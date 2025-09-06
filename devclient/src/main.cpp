@@ -67,7 +67,16 @@ static bool recv_one(asio::ip::tcp::socket& sock) {
             if (body.size() >= 4 + len) {
                 msg.assign(reinterpret_cast<const char*>(body.data() + 4), len);
             }
-            std::cout << "[ERROR] code=0x" << std::hex << code << std::dec << " msg=" << msg << std::endl;
+            const char* name = "UNKNOWN";
+            switch (code) {
+                case 0x0002: name = "LENGTH_LIMIT_EXCEEDED"; break;
+                case 0x0003: name = "UNKNOWN_MSG_ID"; break;
+                case 0x0101: name = "UNAUTHORIZED"; break;
+                case 0x0104: name = "NO_ROOM"; break;
+                case 0x0105: name = "NOT_MEMBER"; break;
+                case 0x0106: name = "ROOM_MISMATCH"; break;
+            }
+            std::cout << "[ERROR] " << name << "(0x" << std::hex << code << std::dec << ") msg=" << msg << std::endl;
         } else {
             std::cout << "[ERROR] (payload malformed)" << std::endl;
         }

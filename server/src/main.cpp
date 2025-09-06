@@ -21,6 +21,8 @@
 #include "server/core/dispatcher.hpp"
 #include "server/core/session.hpp"
 #include "server/core/protocol.hpp"
+// 에러 코드
+#include "server/core/protocol_errors.hpp"
 // 고정 헤더에 UTC/SEQ가 항상 포함되므로 별도 플래그 불필요
 #include "server/core/util/log.hpp"
 #include "server/core/options.hpp"
@@ -106,7 +108,7 @@ int main(int argc, char** argv) {
                 std::vector<std::uint8_t> body;
                 {
                     std::lock_guard<std::mutex> lk(chat.mu);
-                    if (!chat.authed.count(&s)) { s.send_error(0x0101 /*UNAUTHORIZED*/, "unauthorized"); return; }
+                if (!chat.authed.count(&s)) { s.send_error(protocol::errc::UNAUTHORIZED, "unauthorized"); return; }
                     // 기존 방에서 현재 세션만 정확히 제거
                     auto itold = chat.cur_room.find(&s);
                     if (itold != chat.cur_room.end() && itold->second != room) {
@@ -155,14 +157,14 @@ int main(int argc, char** argv) {
                     corelog::info(std::string("CHAT_SEND: room=") + (room.empty()?"(empty)":room) + ", text=" + text);
                     if (!chat.authed.count(&s)) {
                         // 미인증: 거부
-                        s.send_error(0x0101 /*UNAUTHORIZED*/, "unauthorized");
+                        s.send_error(protocol::errc::UNAUTHORIZED, "unauthorized");
                         return;
                     }
                     if (room.empty()) {
                         auto it = chat.cur_room.find(&s);
                         if (it == chat.cur_room.end()) {
                             // 현재 방 없음 → 거부
-                            s.send_error(0x0104 /*NO_ROOM*/, "no current room");
+                            s.send_error(protocol::errc::NO_ROOM, "no current room");
                             return;
                         }
                         room = it->second;
@@ -231,7 +233,7 @@ int main(int argc, char** argv) {
                     // 방 멤버십 확인(현재 방과 불일치하면 거부)
                     auto itcr = chat.cur_room.find(&s);
                     if (itcr == chat.cur_room.end() || itcr->second != room) {
-                        s.send_error(0x0105 /*NOT_MEMBER*/, "not a member of room");
+                        s.send_error(protocol::errc::NOT_MEMBER, "not a member of room");
                         return;
                     }
                     auto it2 = chat.user.find(&s);
@@ -280,10 +282,10 @@ int main(int argc, char** argv) {
                 std::vector<std::uint8_t> body;
                 {
                     std::lock_guard<std::mutex> lk(chat.mu);
-                    if (!chat.authed.count(&s)) { s.send_error(0x0101, "unauthorized"); return; }
-                    auto itcr = chat.cur_room.find(&s);
-                    if (itcr == chat.cur_room.end()) { s.send_error(0x0104, "no current room"); return; }
-                    if (!room.empty() && itcr->second != room) { s.send_error(0x0106, "room mismatch"); return; }
+                if (!chat.authed.count(&s)) { s.send_error(protocol::errc::UNAUTHORIZED, "unauthorized"); return; }
+                auto itcr = chat.cur_room.find(&s);
+                if (itcr == chat.cur_room.end()) { s.send_error(protocol::errc::NO_ROOM, "no current room"); return; }
+                if (!room.empty() && itcr->second != room) { s.send_error(protocol::errc::ROOM_MISMATCH, "room mismatch"); return; }
                     room = itcr->second;
                     auto itroom = chat.rooms.find(room);
                     if (itroom != chat.rooms.end()) {

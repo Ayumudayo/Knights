@@ -4,6 +4,7 @@
 #include "server/core/options.hpp"
 #include "server/core/shared_state.hpp"
 #include "server/core/protocol_flags.hpp"
+#include "server/core/protocol_errors.hpp"
 
 #include <array>
 #include <cstring>
@@ -99,7 +100,7 @@ void Session::do_read_header() {
             }
             server::core::protocol::decode_header(read_buf_.data(), header_);
             if (options_ && options_->recv_max_payload > 0 && header_.length > options_->recv_max_payload) {
-                send_error(0x0002 /*LENGTH_LIMIT_EXCEEDED*/, "payload too large");
+                send_error(server::core::protocol::errc::LENGTH_LIMIT_EXCEEDED, "payload too large");
                 stop();
                 return;
             }
@@ -146,7 +147,7 @@ void Session::do_read_body(std::size_t body_len) {
             // 수신 성공 → read 타이머 재무장
             arm_read_timeout();
             if (!dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(read_buf_.data(), read_buf_.size()))) {
-                send_error(0x0003 /*UNKNOWN_MSG_ID*/, "unknown msg");
+                send_error(server::core::protocol::errc::UNKNOWN_MSG_ID, "unknown msg");
             }
             do_read_header();
         }));
