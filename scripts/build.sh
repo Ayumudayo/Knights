@@ -7,6 +7,7 @@ CONFIG="RelWithDebInfo"
 BUILD_DIR="build-linux"
 BOOST_ROOT_ENV="${BOOST_ROOT:-}"
 CMD="all" # all|configure|build|clean|install|run-server|run-client
+TARGET=""
 PREFIX=""
 PORT=5000
 
@@ -16,11 +17,12 @@ usage(){
   echo "  -c <config>       (Debug/Release/RelWithDebInfo) 기본: $CONFIG"
   echo "  -b <build-dir>    (기본: $BUILD_DIR)"
   echo "  -r <command>      all|configure|build|clean|install|run-server|run-client"
+  echo "  -t <target>       빌드 타깃(기본: all/ALL_BUILD)"
   echo "  -p <prefix>       설치 경로(--install)"
   echo "  -P <port>         서버/클라이언트 포트 (기본: 5000)"
 }
 
-while getopts ":g:c:b:r:p:P:h" opt; do
+while getopts ":g:c:b:r:p:P:t:h" opt; do
   case $opt in
     g) GENERATOR="$OPTARG";;
     c) CONFIG="$OPTARG";;
@@ -28,6 +30,7 @@ while getopts ":g:c:b:r:p:P:h" opt; do
     r) CMD="$OPTARG";;
     p) PREFIX="$OPTARG";;
     P) PORT="$OPTARG";;
+    t) TARGET="$OPTARG";;
     h) usage; exit 0;;
     :) echo "옵션 -$OPTARG 인자 필요"; usage; exit 2;;
     \?) echo "알 수 없는 옵션 -$OPTARG"; usage; exit 2;;
@@ -43,7 +46,12 @@ conf(){
 }
 
 build(){
-  cmake --build "$BUILD_DIR" --config "$CONFIG" -j
+  local t="$TARGET"
+  if [[ -z "$t" ]]; then
+    # VS/Ninja/Makefiles별 기본 타깃
+    if [[ "$GENERATOR" == *"Visual Studio"* ]]; then t="ALL_BUILD"; else t="all"; fi
+  fi
+  cmake --build "$BUILD_DIR" --config "$CONFIG" --target "$t" -j
 }
 
 clean(){
@@ -81,4 +89,3 @@ case "$CMD" in
 esac
 
 echo "완료"
-

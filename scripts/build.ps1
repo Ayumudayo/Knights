@@ -10,11 +10,12 @@ param(
   [string]$Config = "RelWithDebInfo",
   [string]$BuildDir = "",
   [string]$BoostRoot = "",
+  [string]$Target = "",
   [switch]$Clean,
   [string]$InstallPrefix = "",
   [ValidateSet('none','server','client')]
   [string]$Run = 'none',
-[int]$Port = 5000
+  [int]$Port = 5000
 )
 
 $ErrorActionPreference = 'Stop'
@@ -69,7 +70,10 @@ Info "CMake 구성 중..."
 if ($LASTEXITCODE -ne 0) { Fail "CMake 구성 실패" }
 
 Info "빌드 중..."
-& cmake --build $BuildDir --config $Config -j
+if (-not $Target -or $Target -eq '') {
+  if ($onWindows -and $Generator -like 'Visual Studio*') { $Target = 'ALL_BUILD' } else { $Target = 'all' }
+}
+& cmake --build $BuildDir --config $Config --target $Target -j
 if ($LASTEXITCODE -ne 0) { Fail "빌드 실패" }
 
 if ($InstallPrefix -and $InstallPrefix -ne '') {

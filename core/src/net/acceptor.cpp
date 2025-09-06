@@ -13,8 +13,9 @@ Acceptor::Acceptor(asio::io_context& io,
                    const asio::ip::tcp::endpoint& ep,
                    Dispatcher& dispatcher,
                    std::shared_ptr<const SessionOptions> options,
-                   std::shared_ptr<SharedState> state)
-    : io_(io), acceptor_(io), dispatcher_(dispatcher), options_(std::move(options)), state_(std::move(state)) {
+                   std::shared_ptr<SharedState> state,
+                   new_session_cb_t on_new_session)
+    : io_(io), acceptor_(io), dispatcher_(dispatcher), options_(std::move(options)), state_(std::move(state)), on_new_session_(std::move(on_new_session)) {
     error_code ec;
     acceptor_.open(ep.protocol(), ec);
     if (ec) {
@@ -76,6 +77,7 @@ void Acceptor::do_accept() {
             // 세션 생성 및 시작
             try {
                 auto session = std::make_shared<Session>(std::move(socket), self->dispatcher_, self->options_, self->state_);
+                if (self->on_new_session_) self->on_new_session_(session);
                 session->start();
             } catch (const std::exception& ex) {
                 log::error(std::string("세션 생성 예외: ") + ex.what());

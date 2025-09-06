@@ -39,11 +39,13 @@ cmake --build build -j
 ## 스크립트 사용(권장)
 - Windows PowerShell:
   - 부스트 빌드/환경변수: `scripts/bootstrap_boost.ps1 -BoostRoot C:/local/boost_1_89_0`
-  - 구성+빌드: `scripts/build.ps1 -Config RelWithDebInfo`
+  - 구성+빌드(모든 타깃): `scripts/build.ps1 -Config RelWithDebInfo`
+  - 특정 타깃만 빌드: `scripts/build.ps1 -Target server_app` 또는 `-Target dev_chat_cli`
   - 서버 실행: `scripts/build.ps1 -Run server -Port 5000`
   - 클라이언트 실행: `scripts/build.ps1 -Run client -Port 5000`
 - Linux/WSL Bash:
-  - 구성+빌드: `scripts/build.sh -r all`
+  - 구성+빌드(모든 타깃): `scripts/build.sh -r all`
+  - 특정 타깃만 빌드: `scripts/build.sh -r build -t server_app`
   - 서버 실행: `scripts/build.sh -r run-server -P 5000`
   - 클라이언트 실행: `scripts/build.sh -r run-client -P 5000`
 

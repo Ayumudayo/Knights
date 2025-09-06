@@ -7,6 +7,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include "server/core/protocol/frame.hpp"
+#include <functional>
 
 namespace server::core {
 
@@ -28,6 +29,12 @@ public:
     void start();
     void stop();
 
+    // 세션 종료 시 호출될 콜백을 설정한다.
+    void set_on_close(std::function<void(Session&)> cb) { on_close_ = std::move(cb); }
+
+    // 표준 에러 프레임 송신
+    void send_error(std::uint16_t code, const std::string& msg);
+
     // 완전한 프레임을 직접 전송(헤더 포함)
     void async_send(std::vector<std::uint8_t> data);
     // payload와 msg_id를 받아 프레임을 구성하여 전송
@@ -43,7 +50,6 @@ private:
                                                 std::uint32_t seq,
                                                 std::uint32_t utc_ts_ms32);
     void send_hello();
-    void send_error(std::uint16_t code, const std::string& msg);
     void on_stopped();
     void arm_read_timeout();
     void arm_heartbeat();
@@ -62,6 +68,6 @@ private:
     boost::asio::steady_timer read_timer_{socket_.get_executor()};
     boost::asio::steady_timer heartbeat_timer_{socket_.get_executor()};
     std::uint32_t tx_seq_{1};
+    std::function<void(Session&)> on_close_{};
 };
-
 } // namespace server::core

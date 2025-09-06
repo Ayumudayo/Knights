@@ -5,6 +5,7 @@
 #include <chrono>
 #include <cstring>
 #include <span>
+#include <atomic>
 
 #include <boost/asio.hpp>
 #include <clocale>
@@ -58,6 +59,18 @@ static bool recv_one(asio::ip::tcp::socket& sock) {
         if (!proto::read_lp_utf8(sp, sender)) sender = "";
         if (!proto::read_lp_utf8(sp, text)) text = std::string(reinterpret_cast<const char*>(body.data()), body.size());
         std::cout << "[" << room << "] " << sender << ": " << text << std::endl;
+    } else if (h.msg_id == proto::MSG_ERR) {
+        if (body.size() >= 4) {
+            std::uint16_t code = proto::read_be16(body.data());
+            std::uint16_t len  = proto::read_be16(body.data() + 2);
+            std::string msg;
+            if (body.size() >= 4 + len) {
+                msg.assign(reinterpret_cast<const char*>(body.data() + 4), len);
+            }
+            std::cout << "[ERROR] code=0x" << std::hex << code << std::dec << " msg=" << msg << std::endl;
+        } else {
+            std::cout << "[ERROR] (payload malformed)" << std::endl;
+        }
     }
     return true;
 }
@@ -87,26 +100,101 @@ int main(int argc, char** argv) {
         // 서버의 HELLO 수신
         recv_one(sock);
 
-        std::uint32_t seq = 1;
-        // PING 한 번
-        {
-            std::vector<std::uint8_t> payload; // 빈 페이로드
-            send_frame_simple(sock, proto::MSG_PING, 0, payload, seq);
-            recv_one(sock);
-        }
+        std::string current_room = "lobby";
+        std::string username = "guest";
 
-        std::cout << "메시지를 입력하세요. 빈 줄로 종료." << std::endl;
+        std::uint32_t seq = 1;
+        // 백그라운드 수신 쓰레드 시작
+        std::atomic<bool> running{true};
+        std::thread rx([&](){
+            try {
+                while (running.load()) {
+                    if (!recv_one(sock)) break;
+                }
+            } catch (const std::exception& ex) {
+                if (running.load()) {
+                    std::cerr << "수신 오류: " << ex.what() << std::endl;
+                }
+            }
+        });
+
+        // 주기적 PING 스레드 시작(서버 read 타임아웃 방지)
+        std::thread tx_ping([&](){
+            try {
+                while (running.load()) {
+                    std::this_thread::sleep_for(std::chrono::seconds(8));
+                    if (!running.load()) break;
+                    std::vector<std::uint8_t> payload;
+                    send_frame_simple(sock, proto::MSG_PING, 0, payload, seq);
+                }
+            } catch (...) {
+            }
+        });
+
+        std::cout << "명령: /login <user>, /join <room>, /leave [room], /rooms, /who [room], /say <text>, 빈 줄 종료" << std::endl;
         std::string line;
         while (true) {
             std::getline(std::cin, line);
             if (!std::cin.good() || line.empty()) break;
-            std::vector<std::uint8_t> payload;
-            proto::write_lp_utf8(payload, "default"); // room
-            proto::write_lp_utf8(payload, line);       // text
-            send_frame_simple(sock, proto::MSG_CHAT_SEND, 0, payload, seq);
-            // 서버가 즉시 브로드캐스트 에코를 보냄
-            recv_one(sock);
+            if (!line.empty() && line[0] == '/') {
+                // 슬래시 명령 처리
+                if (line.rfind("/login ", 0) == 0) {
+                    username = line.substr(7);
+                    std::vector<std::uint8_t> payload;
+                    proto::write_lp_utf8(payload, username);
+                    proto::write_lp_utf8(payload, std::string()); // token 비움
+                    send_frame_simple(sock, proto::MSG_LOGIN_REQ, 0, payload, seq);
+                } else if (line.rfind("/join ", 0) == 0) {
+                    current_room = line.substr(6);
+                    std::vector<std::uint8_t> payload;
+                    proto::write_lp_utf8(payload, current_room);
+                    send_frame_simple(sock, proto::MSG_JOIN_ROOM, 0, payload, seq);
+                } else if (line.rfind("/leave", 0) == 0) {
+                    std::string room = current_room;
+                    if (line.size() > 6) {
+                        auto pos = line.find_first_not_of(' ', 6);
+                        if (pos != std::string::npos) room = line.substr(pos);
+                    }
+                    std::vector<std::uint8_t> payload;
+                    proto::write_lp_utf8(payload, room);
+                    send_frame_simple(sock, proto::MSG_LEAVE_ROOM, 0, payload, seq);
+                } else if (line == "/rooms") {
+                    // 서버가 CHAT_SEND 내 슬래시 명령으로 처리
+                    std::vector<std::uint8_t> payload;
+                    proto::write_lp_utf8(payload, current_room);
+                    proto::write_lp_utf8(payload, std::string("/rooms"));
+                    send_frame_simple(sock, proto::MSG_CHAT_SEND, 0, payload, seq);
+                } else if (line.rfind("/who", 0) == 0) {
+                    std::string what;
+                    if (line.size() > 4) {
+                        auto pos = line.find_first_not_of(' ', 4);
+                        if (pos != std::string::npos) what = line.substr(pos);
+                    }
+                    std::vector<std::uint8_t> payload;
+                    proto::write_lp_utf8(payload, current_room);
+                    proto::write_lp_utf8(payload, what.empty()?std::string("/who"):std::string("/who ")+what);
+                    send_frame_simple(sock, proto::MSG_CHAT_SEND, 0, payload, seq);
+                } else if (line.rfind("/say ", 0) == 0) {
+                    std::string text = line.substr(5);
+                    std::vector<std::uint8_t> payload;
+                    proto::write_lp_utf8(payload, current_room);
+                    proto::write_lp_utf8(payload, text);
+                    send_frame_simple(sock, proto::MSG_CHAT_SEND, 0, payload, seq);
+                } else {
+                    std::cout << "알 수 없는 명령" << std::endl;
+                }
+            } else {
+                // 일반 텍스트는 /say 취급
+                std::vector<std::uint8_t> payload;
+                proto::write_lp_utf8(payload, current_room);
+                proto::write_lp_utf8(payload, line);
+                send_frame_simple(sock, proto::MSG_CHAT_SEND, 0, payload, seq);
+            }
         }
+        running.store(false);
+        try { sock.close(); } catch (...) {}
+        if (rx.joinable()) rx.join();
+        if (tx_ping.joinable()) tx_ping.join();
         std::cout << "종료" << std::endl;
         return 0;
     } catch (const std::exception& ex) {

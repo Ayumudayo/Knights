@@ -47,6 +47,10 @@ void Session::stop() {
     read_timer_.cancel();
     heartbeat_timer_.cancel();
     if (state_) state_->connection_count.fetch_sub(1);
+    log::info("세션 종료: " + std::to_string(reinterpret_cast<std::uintptr_t>(this)));
+    if (on_close_) {
+        try { on_close_(*this); } catch (...) {}
+    }
 }
 
 void Session::async_send(std::vector<std::uint8_t> data) {
@@ -99,6 +103,8 @@ void Session::do_read_header() {
                 stop();
                 return;
             }
+            // 수신 성공 → read 타이머 재무장
+            arm_read_timeout();
             do_read_body(header_.length);
         }));
 }
@@ -137,6 +143,8 @@ void Session::do_read_body(std::size_t body_len) {
                 stop();
                 return;
             }
+            // 수신 성공 → read 타이머 재무장
+            arm_read_timeout();
             if (!dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(read_buf_.data(), read_buf_.size()))) {
                 send_error(0x0003 /*UNKNOWN_MSG_ID*/, "unknown msg");
             }
@@ -198,13 +206,17 @@ void Session::send_error(std::uint16_t code, const std::string& msg) {
 
 void Session::arm_read_timeout() {
     if (!options_ || options_->read_timeout_ms == 0) return;
-    read_timer_.expires_after(std::chrono::milliseconds(options_->read_timeout_ms));
     auto self = shared_from_this();
-    read_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec){
-        if (ec || stopped_) return;
-        log::warn("read timeout");
-        stop();
-    }));
+    asio::dispatch(strand_, [this, self]() {
+        // 기존 타이머 취소 후 재무장
+        read_timer_.cancel();
+        read_timer_.expires_after(std::chrono::milliseconds(options_->read_timeout_ms));
+        read_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec){
+            if (ec || stopped_) return; // cancel 등 무시
+            log::warn("read timeout");
+            stop();
+        }));
+    });
 }
 
 void Session::arm_heartbeat() {

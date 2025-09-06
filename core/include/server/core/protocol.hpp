@@ -11,5 +11,7 @@ static constexpr std::uint16_t MSG_LOGIN_REQ            = 0x0010; // 로그인 �
 static constexpr std::uint16_t MSG_LOGIN_RES            = 0x0011; // 로그인 응답
 static constexpr std::uint16_t MSG_CHAT_SEND            = 0x0100; // 채팅 전송
 static constexpr std::uint16_t MSG_CHAT_BROADCAST       = 0x0101; // 채팅 브로드캐스트
+static constexpr std::uint16_t MSG_JOIN_ROOM            = 0x0102; // 룸 입장
+static constexpr std::uint16_t MSG_LEAVE_ROOM           = 0x0103; // 룸 퇴장
 } // namespace server::core::protocol
 
