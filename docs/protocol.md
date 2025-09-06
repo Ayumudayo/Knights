@@ -18,7 +18,7 @@
 ### Flags 비트 정의(초안)
 - bit0: COMPRESSED(LZ4)
 - bit1: ENCRYPTED(TLS 외 경량 암호화 사용 시)
-- bit2~15: 예약
+- bit2~15: 예약(SEQ/TS는 고정 헤더 포함이므로 플래그 불요)
 
 ## 예약 메시지 ID
 - 소스 오브 트루스: `protocol/opcodes.json` (빌드 시 `protocol.hpp` 자동 생성)
@@ -33,8 +33,9 @@
 - 압축: `flags`에 LZ4 표시, 임계치(예: 1KB) 초과 시 적용.
 - 암호화: TLS 권장. 경량 XOR/ChaCha20은 개발·테스트용.
 
-## 시퀀스/재전송(선택)
-- `seq` 필드는 초기에는 미사용. 필요 시 확장 헤더로 추가.
+## 시퀀스/재전송
+- `seq`와 `utc_ts_ms32`는 항상 고정 헤더에 포함된다.
+- 현재는 재전송/ACK 등의 신뢰 레이어를 구현하지 않으며, `seq`는 클라이언트/서버 측 추적/디버깅/순서 확인 용도로만 사용한다.
 
 ## 예시 인코딩
 ```
@@ -69,26 +70,25 @@
 
 ## 외부 핸드셰이크/헬로(권장)
 - 흐름: Client 접속 → 서버가 `MSG_HELLO` 전송 → 클라가 선택적 기능 협상 후 로그인 시도.
-- `MSG_HELLO` payload(예시):
+- `MSG_HELLO` payload(v1.1):
   - `uint16 proto_major`, `uint16 proto_minor`
-  - `uint16 capabilities` 비트필드(예: COMPRESS_SUPP)
-  - `uint16 heartbeat_interval_ms / 10`(정수, 10ms 단위)
-  - `uint16 max_payload_kb`
-  - `uint32 epoch_high32`(서버 UTC ms 상위 32비트)
+  - `uint16 capabilities` 비트필드(예: CAP_COMPRESS_SUPP)
+  - `uint16 heartbeat_interval_x10ms`(10ms 단위 인터벌 값)
+  - `uint32 epoch_high32`(서버 UTC ms 상위 32비트; 클라가 수신 헤더의 `utc_ts_ms32`와 결합해 64비트 시각 재구성 가능)
 
 ## 에러 응답 규격(MSG_ERR)
 - payload 형식:
   - `uint16 code`(에러 코드)
   - `uint16 detail_len`
   - `detail_len` 바이트의 UTF-8 설명 문자열(선택)
-- 에러 코드 범위(초안):
-  - 0x0001: MALFORMED_FRAME
+- 에러 코드(코어 공용, 발췌):
   - 0x0002: LENGTH_LIMIT_EXCEEDED
   - 0x0003: UNKNOWN_MSG_ID
-  - 0x0004: UNAUTHORIZED
-  - 0x0005: FORBIDDEN
-  - 0x0006: RATE_LIMITED
-  - 0x0007: INTERNAL_ERROR
+  - 0x0101: UNAUTHORIZED
+  - 0x0104: NO_ROOM(현재 방 없음)
+  - 0x0105: NOT_MEMBER(해당 방 멤버 아님)
+  - 0x0106: ROOM_MISMATCH(지정 방과 현재 방 불일치)
+  - 필요 시 확장: MALFORMED_FRAME, FORBIDDEN, RATE_LIMITED, INTERNAL_ERROR 등은 도입 시 코드 예약 후 사용
 
 ## 문자열/인코딩 규칙(중요)
 - 모든 문자열은 UTF-8로 인코딩한다(서버/클라 모두).

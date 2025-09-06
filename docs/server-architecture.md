@@ -90,7 +90,7 @@ flowchart LR
 ```
 
 - 빌드 옵션 예: `KNIGHTS_ENABLE_TLS`, `KNIGHTS_ENABLE_PROFILING`, `KNIGHTS_MAX_CONNECTIONS`, `KNIGHTS_USE_PROTOBUF` 등.
-- 프로토콜 확장: `flags`로 SEQ/UTC 확장 사용. 서버는 `MSG_HELLO`로 지원 capability(`CAP_SEQ_SUPP`, `CAP_TS_SUPP`) 통지.
+- 프로토콜 헤더: v1.1 고정 14바이트(SEQ/UTC 포함). SEQ/UTC는 항상 포함되며 캡 능협상 불필요.
 - 외부 의존: Boost(ASIO, System), spdlog(로그), fmt(포맷), GoogleTest(테스트), gRPC/Protobuf(내부 RPC), 메시지 브로커(NATS/Kafka/Redis Streams) 등 선택.
   - IDL 위치: `proto/` 디렉터리, gRPC 코드는 각 서비스에서 코드젠.
 
@@ -112,14 +112,10 @@ flowchart LR
 - 암호화(옵션): TLS(Asio SSL) 또는 경량 XOR/ChaCha20(개발용). 운영은 TLS 권장.
 
 ### 4.4 프로토콜(바이너리)
-- Endianness: 네트워크 바이트 오더(big-endian) 권장. 유니티/언리얼 등 클라 SDK 정합 고려.
-- 헤더 예시(8~12바이트):
-  - `uint16 length`(헤더 제외 본문 길이) / 또는 `uint32 length`
-  - `uint16 msg_id`
-  - `uint16 flags`(압축/암호화/예약)
-  - `uint16 seq`(선택: 재전송/순서 확인)
-- 본문: 메시지별 스키마. 직렬화는 초기엔 가벼운 수제 바이너리, 확장 시 Protobuf/FlatBuffers 채택.
-- 압축: 작은 패킷은 미압축, 임계치 초과 시 LZ4 등.
+- Endianness: 네트워크 바이트 오더(big-endian) 권장.
+- 헤더(v1.1, 14바이트 고정): `u16 length | u16 msg_id | u16 flags | u32 seq | u32 utc_ts_ms32`.
+- 본문: 메시지별 스키마. 문자열은 UTF-8 + u16 길이 프리픽스.
+- 압축/암호화: `flags`로 표시. 운영은 TLS 권장.
 
 ### 4.5 라우팅/디스패치
 - Gateway 레벨 디스패치: `msg_id -> route(service, rpc)` 매핑. 인증 전/후 경로 분리.
