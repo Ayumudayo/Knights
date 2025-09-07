@@ -11,7 +11,8 @@ target_include_directories(server_app PRIVATE ${CMAKE_BINARY_DIR}/proto)
 if(WIN32)
     add_custom_command(TARGET server_app POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        $<TARGET_FILE:protobuf::libprotobuf>
-        $<TARGET_FILE:protobuf::libprotoc>
+        "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/$<$<CONFIG:Debug>:debug/>bin/libprotobuf$<$<CONFIG:Debug>:d>.dll"
+        "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/$<$<CONFIG:Debug>:debug/>bin/libprotoc$<$<CONFIG:Debug>:d>.dll"
+        "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/$<$<CONFIG:Debug>:debug/>bin/abseil_dll.dll"
         $<TARGET_FILE_DIR:server_app>)
 endif()
