@@ -6,6 +6,18 @@
 #include "server/core/util/log.hpp"
 #include "server/wire/v1/wire.pb.h"
 
+namespace {
+    template <typename ProtoMsg>
+    const std::vector<std::uint8_t>& EncodeToScratch(const ProtoMsg& pb) {
+        thread_local std::vector<std::uint8_t> scratch;
+        const int sz = pb.ByteSizeLong();
+        if (sz <= 0) { scratch.clear(); return scratch; }
+        scratch.resize(static_cast<std::size_t>(sz));
+        pb.SerializeToArray(scratch.data(), sz);
+        return scratch;
+    }
+}
+
 using namespace server::core;
 namespace proto = server::core::protocol;
 namespace corelog = server::core::log;
@@ -75,8 +87,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         state_.rooms[room].insert(s.shared_from_this());
     }
     server::wire::v1::LoginRes pb; pb.set_effective_user(new_user); pb.set_session_id(s.session_id()); pb.set_message("ok");
-    std::string bytes; pb.SerializeToString(&bytes);
-    std::vector<std::uint8_t> res(bytes.begin(), bytes.end());
+    const auto& res = EncodeToScratch(pb);
     s.async_send(proto::MSG_LOGIN_RES, res, 0);
 }
 
@@ -117,7 +128,10 @@ void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
                 std::chrono::system_clock::now().time_since_epoch()).count();
             pb.set_ts_ms(static_cast<std::uint64_t>(now64));
         }
-        std::string bytes; pb.SerializeToString(&bytes); body.assign(bytes.begin(), bytes.end());
+        {
+            const auto& scratch = EncodeToScratch(pb);
+            body.assign(scratch.begin(), scratch.end());
+        }
         // 타겟 수집
         auto it = state_.rooms.find(room);
         if (it != state_.rooms.end()) {
@@ -192,7 +206,10 @@ void ChatService::send_rooms_list(Session& s) {
             std::chrono::system_clock::now().time_since_epoch()).count();
         pb.set_ts_ms(static_cast<std::uint64_t>(now64));
     }
-    std::string bytes; pb.SerializeToString(&bytes); body.assign(bytes.begin(), bytes.end());
+    {
+        const auto& scratch = EncodeToScratch(pb);
+        body.assign(scratch.begin(), scratch.end());
+    }
     s.async_send(proto::MSG_CHAT_BROADCAST, body, 0);
 }
 
@@ -213,7 +230,10 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
             }
         }
     }
-    std::string bytes; pb.SerializeToString(&bytes); body.assign(bytes.begin(), bytes.end());
+    {
+        const auto& scratch = EncodeToScratch(pb);
+        body.assign(scratch.begin(), scratch.end());
+    }
     s.async_send(proto::MSG_ROOM_USERS, body, 0);
 }
 
@@ -237,7 +257,10 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
             for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) { if (auto p = wit->lock()) { auto itu = state_.user.find(p.get()); std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest"); pb.add_users(name); ++wit; } else { wit = itroom->second.erase(wit); } }
         }
     }
-    std::string bytes; pb.SerializeToString(&bytes); body.assign(bytes.begin(), bytes.end());
+    {
+        const auto& scratch2 = EncodeToScratch(pb);
+        body.assign(scratch2.begin(), scratch2.end());
+    }
     s.async_send(proto::MSG_STATE_SNAPSHOT, body, 0);
 }
 
@@ -282,7 +305,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             std::string sender; { std::lock_guard<std::mutex> lk(state_.mu); auto it2 = state_.user.find(&s); sender = (it2 != state_.user.end()) ? it2->second : std::string("guest"); }
             server::wire::v1::ChatBroadcast pb; pb.set_room("(direct)"); pb.set_sender(sender); pb.set_text(std::string("(to ") + target_user + ") " + wtext); pb.set_sender_sid(s.session_id());
             auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); pb.set_ts_ms(static_cast<std::uint64_t>(now64));
-            std::string bytes; pb.SerializeToString(&bytes); std::vector<std::uint8_t> body(bytes.begin(), bytes.end());
+            const auto& scratch = EncodeToScratch(pb); std::vector<std::uint8_t> body(scratch.begin(), scratch.end());
             targets.emplace_back(s.shared_from_this()); for (auto& t : targets) t->async_send(proto::MSG_CHAT_BROADCAST, body, 0); return;
         }
     }
@@ -302,7 +325,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             }
             server::wire::v1::ChatBroadcast pb; pb.set_room(room_copy); pb.set_sender(sender); pb.set_text(text_copy); pb.set_sender_sid(self->session_id());
             auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); pb.set_ts_ms(static_cast<std::uint64_t>(now64));
-            std::vector<std::uint8_t> body = server::wire::codec::Encode(pb);
+            const auto& body = EncodeToScratch(pb);
             if (targets.empty()) { self->async_send(proto::MSG_CHAT_BROADCAST, body, proto::FLAG_SELF); }
             else { for (auto& t : targets) { auto f = (t.get() == self.get()) ? proto::FLAG_SELF : 0; t->async_send(proto::MSG_CHAT_BROADCAST, body, f); } }
         });
