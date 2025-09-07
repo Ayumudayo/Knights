@@ -4,6 +4,9 @@
     <ClCompile Include="E:\Repos\MyRepos\Knights\server\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="E:\Repos\MyRepos\Knights\server\src\chat\chat_service.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="E:\Repos\MyRepos\Knights\server\CMakeLists.txt" />
