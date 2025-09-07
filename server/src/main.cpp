@@ -64,6 +64,8 @@ int main(int argc, char** argv) {
             std::unordered_map<Session*, std::string> user;      // 세션별 사용자명
             std::unordered_map<Session*, std::string> cur_room;  // 세션별 현재 룸
             std::unordered_set<Session*> authed;                 // 로그인 완료 세션
+            // 사용자명 기준 세션 목록(여러 세션 동시 접속 지원)
+            std::unordered_map<std::string, RoomSet> by_user;
         } chat;
 
         // 핸들러 등록: PING -> PONG, CHAT_SEND -> CHAT_BROADCAST(자기 자신에게 에코)
@@ -82,7 +84,17 @@ int main(int argc, char** argv) {
                 server::core::protocol::read_lp_utf8(sp, token);
                 {
                     std::lock_guard<std::mutex> lk(chat.mu);
-                    chat.user[&s] = user.empty() ? std::string("guest") : user;
+                    std::string new_user = user.empty() ? std::string("guest") : user;
+                    // 기존 사용자명이 있다면 사용자 맵에서 제거
+                    if (auto itold = chat.user.find(&s); itold != chat.user.end()) {
+                        auto itset = chat.by_user.find(itold->second);
+                        if (itset != chat.by_user.end()) {
+                            ChatState::WeakSession w = s.shared_from_this();
+                            itset->second.erase(w);
+                        }
+                    }
+                    chat.user[&s] = new_user;
+                    chat.by_user[new_user].insert(s.shared_from_this());
                     chat.authed.insert(&s);
                     // 기본 방 자동 입장: lobby
                     std::string room = "lobby";
@@ -169,7 +181,7 @@ int main(int argc, char** argv) {
                         }
                         room = it->second;
                     }
-                    // 슬래시 명령 처리: /rooms, /who [room]
+                    // 슬래시 명령 처리: /rooms, /who [room], /whisper <user> <msg>
                     if (!text.empty() && text[0] == '/') {
                         if (text == "/rooms") {
                             // 방 목록
@@ -227,6 +239,57 @@ int main(int argc, char** argv) {
                             std::uint64_t ts = static_cast<std::uint64_t>(now64);
                             for (int i = 7; i >= 0; --i) { body[off + i] = static_cast<std::uint8_t>(ts & 0xFF); ts >>= 8; }
                             s.async_send(protocol::MSG_CHAT_BROADCAST, body, 0);
+                            return;
+                        } else if (text.rfind("/whisper ", 0) == 0) {
+                            // 구문: /whisper <user> <message...>
+                            std::string rest = text.substr(9);
+                            auto spc = rest.find(' ');
+                            if (spc == std::string::npos) {
+                                std::vector<std::uint8_t> body;
+                                server::core::protocol::write_lp_utf8(body, std::string("(system)"));
+                                server::core::protocol::write_lp_utf8(body, std::string("server"));
+                                server::core::protocol::write_lp_utf8(body, std::string("usage: /whisper <user> <message>"));
+                                auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::system_clock::now().time_since_epoch()).count();
+                                std::size_t off = body.size(); body.resize(off + 8);
+                                std::uint64_t ts = static_cast<std::uint64_t>(now64);
+                                for (int i = 7; i >= 0; --i) { body[off + i] = static_cast<std::uint8_t>(ts & 0xFF); ts >>= 8; }
+                                s.async_send(protocol::MSG_CHAT_BROADCAST, body, 0);
+                                return;
+                            }
+                            std::string target_user = rest.substr(0, spc);
+                            std::string wtext = rest.substr(spc + 1);
+                            std::vector<std::shared_ptr<Session>> targets;
+                            // 대상 사용자 세션 수집
+                            {
+                                auto itset = chat.by_user.find(target_user);
+                                if (itset != chat.by_user.end()) {
+                                    for (auto wit = itset->second.begin(); wit != itset->second.end(); ) {
+                                        if (auto p = wit->lock()) { targets.emplace_back(std::move(p)); ++wit; }
+                                        else { wit = itset->second.erase(wit); }
+                                    }
+                                }
+                            }
+                            // 보낸 사람 이름
+                            auto it2 = chat.user.find(&s);
+                            sender = (it2 != chat.user.end()) ? it2->second : std::string("guest");
+                            // payload: room="(direct)", sender, text="(to <user>) <msg>", ts
+                            std::vector<std::uint8_t> body;
+                            server::core::protocol::write_lp_utf8(body, std::string("(direct)"));
+                            server::core::protocol::write_lp_utf8(body, sender);
+                            server::core::protocol::write_lp_utf8(body, std::string("(to ") + target_user + ") " + wtext);
+                            auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                std::chrono::system_clock::now().time_since_epoch()).count();
+                            std::size_t off = body.size(); body.resize(off + 8);
+                            std::uint64_t ts = static_cast<std::uint64_t>(now64);
+                            for (int i = 7; i >= 0; --i) { body[off + i] = static_cast<std::uint8_t>(ts & 0xFF); ts >>= 8; }
+                            // 에코를 위해 발신자 추가
+                            targets.emplace_back(s.shared_from_this());
+                            if (targets.empty()) {
+                                s.async_send(protocol::MSG_CHAT_BROADCAST, body, 0);
+                            } else {
+                                for (auto& t : targets) t->async_send(protocol::MSG_CHAT_BROADCAST, body, 0);
+                            }
                             return;
                         }
                     }
@@ -329,6 +392,14 @@ int main(int argc, char** argv) {
                         std::string name;
                         if (auto itname = chat.user.find(&s); itname != chat.user.end()) name = itname->second; else name = "guest";
                         chat.authed.erase(&s);
+                        // by_user에서 제거
+                        if (!name.empty()) {
+                            auto itset = chat.by_user.find(name);
+                            if (itset != chat.by_user.end()) {
+                                ChatState::WeakSession w = s.shared_from_this();
+                                itset->second.erase(w);
+                            }
+                        }
                         chat.user.erase(&s);
                         auto itcr = chat.cur_room.find(&s);
                         if (itcr != chat.cur_room.end()) {

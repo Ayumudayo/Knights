@@ -1,4 +1,4 @@
-﻿#include "server/core/session.hpp"
+#include "server/core/session.hpp"
 #include "server/core/dispatcher.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/options.hpp"
@@ -175,8 +175,7 @@ void Session::do_write() {
 
 void Session::send_hello() {
     std::vector<std::uint8_t> payload;
-    // HELLO payload(v1.1): proto_major(2) + proto_minor(2) + capabilities(2) + hb_x10ms(2) + epoch_high32(4) = 12 bytes
-    payload.resize(12);
+    payload.resize(10);
     server::core::protocol::write_be16(1, payload.data()); // proto_major
     server::core::protocol::write_be16(1, payload.data() + 2); // proto_minor (헤더 v1.1)
     server::core::protocol::write_be16(static_cast<std::uint16_t>(server::core::protocol::CAP_COMPRESS_SUPP), payload.data() + 4);

@@ -22,8 +22,12 @@
   - `/say <text>` 또는 일반 텍스트: 현재 방에 채팅 전송 → 방 멤버에게 브로드캐스트.
 - 에러 표시: `MSG_ERR` 수신 시 코드명과 메시지를 표기(예: UNAUTHORIZED/NO_ROOM/NOT_MEMBER 등).
 
+### 실행/기본값
+- 인자 생략 시 기본 접속 대상: `127.0.0.1:5000`.
+- 스크립트: `scripts/build.ps1 -UseVcpkg -Run both`로 서버 시작 후 클라이언트 자동 실행.
+
 ## 슬래시 명령 및 자동완성
-- 형태: 슬래시(`/`) 프리픽스 기반. 예) `/connect`, `/login`, `/join`, `/say`, `/whisper`, `/rooms`, `/who`, `/ping`, `/quit`, `/help`.
+- 형태: 슬래시(`/`) 프리픽스 기반. 예) `/connect`, `/disconnect`, `/login`, `/join`, `/say`, `/whisper`, `/rooms`, `/who`, `/ping`, `/quit`, `/help`.
 - 자동완성 힌트: Codex CLI, Gemini CLI 유사 UI 제공.
   - Tab: 후보 자동완성, Ctrl+Space: 힌트 창 토글.
   - 고스트 텍스트(미리보기)와 후보 리스트(dropdown) 동시 제공.
@@ -56,26 +60,34 @@
 ```json
 {
   "commands": [
-    {"name": "/connect", "args": ["<host>", "<port:int>"], "desc": "서버에 연결"},
-    {"name": "/login",   "args": ["<user>", "<token>"],     "desc": "로그인"},
-    {"name": "/join",    "args": ["<room>"],                "desc": "룸 입장"},
-    {"name": "/say",     "args": ["<message...>"],          "desc": "메시지 전송"},
-    {"name": "/whisper", "args": ["<user>", "<message...>"],"desc": "귓속말"},
-    {"name": "/rooms",   "args": [],                         "desc": "룸 목록"},
-    {"name": "/who",     "args": ["[room]"],                "desc": "사용자 목록"},
-    {"name": "/ping",    "args": [],                         "desc": "핑"},
-    {"name": "/quit",    "args": [],                         "desc": "종료"}
+    {"name": "/connect",    "args": ["<host>", "<port:int>"], "desc": "서버에 연결"},
+    {"name": "/disconnect", "args": [],                         "desc": "현재 연결 해제"},
+    {"name": "/login",      "args": ["<user>", "<token>"],     "desc": "로그인"},
+    {"name": "/join",       "args": ["<room>"],                "desc": "룸 입장"},
+    {"name": "/say",        "args": ["<message...>"],          "desc": "메시지 전송"},
+    {"name": "/whisper",    "args": ["<user>", "<message...>"],"desc": "귓속말"},
+    {"name": "/rooms",      "args": [],                         "desc": "룸 목록"},
+    {"name": "/who",        "args": ["[room]"],                "desc": "사용자 목록"},
+    {"name": "/ping",       "args": [],                         "desc": "핑"},
+    {"name": "/quit",       "args": [],                         "desc": "종료"}
   ]
 }
 ```
 
 ## 아키텍처
 - Net: Boost.Asio 클라이언트 소켓, 동일한 `protocol.md` 재사용.
-- UI: 입력/출력 분리 구조
-  - 입력부(Input Pane): 라인 에디터(replxx/linenoise-ng 등) 사용, 히스토리/자동완성/힌트 제공.
-  - 출력부(Output Pane): 별도 스레드가 스크롤백 버퍼에 누적, 새로운 로그/채팅은 입력줄을 깨뜨리지 않고 위로 렌더.
-  - 출력 멀티플렉서: 입력줄 유지(리렌더) + 출력 라인 추가를 조정(ANSI 시퀀스, Windows 콘솔 API 동시 지원).
+- UI: FTXUI 기반의 입력/출력 분리 레이아웃
+  - 레이아웃: 상단 로그 pane(스크롤), 하단 입력 pane 고정 + 구분선.
+  - 렌더링 최적화: 화면 높이×2~3 범위 및 최대 500줄로 슬라이스, 변경 시에만 캐시 갱신.
+  - 이벤트 절제: `ScreenInteractive::TrackMouse(false)`로 마우스 이동 이벤트 제거, 불필요 커서 이벤트 소비.
+  - 알려진 현상: Windows 콘솔/터미널에서 최초 포커스/입력 시 깜빡임이 있을 수 있음(FTXUI 특성). 완화를 위해 스로틀(≈80ms)과 캐싱을 적용.
 - 플러그: 메시지 핸들러 테이블(서버와 동일한 구조), slash 명령 파서/실행기.
+
+비고: 초기 설계에서는 라인 에디터(replxx) 기반 UI를 고려했으나, 현재 구현은 FTXUI 전면 적용으로 대체되었습니다.
+
+## 알려진 이슈와 완화
+- Windows 콘솔에서 마우스 이동/포커스 이벤트로 과도한 리프레시가 발생할 수 있음 → 마우스 트래킹 비활성화 및 캐시 기반 렌더로 완화.
+- 빠른 로그 유입 시 입력 커서가 요동할 수 있음 → 렌더 주기 스로틀(약 12fps)과 로그 슬라이스로 영향 최소화.
 
 ## 테스트
 - 에코/채팅/핑-퐁 시나리오 자동화 스크립트.

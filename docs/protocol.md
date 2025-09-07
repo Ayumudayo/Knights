@@ -108,3 +108,12 @@
 - Pre-Auth 허용 메시지: `MSG_HELLO`, `MSG_LOGIN_REQ`, `MSG_PING`.
 - Post-Auth에서만 허용: 채팅/룸 조작, 기타 도메인 메시지.
 - 위반 시 `MSG_ERR(UNAUTHORIZED)` 전송 후 정책에 따라 세션 종료.
+
+---
+
+## 변경 이력(요약)
+- v1.1
+  - 고정 헤더: 14바이트(변경 없음).
+  - `MSG_HELLO` payload를 12바이트로 명시: `u16 major`, `u16 minor`, `u16 capabilities`, `u16 heartbeat_x10ms`, `u32 epoch_high32`.
+  - 서버 구현에서 과거 10바이트로 인코딩하던 버그를 수정(힙 오염/오버리드 예방).
+  - `MSG_CHAT_BROADCAST`에 `u64 ts_ms`를 payload 마지막에 포함하도록 고정.
