@@ -86,7 +86,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
@@ -104,16 +104,16 @@
       <SupportJustMyCode></SupportJustMyCode>
       <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;_WIN32_WINNT=0x0602;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR="Debug"</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -121,7 +121,7 @@
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <Link>
-      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-component.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-component.lib;ws2_32.lib;mswsock.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -140,7 +140,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -157,18 +157,18 @@
       <SupportJustMyCode></SupportJustMyCode>
       <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;_WIN32_WINNT=0x0602;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR="Release"</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <DebugInformationFormat>
       </DebugInformationFormat>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -176,7 +176,7 @@
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <Link>
-      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-component.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-component.lib;ws2_32.lib;mswsock.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -195,7 +195,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -212,18 +212,18 @@
       <SupportJustMyCode></SupportJustMyCode>
       <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;_WIN32_WINNT=0x0602;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR="MinSizeRel"</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <DebugInformationFormat>
       </DebugInformationFormat>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -231,7 +231,7 @@
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <Link>
-      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-component.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-component.lib;ws2_32.lib;mswsock.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>
@@ -250,7 +250,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -268,16 +268,16 @@
       <SupportJustMyCode></SupportJustMyCode>
       <TreatWChar_tAsBuiltInType></TreatWChar_tAsBuiltInType>
       <UseFullPaths>false</UseFullPaths>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;_WIN32_WINNT=0x0602;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR="RelWithDebInfo"</PreprocessorDefinitions>
       <ObjectFileName>$(IntDir)</ObjectFileName>
       <ScanSourceForModuleDependencies>false</ScanSourceForModuleDependencies>
     </ClCompile>
     <ResourceCompile>
-      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -285,7 +285,7 @@
       <ProxyFileName>%(Filename)_p.c</ProxyFileName>
     </Midl>
     <Link>
-      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-component.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
+      <AdditionalDependencies>E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-component.lib;ws2_32.lib;mswsock.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-dom.lib;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\debug\lib\ftxui-screen.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;comdlg32.lib;advapi32.lib</AdditionalDependencies>
       <AdditionalLibraryDirectories>%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalOptions>%(AdditionalOptions) /machine:x64</AdditionalOptions>
       <DataExecutionPrevention></DataExecutionPrevention>

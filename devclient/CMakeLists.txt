@@ -4,9 +4,24 @@ cmake_minimum_required(VERSION 3.20)
 add_executable(dev_chat_cli src/main.cpp)
 target_include_directories(dev_chat_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 
+# 코어 프로토콜 헤더 사용
+target_include_directories(dev_chat_cli PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+
 # FTXUI 의존성 (vcpkg)
 find_package(ftxui CONFIG REQUIRED)
 target_link_libraries(dev_chat_cli PRIVATE ftxui::screen ftxui::dom ftxui::component)
+
+# Boost.Asio 사용: header-only boost::system 모드 지원
+if (SERVER_USE_HEADER_ONLY_BOOST_SYSTEM)
+    target_compile_definitions(dev_chat_cli PUBLIC BOOST_ERROR_CODE_HEADER_ONLY)
+    target_include_directories(dev_chat_cli PUBLIC ${Boost_INCLUDE_DIRS})
+else()
+    target_link_libraries(dev_chat_cli PRIVATE Boost::system)
+endif()
+
+if (WIN32)
+    target_link_libraries(dev_chat_cli PRIVATE ws2_32 mswsock)
+endif()
 
 if (MSVC)
     target_compile_definitions(dev_chat_cli PUBLIC _WIN32_WINNT=0x0602)
