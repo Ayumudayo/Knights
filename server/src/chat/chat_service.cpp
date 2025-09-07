@@ -4,7 +4,7 @@
 #include "server/core/protocol_errors.hpp"
 #include "server/core/protocol_flags.hpp"
 #include "server/core/util/log.hpp"
-#include "server/wire/v1/wire.pb.h"
+#include "wire.pb.h"
 
 namespace {
     template <typename ProtoMsg>
@@ -24,7 +24,15 @@ namespace corelog = server::core::log;
 
 namespace server::app::chat {
 
-ChatService::ChatService() = default;
+ChatService::ChatService(boost::asio::io_context& io) : io_(&io) {}
+
+ChatService::Strand& ChatService::strand_for(const std::string& room) {
+    auto it = room_strands_.find(room);
+    if (it == room_strands_.end()) {
+        it = room_strands_.emplace(room, std::make_shared<Strand>(io_->get_executor())).first;
+    }
+    return *it->second;
+}
 
 std::string ChatService::gen_hex_name(Session& s) {
     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(

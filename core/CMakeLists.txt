@@ -6,6 +6,8 @@ add_library(server_core
 )
 
 target_include_directories(server_core PUBLIC include)
+# protobuf 생성 헤더 경로 추가
+target_include_directories(server_core PUBLIC ${CMAKE_BINARY_DIR}/proto)
 
 if (SERVER_USE_HEADER_ONLY_BOOST_SYSTEM)
     # 헤더온리 boost::system 사용: 라이브러리 링크 생략, 매크로 정의 필요

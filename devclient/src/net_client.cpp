@@ -4,7 +4,7 @@
 #include "server/core/protocol_flags.hpp"
 #include "server/core/protocol/frame.hpp"
 #include "server/wire/codec.hpp"
-#include "server/wire/v1/wire.pb.h"
+#include "wire.pb.h"
 #include <cstring>
 #include <chrono>
 

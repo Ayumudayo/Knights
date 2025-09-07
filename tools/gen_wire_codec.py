@@ -11,9 +11,13 @@ HEADER_TMPL = """// 자동 생성 파일: tools/gen_wire_codec.py에 의해 생�
 #include <string>
 #include <vector>
 #include "server/core/protocol.hpp"
-#include "server/wire/v1/wire.pb.h"
+#include "wire.pb.h"
 
 namespace server {{ namespace wire {{ namespace codec {{
+
+// MsgId<T> 템플릿 기본 정의
+template<typename T>
+constexpr std::uint16_t MsgId() {{ return 0; }}
 
 // MsgId<T> 특수화: Protobuf 타입 -> msg_id
 {msgid_specs}

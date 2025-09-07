@@ -4,3 +4,5 @@ add_executable(server_app
 )
 target_include_directories(server_app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(server_app PRIVATE server_core wire_proto)
+# protobuf 생성 헤더 경로 추가
+target_include_directories(server_app PRIVATE ${CMAKE_BINARY_DIR}/proto)
