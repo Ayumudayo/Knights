@@ -86,7 +86,7 @@
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
@@ -110,10 +110,10 @@
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_DEBUG;_WINDOWS;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"Debug\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -140,7 +140,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -165,10 +165,10 @@
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"Release\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -195,7 +195,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -220,10 +220,10 @@
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"MinSizeRel\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -250,7 +250,7 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
     <ClCompile>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>%(AdditionalOptions) /external:I "E:/Repos/MyRepos/Knights/vcpkg_installed/x64-windows/include" /utf-8</AdditionalOptions>
       <AssemblerListingLocation>$(IntDir)</AssemblerListingLocation>
       <BasicRuntimeChecks>Default</BasicRuntimeChecks>
@@ -274,10 +274,10 @@
     </ClCompile>
     <ResourceCompile>
       <PreprocessorDefinitions>%(PreprocessorDefinitions);WIN32;_WINDOWS;NDEBUG;BOOST_ERROR_CODE_HEADER_ONLY;_WIN32_WINNT=0x0602;CMAKE_INTDIR=\"RelWithDebInfo\"</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
     <Midl>
-      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>E:\Repos\MyRepos\Knights\devclient\src;E:\Repos\MyRepos\Knights\devclient\include;E:\Repos\MyRepos\Knights\core\include;C:\local\boost_1_89_0;E:\Repos\MyRepos\Knights\vcpkg_installed\x64-windows\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
       <HeaderFileName>%(Filename).h</HeaderFileName>
       <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
@@ -361,6 +361,8 @@ if %errorlevel% neq 0 goto :VCEnd</Command>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="E:\Repos\MyRepos\Knights\devclient\src\main.cpp" />
+    <ClCompile Include="E:\Repos\MyRepos\Knights\devclient\src\net_client.cpp" />
+    <ClCompile Include="E:\Repos\MyRepos\Knights\devclient\src\store.cpp" />
   </ItemGroup>
   <ItemGroup />
   <ItemGroup>

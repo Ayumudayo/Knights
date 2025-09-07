@@ -22,6 +22,8 @@
 
 #include <ftxui/screen/terminal.hpp>
 
+#include "client/net_client.hpp"
+#include "client/store.hpp"
 #include <boost/asio.hpp>
 #include "server/core/protocol/frame.hpp"
 #include "server/core/protocol.hpp"
@@ -81,6 +83,7 @@ int main() {
     std::uint32_t seq = 1;
     std::uint32_t my_sid = 0;
     bool cap_sender_sid = false;
+    NetClient net;
 
     auto request_refresh = [&]{ screen.PostEvent(Event::Custom); };
 
@@ -581,21 +584,17 @@ int main() {
         }
     };
 
-    // 초기 안내 로그 + 자동 연결 시도
+    // 초기 안내 로그 + 연결 시도
     append_log("[system] FTXUI 클라이언트가 시작되었습니다.");
     append_log("[hint] 명령: /login <name>, /join <room>, /leave, /refresh");
     append_log("[hint] 입력 후 Enter로 전송합니다.");
-    // 비동기 연결 시작(화면 렌더링과 병행)
-    std::thread auto_conn([&]{ start_connect("127.0.0.1", 5000); });
-    auto_conn.detach();
+    if (net.connect("127.0.0.1", 5000)) { connected.store(true); append_log("접속됨: 127.0.0.1:5000"); net.send_login(username, ""); }
+    else { append_log("연결 실패"); }
 
     screen.Loop(app_with_events);
 
     // 종료 시 정리
-    running.store(false);
-    try { sock.close(); } catch (...) {}
-    if (recv_thread.joinable()) recv_thread.join();
-    if (ping_thread.joinable()) ping_thread.join();
+    net.close();
     return 0;
 }
 

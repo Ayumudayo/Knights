@@ -4,6 +4,12 @@
     <ClCompile Include="E:\Repos\MyRepos\Knights\devclient\src\main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="E:\Repos\MyRepos\Knights\devclient\src\net_client.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="E:\Repos\MyRepos\Knights\devclient\src\store.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <CustomBuild Include="E:\Repos\MyRepos\Knights\devclient\CMakeLists.txt" />

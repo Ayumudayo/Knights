@@ -1,8 +1,13 @@
 cmake_minimum_required(VERSION 3.20)
 
 # FTXUI 기반 최소 클라이언트(처음부터 다시 시작)
-add_executable(dev_chat_cli src/main.cpp)
+add_executable(dev_chat_cli
+    src/main.cpp
+    src/net_client.cpp
+    src/store.cpp
+)
 target_include_directories(dev_chat_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
+target_include_directories(dev_chat_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
 
 # 코어 프로토콜 헤더 사용
 target_include_directories(dev_chat_cli PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
