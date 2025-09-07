@@ -36,3 +36,12 @@ if (MSVC)
     # Visual Studio에서 인스톨/구성 매핑 경고 회피
     set(CMAKE_MAP_IMPORTED_CONFIG_RELWITHDEBINFO Release)
 endif()
+
+# vcpkg DLL 자동 복사
+if(WIN32)
+    add_custom_command(TARGET dev_chat_cli POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:protobuf::libprotobuf>
+        $<TARGET_FILE:protobuf::libprotoc>
+        $<TARGET_FILE_DIR:dev_chat_cli>)
+endif()
