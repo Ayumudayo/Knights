@@ -4,6 +4,7 @@
 #include "server/core/util/log.hpp"
 #include "server/core/options.hpp"
 #include "server/core/shared_state.hpp"
+#include "server/core/MemoryPool.hpp"
 
 using boost::system::error_code;
 
@@ -12,10 +13,17 @@ namespace server::core {
 Acceptor::Acceptor(asio::io_context& io,
                    const asio::ip::tcp::endpoint& ep,
                    Dispatcher& dispatcher,
+                   BufferManager& buffer_manager,
                    std::shared_ptr<const SessionOptions> options,
                    std::shared_ptr<SharedState> state,
                    new_session_cb_t on_new_session)
-    : io_(io), acceptor_(io), dispatcher_(dispatcher), options_(std::move(options)), state_(std::move(state)), on_new_session_(std::move(on_new_session)) {
+    : io_(io), 
+      acceptor_(io), 
+      dispatcher_(dispatcher), 
+      buffer_manager_(buffer_manager),
+      options_(std::move(options)), 
+      state_(std::move(state)), 
+      on_new_session_(std::move(on_new_session)) {
     error_code ec;
     acceptor_.open(ep.protocol(), ec);
     if (ec) {
@@ -76,7 +84,7 @@ void Acceptor::do_accept() {
 
             // 세션 생성 및 시작
             try {
-                auto session = std::make_shared<Session>(std::move(socket), self->dispatcher_, self->options_, self->state_);
+                auto session = std::make_shared<Session>(std::move(socket), self->dispatcher_, self->buffer_manager_, self->options_, self->state_);
                 if (self->on_new_session_) self->on_new_session_(session);
                 session->start();
             } catch (const std::exception& ex) {

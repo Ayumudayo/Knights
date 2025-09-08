@@ -11,6 +11,7 @@ namespace asio = boost::asio;
 
 class Session;
 class Dispatcher;
+class BufferManager;
 struct SessionOptions;
 struct SharedState;
 
@@ -20,6 +21,7 @@ public:
     Acceptor(asio::io_context& io,
              const asio::ip::tcp::endpoint& ep,
              Dispatcher& dispatcher,
+             BufferManager& buffer_manager,
              std::shared_ptr<const SessionOptions> options,
              std::shared_ptr<SharedState> state,
              new_session_cb_t on_new_session = {});
@@ -34,6 +36,7 @@ private:
     asio::ip::tcp::acceptor acceptor_;
     bool running_ {false};
     Dispatcher& dispatcher_;
+    BufferManager& buffer_manager_;
     std::shared_ptr<const SessionOptions> options_;
     std::shared_ptr<SharedState> state_;
     new_session_cb_t on_new_session_{};

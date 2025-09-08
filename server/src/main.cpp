@@ -3,39 +3,31 @@
 #include <vector>
 #include <string>
 #include <span>
-#include <cstdint>
-#include <algorithm>
+#include <csignal>
 
 #include <boost/asio.hpp>
 #include <clocale>
 #if defined(_WIN32)
 #  include <windows.h>
 #endif
-#include <unordered_map>
-#include <unordered_set>
-#include <set>
-#include <mutex>
-#include "server/core/protocol/frame.hpp"
 
 #include "server/core/acceptor.hpp"
 #include "server/core/dispatcher.hpp"
 #include "server/core/session.hpp"
 #include "server/core/protocol.hpp"
-// flags
 #include "server/core/protocol_flags.hpp"
-// 에러 코드
 #include "server/core/protocol_errors.hpp"
-// 고정 헤더에 UTC/SEQ가 항상 포함되므로 별도 플래그 불필요
 #include "server/core/util/log.hpp"
 #include "server/core/options.hpp"
 #include "server/core/shared_state.hpp"
+#include "server/core/JobQueue.hpp"
+#include "server/core/ThreadManager.hpp"
+#include "server/core/MemoryPool.hpp"
 #include "server/chat/chat_service.hpp"
 
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
-using server::core::Dispatcher;
-using server::core::Acceptor;
-using server::core::Session;
+namespace core = server::core;
 namespace protocol = server::core::protocol;
 namespace corelog = server::core::log;
 
@@ -52,55 +44,80 @@ int main(int argc, char** argv) {
         }
 
         asio::io_context io;
-        Dispatcher dispatcher;
-        auto options = std::make_shared<server::core::SessionOptions>();
-        options->read_timeout_ms = 60'000;     // 개발 편의: 타임아웃 여유
+        core::JobQueue job_queue;
+        core::ThreadManager workers(job_queue);
+        core::BufferManager buffer_manager(2048, 1024); // 2KB buffers, 1024 count
+
+        core::Dispatcher dispatcher;
+        auto options = std::make_shared<core::SessionOptions>();
+        options->read_timeout_ms = 60'000;
         options->heartbeat_interval_ms = 10'000;
-        auto state   = std::make_shared<server::core::SharedState>();
+        auto state = std::make_shared<core::SharedState>();
 
-        server::app::chat::ChatService chat(io);
+        server::app::chat::ChatService chat(io, job_queue);
 
-        // 핸들러 등록: PING -> PONG, CHAT_SEND -> CHAT_BROADCAST(자기 자신에게 에코)
         dispatcher.register_handler(protocol::MSG_PING,
-            [](Session& s, std::span<const std::uint8_t> payload) {
+            [](core::Session& s, std::span<const std::uint8_t> payload) {
                 std::vector<std::uint8_t> body(payload.begin(), payload.end());
                 s.async_send(protocol::MSG_PONG, body, 0);
             });
 
         dispatcher.register_handler(protocol::MSG_LOGIN_REQ,
-            [&chat](Session& s, std::span<const std::uint8_t> payload) { chat.on_login(s, payload); });
+            [&chat](core::Session& s, std::span<const std::uint8_t> payload) { chat.on_login(s, payload); });
 
         dispatcher.register_handler(protocol::MSG_JOIN_ROOM,
-            [&chat](Session& s, std::span<const std::uint8_t> payload) { chat.on_join(s, payload); });
+            [&chat](core::Session& s, std::span<const std::uint8_t> payload) { chat.on_join(s, payload); });
 
         dispatcher.register_handler(protocol::MSG_CHAT_SEND,
-            [&chat](Session& s, std::span<const std::uint8_t> payload) { chat.on_chat_send(s, payload); });
+            [&chat](core::Session& s, std::span<const std::uint8_t> payload) { chat.on_chat_send(s, payload); });
 
         dispatcher.register_handler(protocol::MSG_LEAVE_ROOM,
-            [&chat](Session& s, std::span<const std::uint8_t> payload) { chat.on_leave(s, payload); });
+            [&chat](core::Session& s, std::span<const std::uint8_t> payload) { chat.on_leave(s, payload); });
 
         tcp::endpoint ep(tcp::v4(), port);
-        auto acceptor = std::make_shared<Acceptor>(io, ep, dispatcher, options, state,
-            [&chat](std::shared_ptr<Session> sess){
-                // 세션 종료 시 상태 정리
-                sess->set_on_close([&chat](Session& s){ chat.on_session_close(s); });
+        auto acceptor = std::make_shared<core::Acceptor>(io, ep, dispatcher, buffer_manager, options, state,
+            [&chat](std::shared_ptr<core::Session> sess){
+                sess->set_on_close([&chat](std::shared_ptr<core::Session> s){ chat.on_session_close(s); });
             });
         acceptor->start();
         corelog::info("server_app 시작: 0.0.0.0:" + std::to_string(port));
 
-        // 워커 스레드 풀
-        unsigned int n = std::max(1u, std::thread::hardware_concurrency());
-        std::vector<std::thread> workers;
-        workers.reserve(n);
-        for (unsigned int i = 0; i < n; ++i) {
-            workers.emplace_back([&io]() { io.run(); });
+        // 워커 스레드 풀 시작
+        unsigned int num_worker_threads = std::max(1u, std::thread::hardware_concurrency());
+        workers.Start(num_worker_threads);
+        corelog::info(std::to_string(num_worker_threads) + "개의 워커 스레드를 시작합니다.");
+
+        // I/O 스레드 풀 시작
+        unsigned int num_io_threads = std::max(1u, std::thread::hardware_concurrency());
+        std::vector<std::thread> io_threads;
+        io_threads.reserve(num_io_threads);
+        for (unsigned int i = 0; i < num_io_threads; ++i) {
+            io_threads.emplace_back([&io]() { 
+                try {
+                    io.run();
+                } catch (const std::exception& e) {
+                    corelog::error(std::string("I/O 스레드 예외: ") + e.what());
+                }
+            });
+        }
+        corelog::info(std::to_string(num_io_threads) + "개의 I/O 스레드를 시작합니다.");
+
+        // 정상 종료(Ctrl+C) 처리
+        asio::signal_set signals(io, SIGINT, SIGTERM);
+        signals.async_wait([&](const boost::system::error_code&, int) {
+            corelog::info("서버 종료 신호 수신...");
+            acceptor->stop();
+            io.stop();
+            workers.Stop();
+        });
+
+        for (auto& t : io_threads) {
+            t.join();
         }
 
-        // 단순 대기(종료는 프로세스 종료로)
-        for (auto& t : workers) t.join();
         return 0;
     } catch (const std::exception& ex) {
-        std::cerr << "server_app 예외: " << ex.what() << std::endl;
+        corelog::error(std::string("server_app 예외: ") + ex.what());
         return 1;
     }
 }

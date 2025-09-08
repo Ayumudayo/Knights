@@ -92,7 +92,7 @@ if ($UseVcpkg -or $vcpkgJsonExists -or ($vcpkgRoot -and (Test-Path $vcpkgRoot)))
   } catch {}
   # 매니페스트가 있으면 사전 설치(선택)
   if ($vcpkgJsonExists -and -not $NoVcpkgAutoInstall) {
-    $exe = Join-Path $vcpkgRoot ($onWindows ? 'vcpkg.exe' : 'vcpkg')
+    $exe = Join-Path $vcpkgRoot $(if ($onWindows) { 'vcpkg.exe' } else { 'vcpkg' })
     if (Test-Path $exe) {
       # builtin-baseline이 없으면 자동 갱신 시도
       $manifest = Get-Content -Raw -ErrorAction SilentlyContinue 'vcpkg.json'

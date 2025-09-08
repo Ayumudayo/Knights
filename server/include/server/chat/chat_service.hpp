@@ -8,24 +8,26 @@
 #include <mutex>
 #include <memory>
 #include <span>
- #include <unordered_map>
+#include <unordered_map>
 
 #include <boost/asio.hpp>
 
 #include "server/core/session.hpp"
 #include "server/core/protocol.hpp"
 
+namespace server::core { class JobQueue; } // Forward declaration
+
 namespace server::app::chat {
 
 class ChatService {
 public:
-    explicit ChatService(boost::asio::io_context& io);
+    ChatService(boost::asio::io_context& io, server::core::JobQueue& job_queue);
 
     void on_login(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_join(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_leave(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_chat_send(server::core::Session& s, std::span<const std::uint8_t> payload);
-    void on_session_close(server::core::Session& s);
+    void on_session_close(std::shared_ptr<server::core::Session> s);
 
 private:
     using Session = server::core::Session;
@@ -46,6 +48,7 @@ private:
     } state_;
 
     boost::asio::io_context* io_{};
+    server::core::JobQueue& job_queue_;
     std::unordered_map<std::string, std::shared_ptr<Strand>> room_strands_;
     Strand& strand_for(const std::string& room);
 

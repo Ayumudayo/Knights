@@ -5,6 +5,7 @@
 #include "server/core/shared_state.hpp"
 #include "server/core/protocol_flags.hpp"
 #include "server/core/protocol_errors.hpp"
+#include "server/core/MemoryPool.hpp"
 
 #include <array>
 #include <cstring>
@@ -20,11 +21,13 @@ namespace { }
 
 Session::Session(asio::ip::tcp::socket socket,
                  Dispatcher& dispatcher,
+                 BufferManager& buffer_manager,
                  std::shared_ptr<const SessionOptions> options,
                  std::shared_ptr<SharedState> state)
     : socket_(std::move(socket))
     , strand_(socket_.get_executor())
     , dispatcher_(dispatcher)
+    , buffer_manager_(buffer_manager)
     , options_(std::move(options))
     , state_(std::move(state))
     , read_timer_(socket_.get_executor())
@@ -51,28 +54,25 @@ void Session::stop() {
     if (state_) state_->connection_count.fetch_sub(1);
     log::info("세션 종료: " + std::to_string(reinterpret_cast<std::uintptr_t>(this)));
     if (on_close_) {
-        try { on_close_(*this); } catch (...) {}
+        try { on_close_(shared_from_this()); } catch (...) {}
     }
 }
 
-void Session::async_send(std::vector<std::uint8_t> data) {
+void Session::async_send(BufferManager::PooledBuffer data, size_t frame_size) {
     // data는 이미 헤더가 포함된 완전한 프레임으로 간주한다.
-    asio::dispatch(strand_, [self = shared_from_this(), data = std::move(data)]() mutable {
+    asio::dispatch(strand_, [self = shared_from_this(), data = std::move(data), frame_size]() mutable {
         if (self->stopped_) return;
-        std::size_t frame_size = data.size();
         if (self->options_ && self->options_->send_queue_max > 0 && self->queued_bytes_ + frame_size > self->options_->send_queue_max) {
             log::warn("송신 큐 상한 초과로 세션 종료");
             self->stop();
             return;
         }
-        bool kick_write = false;
-        if (!self->writing_) {
-            self->writing_ = true;
-            kick_write = true;
-        }
+        bool kick_write = self->send_queue_.empty();
         self->queued_bytes_ += frame_size;
-        self->send_queue_.emplace_back(std::move(data));
-        if (kick_write) self->do_write();
+        self->send_queue_.push({std::move(data), frame_size});
+        if (kick_write) {
+            self->do_write();
+        }
     });
 }
 
@@ -80,14 +80,49 @@ void Session::async_send(std::uint16_t msg_id, const std::vector<std::uint8_t>& 
     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
-    auto frame = make_frame(msg_id, flags, payload, tx_seq_++, now32);
-    async_send(std::move(frame));
+    
+    auto [buffer, frame_size] = make_frame(msg_id, flags, payload, tx_seq_++, now32);
+    if (buffer) {
+        async_send(std::move(buffer), frame_size);
+    }
 }
+
+std::pair<BufferManager::PooledBuffer, size_t> Session::make_frame(std::uint16_t msg_id,
+                                              std::uint16_t flags,
+                                              const std::vector<std::uint8_t>& payload,
+                                              std::uint32_t seq,
+                                              std::uint32_t utc_ts_ms32) {
+    size_t frame_size = server::core::protocol::k_header_bytes + payload.size();
+    if (frame_size > buffer_manager_.GetBlockSize()) {
+        log::error("보낼 프레임이 메모리 풀 블록 크기보다 큽니다.");
+        return {nullptr, 0};
+    }
+
+    auto buffer = buffer_manager_.Acquire();
+    if (!buffer) {
+        log::error("메모리 풀 할당 실패");
+        return {nullptr, 0};
+    }
+
+    server::core::protocol::FrameHeader h{static_cast<std::uint16_t>(payload.size()), msg_id, flags, seq, utc_ts_ms32};
+    server::core::protocol::encode_header(h, reinterpret_cast<std::uint8_t*>(buffer.get()));
+    if (!payload.empty()) { 
+        std::memcpy(reinterpret_cast<std::uint8_t*>(buffer.get()) + server::core::protocol::k_header_bytes, payload.data(), payload.size()); 
+    }
+    return {std::move(buffer), frame_size};
+}
+
+// duplicate removed above
 
 void Session::do_read_header() {
     auto self = shared_from_this();
-    read_buf_.resize(server::core::protocol::k_header_bytes);
-    asio::async_read(socket_, asio::buffer(read_buf_),
+    read_buf_ = buffer_manager_.Acquire();
+    if (!read_buf_) {
+        log::error("헤더 버퍼 할당 실패");
+        stop();
+        return;
+    }
+    asio::async_read(socket_, asio::buffer(read_buf_.get(), server::core::protocol::k_header_bytes),
         asio::bind_executor(strand_, [this, self](const error_code& ec, std::size_t n) {
             if (ec) {
                 log::debug(std::string("헤더 읽기 실패: ") + ec.message());
@@ -99,7 +134,7 @@ void Session::do_read_header() {
                 stop();
                 return;
             }
-            server::core::protocol::decode_header(read_buf_.data(), header_);
+            server::core::protocol::decode_header(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_);
             if (options_ && options_->recv_max_payload > 0 && header_.length > options_->recv_max_payload) {
                 send_error(server::core::protocol::errc::LENGTH_LIMIT_EXCEEDED, "payload too large");
                 stop();
@@ -111,43 +146,40 @@ void Session::do_read_header() {
         }));
 }
 
-std::vector<std::uint8_t> Session::make_frame(std::uint16_t msg_id,
-                                              std::uint16_t flags,
-                                              const std::vector<std::uint8_t>& payload,
-                                              std::uint32_t seq,
-                                              std::uint32_t utc_ts_ms32) {
-    std::vector<std::uint8_t> out;
-    out.resize(server::core::protocol::k_header_bytes + payload.size());
-    server::core::protocol::FrameHeader h{static_cast<std::uint16_t>(payload.size()), msg_id, flags, seq, utc_ts_ms32};
-    server::core::protocol::encode_header(h, out.data());
-    if (!payload.empty()) { std::memcpy(out.data() + server::core::protocol::k_header_bytes, payload.data(), payload.size()); }
-    return out;
-}
-
 void Session::do_read_body(std::size_t body_len) {
     auto self = shared_from_this();
-    read_buf_.resize(body_len);
     if (body_len == 0) {
         // 빈 페이로드도 허용. 즉시 디스패치 시도.
         dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>{});
         do_read_header();
         return;
     }
-    asio::async_read(socket_, asio::buffer(read_buf_),
+    if (body_len > buffer_manager_.GetBlockSize()) {
+        log::error("수신 본문이 메모리 풀 블록 크기보다 큽니다.");
+        stop();
+        return;
+    }
+    read_buf_ = buffer_manager_.Acquire();
+    if (!read_buf_) {
+        log::error("본문 버퍼 할당 실패");
+        stop();
+        return;
+    }
+    asio::async_read(socket_, asio::buffer(read_buf_.get(), body_len),
         asio::bind_executor(strand_, [this, self](const error_code& ec, std::size_t n) {
             if (ec) {
                 log::debug(std::string("본문 읽기 실패: ") + ec.message());
                 stop();
                 return;
             }
-            if (n != read_buf_.size()) {
+            if (n != header_.length) {
                 log::warn("본문 길이 불일치");
                 stop();
                 return;
             }
             // 수신 성공 → read 타이머 재무장
             arm_read_timeout();
-            if (!dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(read_buf_.data(), read_buf_.size()))) {
+            if (!dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_.length))) {
                 send_error(server::core::protocol::errc::UNKNOWN_MSG_ID, "unknown msg");
             }
             do_read_header();
@@ -160,53 +192,58 @@ void Session::do_write() {
         return;
     }
     auto self = shared_from_this();
-    auto& front = send_queue_.front();
-    asio::async_write(socket_, asio::buffer(front),
+    auto& front_pair = send_queue_.front();
+    asio::async_write(socket_, asio::buffer(front_pair.first.get(), front_pair.second),
         asio::bind_executor(strand_, [this, self](const error_code& ec, std::size_t /*n*/) {
             if (ec) {
                 log::debug(std::string("쓰기 실패: ") + ec.message());
                 stop();
                 return;
             }
-            self->queued_bytes_ -= self->send_queue_.front().size();
-            send_queue_.erase(send_queue_.begin());
+            send_queue_.pop(); // PooledBuffer will be released here
             do_write();
         }));
 }
 
 void Session::send_hello() {
-    std::vector<std::uint8_t> payload;
+    std::vector<std::uint8_t> payload_vec;
     // HELLO payload(v1.1): proto_major(2) + proto_minor(2) + capabilities(2) + hb_x10ms(2) + epoch_high32(4) = 12 bytes
-    payload.resize(12);
-    server::core::protocol::write_be16(1, payload.data()); // proto_major
-    server::core::protocol::write_be16(1, payload.data() + 2); // proto_minor (헤더 v1.1)
+    payload_vec.resize(12);
+    server::core::protocol::write_be16(1, payload_vec.data()); // proto_major
+    server::core::protocol::write_be16(1, payload_vec.data() + 2); // proto_minor (헤더 v1.1)
     // capabilities: 압축 지원 + sender_sid 포함
     std::uint16_t caps = static_cast<std::uint16_t>(server::core::protocol::CAP_COMPRESS_SUPP | server::core::protocol::CAP_SENDER_SID);
-    server::core::protocol::write_be16(caps, payload.data() + 4);
+    server::core::protocol::write_be16(caps, payload_vec.data() + 4);
     unsigned hb = options_ ? options_->heartbeat_interval_ms / 10 : 0;
-    server::core::protocol::write_be16(static_cast<std::uint16_t>(hb), payload.data() + 6);
+    server::core::protocol::write_be16(static_cast<std::uint16_t>(hb), payload_vec.data() + 6);
     // epoch_high32: 서버 UTC ms 상위 32비트 제공(클라가 64비트 재구성 가능)
     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::uint32_t epoch_high32 = static_cast<std::uint32_t>((static_cast<std::uint64_t>(now64) >> 32) & 0xFFFFFFFFu);
-    server::core::protocol::write_be32(epoch_high32, payload.data() + 8);
+    server::core::protocol::write_be32(epoch_high32, payload_vec.data() + 8);
     std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
-    auto frame = make_frame(0x0001 /*MSG_HELLO*/, 0, payload, tx_seq_++, now32);
-    async_send(std::move(frame));
+    
+    auto [buffer, frame_size] = make_frame(0x0001 /*MSG_HELLO*/, 0, payload_vec, tx_seq_++, now32);
+    if (buffer) {
+        async_send(std::move(buffer), frame_size);
+    }
 }
 
 void Session::send_error(std::uint16_t code, const std::string& msg) {
-    std::vector<std::uint8_t> payload;
+    std::vector<std::uint8_t> payload_vec;
     std::uint16_t len = static_cast<std::uint16_t>(std::min<std::size_t>(msg.size(), 400));
-    payload.resize(4 + len);
-    server::core::protocol::write_be16(code, payload.data());
-    server::core::protocol::write_be16(len, payload.data() + 2);
-    if (len) std::memcpy(payload.data() + 4, msg.data(), len);
+    payload_vec.resize(4 + len);
+    server::core::protocol::write_be16(code, payload_vec.data());
+    server::core::protocol::write_be16(len, payload_vec.data() + 2);
+    if (len) std::memcpy(payload_vec.data() + 4, msg.data(), len);
     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
-    auto frame = make_frame(0x0004 /*MSG_ERR*/, 0, payload, tx_seq_++, now32);
-    async_send(std::move(frame));
+    
+    auto [buffer, frame_size] = make_frame(0x0004 /*MSG_ERR*/, 0, payload_vec, tx_seq_++, now32);
+    if (buffer) {
+        async_send(std::move(buffer), frame_size);
+    }
 }
 
 void Session::arm_read_timeout() {

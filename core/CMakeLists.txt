@@ -3,6 +3,9 @@ add_library(server_core
     src/net/session.cpp
     src/net/dispatcher.cpp
     src/util/log.cpp
+    src/concurrent/JobQueue.cpp
+    src/concurrent/ThreadManager.cpp
+    src/memory/MemoryPool.cpp
 )
 
 target_include_directories(server_core PUBLIC include)
