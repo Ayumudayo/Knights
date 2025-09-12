@@ -1,4 +1,4 @@
-﻿#include "server/core/session.hpp"
+#include "server/core/net/session.hpp"
 #include "server/core/net/dispatcher.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/config/options.hpp"
