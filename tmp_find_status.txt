@@ -24,8 +24,6 @@
 
 #include "client/net_client.hpp"
 #include "client/store.hpp"
-#include "client/app/state.hpp"
-#include "client/ui/status_bar.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 
 using namespace ftxui;
@@ -158,15 +156,53 @@ int main() {
         return hbox({ text("> "), input_comp->Render() | flex });
     });
 
-    // 상단 상태바(반응형) - 분리된 UI 모듈 사용
+    // 상단 상태바(반응형)
     auto status_bar = [&] {
-        client::app::State st;
-        st.connected.store(connected.load());
-        st.rooms = rooms; st.rooms_selected = rooms_selected;
-        st.users = users; st.users_selected = users_selected;
-        st.current_room = current_room;
-        st.username = username;
-        return client::ui::RenderStatusBar(st);
+        auto sz = Terminal::Size();
+        int w = sz.dimx;
+        bool wide = w >= 110;
+        bool mid  = w >= 90;
+        bool sml  = w >= 70;
+
+        Elements parts;
+        parts.push_back(text(wide ? " Knights Client " : (mid ? " Knights " : " KC ")) | bold);
+        parts.push_back(separator());
+
+        auto led = text(connected.load() ? "●" : "○") | color(connected.load() ? Color::Green : Color::Red);
+        if (sml) {
+            parts.push_back(text(" 상태:"));
+            parts.push_back(text(connected.load() ? "연결됨" : "미연결") | color(connected.load() ? Color::Green : Color::Red));
+        } else {
+            parts.push_back(led);
+        }
+
+        if (mid) {
+            parts.push_back(text("  사용자:"));
+            auto user_elem = text(username);
+            if (username == "guest") user_elem = user_elem | color(Color::Yellow);
+            else user_elem = user_elem | bold;
+            parts.push_back(user_elem);
+            parts.push_back(text("  방:"));
+            parts.push_back(text(current_room) | bold);
+        } else if (sml) {
+            parts.push_back(text("  "));
+            auto combo = username + "@" + current_room;
+            auto combo_elem = text(combo);
+            if (username == "guest") combo_elem = combo_elem | color(Color::Yellow);
+            else combo_elem = combo_elem | bold;
+            parts.push_back(combo_elem);
+        }
+
+        parts.push_back(filler());
+        if (wide) {
+            parts.push_back(text(" F1:Help  F2:Rooms  F3:Who  F4:Login  F5:Join  F6:Refresh  ESC: 종료  ←/→: 폭 조절  Enter: 보내기 ") | dim);
+        } else if (mid) {
+            parts.push_back(text(" F1 Help  F2 Rooms  F3 Who  F4 Login  F5 Join  F6 Refresh ") | dim);
+        } else if (sml) {
+            parts.push_back(text(" F1 Help  F6 Refresh ") | dim);
+        }
+
+        return hbox(std::move(parts)) | bgcolor(Color::GrayDark) | color(Color::White);
     };
 
     // 레이아웃 전체 렌더러(포커스 이동을 위해 빈 우측 더미 포함)
@@ -372,3 +408,7 @@ int main() {
     net.close();
     return 0;
 }
+
+
+
+

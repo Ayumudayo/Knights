@@ -5,6 +5,7 @@ add_executable(dev_chat_cli
     src/main.cpp
     src/net_client.cpp
     src/store.cpp
+    src/ui/status_bar.cpp
 )
 target_include_directories(dev_chat_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/src)
 target_include_directories(dev_chat_cli PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
