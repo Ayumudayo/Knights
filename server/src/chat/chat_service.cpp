@@ -69,49 +69,7 @@ std::string ChatService::ensure_unique_or_error(Session& s, const std::string& d
     return gen_hex_name(s);
 }
 
-void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
-    // I/O 스레드에서는 최소한의 파싱만 수행
-    auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
-    std::string user, token;
-    if (!proto::read_lp_utf8(sp, user) || !proto::read_lp_utf8(sp, token)) {
-        s.send_error(proto::errc::INVALID_PAYLOAD, "bad login payload");
-        return;
-    }
-
-    // 작업에 필요한 데이터를 복사하고, 세션의 생명을 보장하기 위해 shared_ptr을 캡처
-    auto session_sp = s.shared_from_this();
-
-    // 실제 로직을 Job으로 만들어 워커 스레드에 위임
-    job_queue_.Push([this, session_sp, user, token]() {
-        corelog::info("LOGIN_REQ 처리 시작 (워커 스레드)");
-        std::string new_user = ensure_unique_or_error(*session_sp, user);
-        if (new_user.empty()) return; // NAME_TAKEN 등 에러 이미 송신됨
-
-        {
-            std::lock_guard<std::mutex> lk(state_.mu);
-            // 기존 이름 제거
-            if (auto itold = state_.user.find(session_sp.get()); itold != state_.user.end()) {
-                auto itset = state_.by_user.find(itold->second);
-                if (itset != state_.by_user.end()) {
-                    itset->second.erase(session_sp);
-                }
-            }
-            state_.user[session_sp.get()] = new_user;
-            state_.by_user[new_user].insert(session_sp);
-            state_.authed.insert(session_sp.get());
-            // 기본 방 자동 입장: lobby
-            std::string room = "lobby";
-            state_.cur_room[session_sp.get()] = room;
-            state_.rooms[room].insert(session_sp);
-        }
-        server::wire::v1::LoginRes pb; 
-        pb.set_effective_user(new_user); 
-        pb.set_session_id(session_sp->session_id()); 
-        pb.set_message("ok");
-        const auto& res = EncodeToScratch(pb);
-        session_sp->async_send(proto::MSG_LOGIN_RES, res, 0);
-    });
-}
+// on_login은 handlers_login.cpp로 이동
 
 void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
     auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
@@ -501,63 +459,6 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
     });
 }
 
-void ChatService::on_session_close(std::shared_ptr<Session> s) {
-    job_queue_.Push([this, s]() {
-        std::vector<std::shared_ptr<Session>> targets; 
-        std::vector<std::uint8_t> body; 
-        std::string name;
-        {
-            std::lock_guard<std::mutex> lk(state_.mu);
-            if (auto itname = state_.user.find(s.get()); itname != state_.user.end()) {
-                name = itname->second; 
-            } else {
-                name = "guest";
-            }
-            state_.authed.erase(s.get());
-            if (!name.empty()) { 
-                auto itset = state_.by_user.find(name); 
-                if (itset != state_.by_user.end()) { 
-                    itset->second.erase(s); 
-                } 
-            }
-            state_.user.erase(s.get());
-            auto itcr = state_.cur_room.find(s.get());
-            if (itcr != state_.cur_room.end()) {
-                auto room = itcr->second; 
-                auto itroom = state_.rooms.find(room);
-                if (itroom != state_.rooms.end()) {
-                    itroom->second.erase(s);
-                    server::wire::v1::ChatBroadcast pb; 
-                    pb.set_room(room); 
-                    pb.set_sender("(system)"); 
-                    pb.set_text(name + " 님이 퇴장했습니다"); 
-                    pb.set_sender_sid(0);
-                    auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); 
-                    pb.set_ts_ms(static_cast<std::uint64_t>(now64));
-                    std::string bytes; 
-                    pb.SerializeToString(&bytes); 
-                    body.assign(bytes.begin(), bytes.end());
-                    auto itb = state_.rooms.find(room);
-                    if (itb != state_.rooms.end()) {
-                        auto& set = itb->second;
-                        for (auto wit = set.begin(); wit != set.end(); ) { 
-                            if (auto p = wit->lock()) { 
-                                targets.emplace_back(std::move(p)); 
-                                ++wit; 
-                            } else { 
-                                wit = set.erase(wit); 
-                            } 
-                        }
-                        if (set.empty() && room != std::string("lobby")) state_.rooms.erase(itb);
-                    }
-                }
-                state_.cur_room.erase(itcr);
-            }
-        }
-        for (auto& t : targets) { 
-            t->async_send(proto::MSG_CHAT_BROADCAST, body, 0); 
-        }
-    });
-}
+// on_session_close는 session_events.cpp로 이동
 
 } // namespace server::app::chat
