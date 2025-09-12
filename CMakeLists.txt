@@ -48,7 +48,7 @@ message(STATUS "Boost lib dirs: ${Boost_LIBRARY_DIRS}")
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if (Python3_Interpreter_FOUND)
     set(OPCODES_JSON ${CMAKE_SOURCE_DIR}/protocol/opcodes.json)
-    set(GENERATED_HEADER ${CMAKE_SOURCE_DIR}/core/include/server/core/protocol.hpp)
+    set(GENERATED_HEADER ${CMAKE_SOURCE_DIR}/core/include/server/core/protocol/opcodes.hpp)
     add_custom_command(
         OUTPUT ${GENERATED_HEADER}
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/gen_opcodes.py ${OPCODES_JSON} ${GENERATED_HEADER}

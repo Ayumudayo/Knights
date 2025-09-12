@@ -10,7 +10,7 @@ HEADER_TMPL = """// 자동 생성 파일: tools/gen_wire_codec.py에 의해 생�
 #include <cstdint>
 #include <string>
 #include <vector>
-#include "server/core/protocol.hpp"
+#include "server/core/protocol/opcodes.hpp"
 #include "wire.pb.h"
 
 namespace server {{ namespace wire {{ namespace codec {{

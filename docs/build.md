@@ -64,6 +64,5 @@ cmake --install build-msvc --config Debug --prefix "C:/server-core-sdk"  # Windo
 
 ## 코드 생성(opcodes)
 - 소스 오브 트루스: `protocol/opcodes.json`
-- 생성 대상: `core/include/server/core/protocol.hpp`
-- 수동 실행: `python tools/gen_opcodes.py protocol/opcodes.json core/include/server/core/protocol.hpp`
-
+ - 생성 대상: `core/include/server/core/protocol/opcodes.hpp`
+ - 수동 실행: `python tools/gen_opcodes.py protocol/opcodes.json core/include/server/core/protocol/opcodes.hpp`

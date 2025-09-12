@@ -13,7 +13,8 @@
 #include <boost/asio.hpp>
 
 #include "server/core/net/session.hpp"
-#include "server/core/protocol.hpp"
+// Opcodes are defined in generated header
+#include "server/core/protocol/opcodes.hpp"
 
 namespace server::core { class JobQueue; } // Forward declaration
 

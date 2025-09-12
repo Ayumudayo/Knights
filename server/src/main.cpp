@@ -14,7 +14,7 @@
 #include "server/core/net/acceptor.hpp"
 #include "server/core/net/dispatcher.hpp"
 #include "server/core/net/session.hpp"
-#include "server/core/protocol.hpp"
+#include "server/core/protocol/opcodes.hpp"
 #include "server/core/protocol/protocol_flags.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/util/log.hpp"

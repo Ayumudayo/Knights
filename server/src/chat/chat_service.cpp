@@ -1,6 +1,6 @@
 // UTF-8, 한국어 주석
 #include "server/chat/chat_service.hpp"
-#include "server/core/protocol.hpp"
+#include "server/core/protocol/opcodes.hpp"
 #include "server/core/protocol/frame.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/protocol/protocol_flags.hpp"
