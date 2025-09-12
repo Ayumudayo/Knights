@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <atomic>
 #include <cstddef>
@@ -12,3 +12,4 @@ struct SharedState {
 };
 
 } // namespace server::core
+

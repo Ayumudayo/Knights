@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include <cstdint>
 
@@ -20,3 +20,4 @@ enum : std::uint16_t {
 };
 
 } // namespace server::core::protocol
+

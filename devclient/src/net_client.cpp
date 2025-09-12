@@ -1,7 +1,7 @@
 // UTF-8, 한국어 주석
 #include "client/net_client.hpp"
 #include "server/core/protocol.hpp"
-#include "server/core/protocol_flags.hpp"
+#include "server/core/protocol/protocol_flags.hpp"
 #include "server/core/protocol/frame.hpp"
 #include "server/wire/codec.hpp"
 #include "wire.pb.h"

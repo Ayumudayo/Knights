@@ -1,10 +1,11 @@
 // UTF-8, 한국어 주석
 #include "server/chat/chat_service.hpp"
+#include "server/core/protocol.hpp"
 #include "server/core/protocol/frame.hpp"
-#include "server/core/protocol_errors.hpp"
-#include "server/core/protocol_flags.hpp"
+#include "server/core/protocol/protocol_errors.hpp"
+#include "server/core/protocol/protocol_flags.hpp"
 #include "server/core/util/log.hpp"
-#include "server/core/JobQueue.hpp"
+#include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
 
 namespace {

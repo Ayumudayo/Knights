@@ -1,5 +1,5 @@
-#include "server/core/ThreadManager.hpp"
-#include "server/core/JobQueue.hpp"
+#include "server/core/concurrent/thread_manager.hpp"
+#include "server/core/concurrent/job_queue.hpp"
 
 namespace server::core {
 

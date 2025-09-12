@@ -11,18 +11,18 @@
 #  include <windows.h>
 #endif
 
-#include "server/core/acceptor.hpp"
-#include "server/core/dispatcher.hpp"
-#include "server/core/session.hpp"
+#include "server/core/net/acceptor.hpp"
+#include "server/core/net/dispatcher.hpp"
+#include "server/core/net/session.hpp"
 #include "server/core/protocol.hpp"
-#include "server/core/protocol_flags.hpp"
-#include "server/core/protocol_errors.hpp"
+#include "server/core/protocol/protocol_flags.hpp"
+#include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/util/log.hpp"
-#include "server/core/options.hpp"
-#include "server/core/shared_state.hpp"
-#include "server/core/JobQueue.hpp"
-#include "server/core/ThreadManager.hpp"
-#include "server/core/MemoryPool.hpp"
+#include "server/core/config/options.hpp"
+#include "server/core/state/shared_state.hpp"
+#include "server/core/concurrent/job_queue.hpp"
+#include "server/core/concurrent/thread_manager.hpp"
+#include "server/core/memory/memory_pool.hpp"
 #include "server/chat/chat_service.hpp"
 
 namespace asio = boost::asio;

@@ -1,4 +1,4 @@
-#include "server/core/JobQueue.hpp"
+#include "server/core/concurrent/job_queue.hpp"
 
 namespace server::core {
 

@@ -18,3 +18,4 @@ static constexpr std::uint16_t NOT_MEMBER            = 0x0105; // 해당 방 멤
 static constexpr std::uint16_t ROOM_MISMATCH         = 0x0106; // 지정된 방과 현재 방 불일치
 
 } // namespace server::core::protocol::errc
+

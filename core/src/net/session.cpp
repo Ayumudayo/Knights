@@ -1,11 +1,11 @@
 ﻿#include "server/core/session.hpp"
-#include "server/core/dispatcher.hpp"
+#include "server/core/net/dispatcher.hpp"
 #include "server/core/util/log.hpp"
-#include "server/core/options.hpp"
-#include "server/core/shared_state.hpp"
-#include "server/core/protocol_flags.hpp"
-#include "server/core/protocol_errors.hpp"
-#include "server/core/MemoryPool.hpp"
+#include "server/core/config/options.hpp"
+#include "server/core/state/shared_state.hpp"
+#include "server/core/protocol/protocol_flags.hpp"
+#include "server/core/protocol/protocol_errors.hpp"
+#include "server/core/memory/memory_pool.hpp"
 
 #include <array>
 #include <cstring>

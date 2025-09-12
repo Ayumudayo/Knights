@@ -1,7 +1,7 @@
-#include "server/core/dispatcher.hpp"
-#include "server/core/session.hpp"
+#include "server/core/net/dispatcher.hpp"
+#include "server/core/net/session.hpp"
 #include "server/core/util/log.hpp"
-#include "server/core/protocol_errors.hpp"
+#include "server/core/protocol/protocol_errors.hpp"
 
 namespace server::core {
 

@@ -24,7 +24,7 @@
 
 #include "client/net_client.hpp"
 #include "client/store.hpp"
-#include "server/core/protocol_errors.hpp"
+#include "server/core/protocol/protocol_errors.hpp"
 
 using namespace ftxui;
 // 모든 네트워킹은 NetClient를 통해 수행한다.

@@ -1,10 +1,10 @@
 ﻿#include "server/core/acceptor.hpp"
-#include "server/core/session.hpp"
-#include "server/core/dispatcher.hpp"
+#include "server/core/net/session.hpp"
+#include "server/core/net/dispatcher.hpp"
 #include "server/core/util/log.hpp"
-#include "server/core/options.hpp"
-#include "server/core/shared_state.hpp"
-#include "server/core/MemoryPool.hpp"
+#include "server/core/config/options.hpp"
+#include "server/core/state/shared_state.hpp"
+#include "server/core/memory/memory_pool.hpp"
 
 using boost::system::error_code;
 

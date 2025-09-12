@@ -12,7 +12,7 @@
 
 #include <boost/asio.hpp>
 
-#include "server/core/session.hpp"
+#include "server/core/net/session.hpp"
 #include "server/core/protocol.hpp"
 
 namespace server::core { class JobQueue; } // Forward declaration
