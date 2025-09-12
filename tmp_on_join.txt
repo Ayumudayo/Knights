@@ -1,0 +1,27 @@
+void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
+    auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
+    std::string room;
+    if (!proto::read_lp_utf8(sp, room)) { 
+        s.send_error(proto::errc::INVALID_PAYLOAD, "bad join payload"); 
+        return; 
+    }
+
+    auto session_sp = s.shared_from_this();
+    job_queue_.Push([this, session_sp, room]() {
+        std::string room_to_join = room;
+        if (room_to_join.empty()) room_to_join = "lobby";
+        corelog::info(std::string("JOIN_ROOM: ") + room_to_join);
+
+        std::vector<std::shared_ptr<Session>> targets;
+        std::vector<std::uint8_t> body;
+        {
+            std::lock_guard<std::mutex> lk(state_.mu);
+            if (!state_.authed.count(session_sp.get())) { 
+                session_sp->send_error(proto::errc::UNAUTHORIZED, "unauthorized"); 
+                return; 
+            }
+            // 기존 방에서 제거
+            auto itold = state_.cur_room.find(session_sp.get());
+            if (itold != state_.cur_room.end() && itold->second != room_to_join) {
+                auto itroom = state_.rooms.find(itold->second);
+                if
