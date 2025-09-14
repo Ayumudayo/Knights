@@ -29,6 +29,7 @@ struct Message {
     std::string   room_id;   // UUID (text)
     std::string   room_name; // 라벨(중복 허용) — denormalized for audit/UX
     std::optional<std::string> user_id; // NULL 허용
+    std::optional<std::string> user_name; // 표시용 닉네임(LEFT JOIN users.name)
     std::string   content;
     std::int64_t  created_at_ms{}; // UTC epoch millis
 };
@@ -101,6 +102,8 @@ public:
                                   std::uint64_t last_seen_msg_id) = 0;
     virtual void leave(const std::string& user_id,
                        const std::string& room_id) = 0;
+    virtual std::optional<std::uint64_t> get_last_seen(const std::string& user_id,
+                                                       const std::string& room_id) = 0;
 };
 
 class ISessionRepository {

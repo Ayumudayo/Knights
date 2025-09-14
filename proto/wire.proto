@@ -25,10 +25,17 @@ message StateSnapshot {
   }
   repeated RoomInfo rooms = 2;
   repeated string users = 3; // users in current_room
+  message SnapshotMessage {
+    uint64 id = 1;
+    string sender = 2;
+    string text = 3;
+    uint64 ts_ms = 4;
+  }
+  repeated SnapshotMessage messages = 4; // recent messages in current_room (ascending)
+  uint64 last_seen_id = 5;              // membership.last_seen_msg_id (0 if unknown)
 }
 
 message RoomUsers {
   string room = 1;
   repeated string users = 2;
 }
-

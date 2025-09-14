@@ -177,13 +177,15 @@ public:
 #if defined(HAVE_LIBPQXX)
         std::vector<Message> out; out.reserve(limit);
         auto r = w_->exec_params(
-            "select id, room_id::text, coalesce(room_name, ''), coalesce(user_id::text, ''), content, (extract(epoch from created_at)*1000)::bigint "
-            "from messages where room_id=$1::uuid and id > $2 order by id asc limit $3",
+            "select m.id, m.room_id::text, coalesce(m.room_name, ''), coalesce(m.user_id::text, ''), m.content, (extract(epoch from m.created_at)*1000)::bigint, coalesce(u.name,'') "
+            "from messages m left join users u on u.id = m.user_id "
+            "where m.room_id=$1::uuid and m.id > $2 order by m.id asc limit $3",
             room_id, static_cast<long long>(since_id), static_cast<int>(limit));
         for (const auto& row : r) {
             Message m{}; m.id = row[0].as<std::uint64_t>(); m.room_id = row[1].c_str(); m.room_name = row[2].c_str();
             auto uid = row[3].c_str(); if (uid && *uid) m.user_id = std::string(uid);
             m.content = row[4].c_str(); m.created_at_ms = row[5].as<std::int64_t>();
+            auto uname = row[6].c_str(); if (uname && *uname) m.user_name = std::string(uname);
             out.emplace_back(std::move(m));
         }
         return out;
@@ -324,6 +326,19 @@ public:
             user_id, room_id);
 #else
         (void)user_id; (void)room_id;
+#endif
+    }
+
+    std::optional<std::uint64_t> get_last_seen(const std::string& user_id,
+                                               const std::string& room_id) override {
+#if defined(HAVE_LIBPQXX)
+        auto r = w_->exec_params(
+            "select last_seen_msg_id from memberships where user_id=$1::uuid and room_id=$2::uuid",
+            user_id, room_id);
+        if (r.empty() || r[0][0].is_null()) return std::nullopt;
+        return r[0][0].as<std::uint64_t>();
+#else
+        (void)user_id; (void)room_id; return std::nullopt;
 #endif
     }
 
