@@ -4,6 +4,8 @@
 #include <string>
 #include <span>
 #include <csignal>
+#include <cstdlib> // getenv, strtoul
+#include <cstring> // strcmp
 
 #include <boost/asio.hpp>
 #include <clocale>
@@ -97,9 +99,6 @@ int run_server(int argc, char** argv) {
             }
         }
 
-        server::app::chat::ChatService chat(io, job_queue, db_pool, redis);
-        // TODO: ChatService에 저장소 주입(후속 단계)
-
         // Redis 클라이언트 구성(환경 변수 기반)
         std::shared_ptr<server::storage::redis::IRedisClient> redis;
         if (const char* ruri = std::getenv("REDIS_URI"); ruri && *ruri) {
@@ -116,6 +115,9 @@ int run_server(int argc, char** argv) {
         } else {
             corelog::warn("REDIS_URI 미설정 — Redis 연동 비활성(후속 단계에서 필요)");
         }
+
+        server::app::chat::ChatService chat(io, job_queue, db_pool, redis);
+        // TODO: ChatService에 저장소 주입(후속 단계)
 
         register_routes(dispatcher, chat);
 
