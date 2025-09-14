@@ -32,6 +32,8 @@
 #include "server/core/storage/connection_pool.hpp"
 // 캐시/팬아웃: Redis 클라이언트(스켈레톤)
 #include "server/storage/redis/client.hpp"
+// .env 로더
+#include "server/core/config/dotenv.hpp"
 
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
@@ -48,6 +50,9 @@ int run_server(int argc, char** argv) {
         SetConsoleCP(CP_UTF8);
         std::setlocale(LC_ALL, ".UTF-8");
 #endif
+        // .env 로드(있으면): 기존 환경변수는 보존
+        server::core::config::load_dotenv(".env", false);
+
         unsigned short port = 5000;
         if (argc >= 2) {
             port = static_cast<unsigned short>(std::stoi(argv[1]));

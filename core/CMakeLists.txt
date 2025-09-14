@@ -6,6 +6,7 @@ add_library(server_core
     src/concurrent/job_queue.cpp
     src/concurrent/thread_manager.cpp
     src/memory/memory_pool.cpp
+    src/config/dotenv.cpp
 )
 
 target_include_directories(server_core PUBLIC include)
