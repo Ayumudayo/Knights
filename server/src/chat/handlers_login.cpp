@@ -9,6 +9,8 @@
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/repositories.hpp"
 #include <algorithm>
+#include <cstdlib>
+#include "server/storage/redis/client.hpp"
 
 using namespace server::core;
 namespace proto = server::core::protocol;
@@ -109,6 +111,28 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         std::string bytes; pb.SerializeToString(&bytes);
         std::vector<std::uint8_t> res(bytes.begin(), bytes.end());
         session_sp->async_send(proto::MSG_LOGIN_RES, res, 0);
+
+        // 프레즌스(user) TTL 유지: presence:user:{user_id} = 1, TTL
+        if (redis_) {
+            try {
+                std::string uid;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto it = state_.user_uuid.find(session_sp.get());
+                    if (it != state_.user_uuid.end()) uid = it->second;
+                }
+                if (!uid.empty()) {
+                    unsigned int ttl = 30; // 기본 30초
+                    if (const char* v = std::getenv("PRESENCE_TTL_SEC")) {
+                        unsigned long t = std::strtoul(v, nullptr, 10);
+                        if (t > 0 && t < 3600) ttl = static_cast<unsigned int>(t);
+                    }
+                    std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
+                    std::string key = pfx + std::string("presence:user:") + uid;
+                    redis_->setex(key, "1", ttl);
+                }
+            } catch (...) {}
+        }
     });
 }
 

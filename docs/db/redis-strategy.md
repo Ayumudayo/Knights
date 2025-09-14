@@ -67,3 +67,9 @@
 - 소스 오브 트루스: Postgres
 - 성능/지연 최적화: Redis (세션/프레즌스/캐시/팬아웃)
 - 메시지 영속: Postgres, 브로드캐스트: Redis Pub/Sub → 필요 시 Streams
+
+## Presence/PubSub 업데이트(추가)
+- User Presence: presence:user:{user_id} 키에 1을 SETEX로 저장하여 TTL로 온라인 상태 유지(기본 PRESENCE_TTL_SEC=30). 로그인/채팅 시 갱신.
+- Room Presence: 입장 시 SADD presence:room:{room_id} {user_id}, 퇴장/세션종료 시 SREM 처리.
+- Pub/Sub 채널: anout:room:{room_name}. USE_REDIS_PUBSUB!=0일 때 Protobuf 바이트를 그대로 publish. 추후 self-echo 방지(envelope + gateway_id) 보강 예정.
+

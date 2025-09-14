@@ -13,6 +13,16 @@ if (MSVC)
     add_compile_options(/utf-8)
 endif()
 
+# write-behind worker (optional)
+add_executable(wb_worker tools/wb_worker/main.cpp)
+target_include_directories(wb_worker PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+if (TARGET server_storage_pg)
+  target_link_libraries(wb_worker PRIVATE server_storage_pg)
+endif()
+if (TARGET server_storage_redis)
+  target_link_libraries(wb_worker PRIVATE server_storage_redis)
+endif()
+
 # Windows에서 Boost.Asio가 적절한 WinSock API를 사용하도록 타깃에 매크로 부여 예정
 
 # Windows에 수동 설치된 Boost 힌트
@@ -76,3 +86,17 @@ add_subdirectory(server)
 add_subdirectory(devclient)
 # add_subdirectory(devclient)  # 이후 단계
 # add_subdirectory(tests)      # 이후 단계
+# migrations runner (requires libpqxx)
+add_executable(migrations_runner tools/migrations/runner.cpp)
+target_include_directories(migrations_runner PRIVATE ${CMAKE_SOURCE_DIR}/core/include)
+find_package(libpqxx CONFIG QUIET)
+if (libpqxx_FOUND AND TARGET libpqxx::pqxx)
+  target_link_libraries(migrations_runner PRIVATE libpqxx::pqxx)
+elseif (NOT libpqxx_FOUND)
+  find_package(unofficial-libpqxx CONFIG QUIET)
+  if (unofficial-libpqxx_FOUND AND TARGET unofficial::libpqxx::libpqxx)
+    target_link_libraries(migrations_runner PRIVATE unofficial::libpqxx::libpqxx)
+  else()
+    message(WARNING "libpqxx not found — migrations_runner will fail to link")
+  endif()
+endif()

@@ -108,6 +108,11 @@
   - 시스템 메시지 sender를 "(system)"으로 통일
   - 퇴장/세션종료 공지: Protobuf `ChatBroadcast` 사용으로 통일
   - 변경 파일: `server/src/chat/handlers_leave.cpp`, `server/src/chat/session_events.cpp`, `server/src/chat/chat_service_core.cpp`
+- Presence/분산 브로드캐스트/워커(1~3 단계)
+  - Presence(user) TTL: 로그인/채팅 시 `SETEX prefix + presence:user:{user_id}`로 TTL 갱신(`PRESENCE_TTL_SEC`, 기본 30초)
+  - 분산 브로드캐스트: `USE_REDIS_PUBSUB!=0`일 때 `prefix + fanout:room:{room_name}`로 Protobuf 바이트 publish(수신 self-echo 필터는 후속 보강 예정)
+  - Write-behind 워커 스켈레톤: `tools/wb_worker/main.cpp` 추가(CMake 타겟 `wb_worker`). Redis 헬스체크 후 루프 대기(Streams 연결은 후속 작업)
+  - 변경 파일: `server/src/chat/handlers_login.cpp`, `server/src/chat/handlers_chat.cpp`, `server/include/server/storage/redis/client.hpp`, `server/src/storage/redis/client.cpp`, `tools/wb_worker/main.cpp`, `CMakeLists.txt`
 - Postgres 빌드 오류 수정(현재 info.txt 기준)
   - `PgMembershipRepository` 누락으로 인한 컴파일 오류(C2079, C2439) 해결: 구현 추가 확인
   - 클래스/함수 재정의(C2011, C2084) 정리: 중복 정의 제거 상태 확인

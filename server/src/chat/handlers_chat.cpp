@@ -10,6 +10,7 @@
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/repositories.hpp"
 #include "server/storage/redis/client.hpp"
+#include <cstdlib>
 
 using namespace server::core;
 namespace proto = server::core::protocol;
@@ -181,8 +182,14 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             try {
                 persisted_room_id = ensure_room_id_ci(current_room);
                 if (!persisted_room_id.empty()) {
+                    std::optional<std::string> uid_opt;
+                    {
+                        std::lock_guard<std::mutex> lk(state_.mu);
+                        auto it = state_.user_uuid.find(session_sp.get());
+                        if (it != state_.user_uuid.end()) uid_opt = it->second;
+                    }
                     auto uow = db_pool_->make_unit_of_work();
-                    auto msg = uow->messages().create(persisted_room_id, current_room, std::nullopt, text);
+                    auto msg = uow->messages().create(persisted_room_id, current_room, uid_opt, text);
                     persisted_msg_id = msg.id;
                     uow->commit();
                 }
@@ -209,6 +216,27 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 auto f = (t.get() == session_sp.get()) ? proto::FLAG_SELF : 0; 
                 t->async_send(proto::MSG_CHAT_BROADCAST, std::vector<std::uint8_t>(bytes.begin(), bytes.end()), f); 
             } 
+        }
+        // 프레즌스(user) heartbeat(옵션 TTL 갱신)
+        if (redis_) {
+            try {
+                std::string uid; { std::lock_guard<std::mutex> lk(state_.mu); auto it = state_.user_uuid.find(session_sp.get()); if (it != state_.user_uuid.end()) uid = it->second; }
+                if (!uid.empty()) {
+                    unsigned int ttl = 30; if (const char* v = std::getenv("PRESENCE_TTL_SEC")) { unsigned long t = std::strtoul(v, nullptr, 10); if (t > 0 && t < 3600) ttl = static_cast<unsigned int>(t); }
+                    std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
+                    std::string key = pfx + std::string("presence:user:") + uid; redis_->setex(key, "1", ttl);
+                }
+            } catch (...) {}
+        }
+        // Redis Pub/Sub 분산 브로드캐스트(옵션)
+        if (redis_) {
+            try {
+                if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
+                    std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
+                    std::string ch = pfx + std::string("fanout:room:") + current_room;
+                    redis_->publish(ch, std::string(bytes.begin(), bytes.end()));
+                }
+            } catch (...) {}
         }
         // 본인이 보낸 메시지는 읽음 처리: last_seen = persisted_msg_id
         if (db_pool_ && persisted_msg_id > 0 && !persisted_room_id.empty()) {

@@ -53,6 +53,14 @@ public:
         try { redis_->srem(key, member); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis SREM failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis SREM failed: unknown"); return false; }
     }
 
+    bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override {
+        try { redis_->setex(key, static_cast<long long>(ttl_sec), value); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis SETEX failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis SETEX failed: unknown"); return false; }
+    }
+
+    bool publish(const std::string& channel, const std::string& message) override {
+        try { redis_->publish(channel, message); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis PUBLISH failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis PUBLISH failed: unknown"); return false; }
+    }
+
     bool del(const std::string& key) override {
         try { redis_->del(key); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis DEL failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis DEL failed: unknown"); return false; }
     }
@@ -89,6 +97,8 @@ public:
     bool lpush_trim(const std::string& key, const std::string& value, std::size_t maxlen) override { (void)key; (void)value; (void)maxlen; return true; }
     bool sadd(const std::string& key, const std::string& member) override { (void)key; (void)member; return true; }
     bool srem(const std::string& key, const std::string& member) override { (void)key; (void)member; return true; }
+    bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)value; (void)ttl_sec; return true; }
+    bool publish(const std::string& channel, const std::string& message) override { (void)channel; (void)message; return true; }
     bool del(const std::string& key) override { (void)key; return true; }
     bool scan_del(const std::string& pattern) override { (void)pattern; return true; }
 private:
