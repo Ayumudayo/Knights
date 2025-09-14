@@ -20,7 +20,16 @@ public:
     }
 
     bool health_check() override {
-        try { auto pong = redis_->ping(); return !pong.empty(); } catch (...) { return false; }
+        try {
+            auto pong = redis_->ping();
+            return !pong.empty();
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis PING failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis PING failed: unknown exception");
+            return false;
+        }
     }
 
     bool lpush_trim(const std::string& key, const std::string& value, std::size_t maxlen) override {
@@ -28,7 +37,13 @@ public:
             redis_->lpush(key, value);
             if (maxlen > 0) redis_->ltrim(key, 0, static_cast<long long>(maxlen - 1));
             return true;
-        } catch (...) { return false; }
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis LPUSH/LTRIM failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis LPUSH/LTRIM failed: unknown exception");
+            return false;
+        }
     }
 
 private:
