@@ -19,6 +19,10 @@ public:
         try { auto pong = redis_.ping(); return !pong.empty(); } catch (...) { return false; }
     }
 
+    bool lpush_trim(const std::string& key, const std::string& value, std::size_t maxlen) override {
+        try { redis_.lpush(key, value); if (maxlen > 0) redis_.ltrim(key, 0, static_cast<long long>(maxlen - 1)); return true; } catch (...) { return false; }
+    }
+
 private:
     sw::redis::Redis redis_;
 };
@@ -28,6 +32,7 @@ public:
     explicit RedisClientStub(std::string uri, Options opts)
         : uri_(std::move(uri)), opts_(opts) {}
     bool health_check() override { (void)uri_; (void)opts_; return true; }
+    bool lpush_trim(const std::string& key, const std::string& value, std::size_t maxlen) override { (void)key; (void)value; (void)maxlen; return true; }
 private:
     std::string uri_; Options opts_{};
 };

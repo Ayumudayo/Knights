@@ -148,6 +148,32 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); 
         pb.set_ts_ms(static_cast<std::uint64_t>(now64));
         std::string bytes; pb.SerializeToString(&bytes);
+        // 영속화(최소 경로): Postgres 메시지 저장 + Redis 최근 리스트 추가
+        std::string persisted_room_id;
+        std::uint64_t persisted_msg_id = 0;
+        if (db_pool_) {
+            try {
+                persisted_room_id = ensure_room_id_ci(current_room);
+                if (!persisted_room_id.empty()) {
+                    auto uow = db_pool_->make_unit_of_work();
+                    auto msg = uow->messages().create(persisted_room_id, std::nullopt, text);
+                    persisted_msg_id = msg.id;
+                    uow->commit();
+                }
+            } catch (const std::exception& e) {
+                corelog::error(std::string("메시지 영속화 실패: ") + e.what());
+            }
+        }
+        if (redis_ && !persisted_room_id.empty() && persisted_msg_id != 0) {
+            // 매우 단순한 JSON 문자열 구성(스냅샷 포맷과 별개, 스모크용)
+            std::string json = std::string("{") +
+                "\"id\":" + std::to_string(persisted_msg_id) + "," +
+                "\"sender\":\"" + sender + "\"," +
+                "\"text\":\"" + text + "\"," +
+                "\"ts_ms\":" + std::to_string(now64) + "}";
+            std::string key = std::string("room:") + persisted_room_id + ":recent";
+            redis_->lpush_trim(key, json, 200);
+        }
         if (targets.empty()) { 
             session_sp->async_send(proto::MSG_CHAT_BROADCAST, std::vector<std::uint8_t>(bytes.begin(), bytes.end()), proto::FLAG_SELF); 
         } else { 

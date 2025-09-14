@@ -51,6 +51,7 @@ private:
         std::unordered_map<Session*, std::string> cur_room;  // 세션별 현재 룸
         std::unordered_set<Session*> authed;                 // 로그인 완료 세션
         std::unordered_map<std::string, RoomSet> by_user;    // 사용자명→세션들
+        std::unordered_map<std::string, std::string> room_ids; // 룸 이름 -> room_id(UUID)
     } state_;
 
     boost::asio::io_context* io_{};
@@ -67,6 +68,9 @@ private:
     void send_room_users(Session& s, const std::string& room);
     void send_rooms_list(Session& s);
     void send_snapshot(Session& s, const std::string& current);
+
+    // 저장소 보조: 룸 이름으로 UUID 확보(없으면 생성)
+    std::string ensure_room_id_ci(const std::string& room_name);
 };
 
 } // namespace server::app::chat

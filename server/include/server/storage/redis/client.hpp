@@ -15,10 +15,10 @@ class IRedisClient {
 public:
     virtual ~IRedisClient() = default;
     virtual bool health_check() = 0;
+    virtual bool lpush_trim(const std::string& key, const std::string& value, std::size_t maxlen) = 0;
 };
 
 // Redis 클라이언트/풀 팩토리(스켈레톤)
 std::shared_ptr<IRedisClient> make_redis_client(const std::string& uri, const Options& opts);
 
 } // namespace server::storage::redis
-

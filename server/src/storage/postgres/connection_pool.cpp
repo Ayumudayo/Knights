@@ -97,6 +97,25 @@ public:
         (void)query; (void)limit; return {};
 #endif
     }
+    std::optional<Room> find_by_name_exact_ci(const std::string& name) override {
+#if defined(HAVE_LIBPQXX)
+        auto r = w_->exec_params("select id::text, name, is_public, is_active, extract(epoch from created_at)*1000::bigint from rooms where lower(name)=lower($1) order by created_at asc limit 1", name);
+        if (r.empty()) return std::nullopt;
+        Room rm{}; rm.id = r[0][0].c_str(); rm.name = r[0][1].c_str(); rm.is_public = r[0][2].as<bool>(); rm.is_active = r[0][3].as<bool>(); rm.created_at_ms = r[0][4].as<std::int64_t>();
+        return rm;
+#else
+        (void)name; return std::nullopt;
+#endif
+    }
+    Room create(const std::string& name, bool is_public) override {
+#if defined(HAVE_LIBPQXX)
+        auto r = w_->exec_params("insert into rooms(id, name, is_public, is_active, created_at) values (gen_random_uuid(), $1, $2, true, now()) returning id::text, extract(epoch from created_at)*1000::bigint", name, is_public);
+        Room rm{}; rm.id = r[0][0].c_str(); rm.name = name; rm.is_public = is_public; rm.is_active = true; rm.created_at_ms = r[0][1].as<std::int64_t>();
+        return rm;
+#else
+        (void)name; (void)is_public; return {};
+#endif
+    }
 #if defined(HAVE_LIBPQXX)
 private:
     pqxx::work* w_{};
@@ -138,7 +157,7 @@ public:
 #if defined(HAVE_LIBPQXX)
         auto r = w_->exec_params(
             "insert into messages(room_id, user_id, content) values ($1::uuid, $2::uuid, $3) returning id, extract(epoch from created_at)*1000::bigint",
-            room_id, user_id.has_value() ? pqxx::to_string(user_id.value()) : pqxx::to_string(nullptr), content);
+            room_id, user_id ? pqxx::to_string(*user_id) : pqxx::null(), content);
         Message m{}; m.id = r[0][0].as<std::uint64_t>(); m.room_id = room_id; if (user_id) m.user_id = *user_id; m.content = content; m.created_at_ms = r[0][1].as<std::int64_t>();
         return m;
 #else

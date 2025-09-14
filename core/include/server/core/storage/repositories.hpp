@@ -56,6 +56,8 @@ public:
     virtual ~IRoomRepository() = default;
     virtual std::optional<Room> find_by_id(const std::string& room_id) = 0;
     virtual std::vector<Room> search_by_name_ci(const std::string& query, std::size_t limit) = 0;
+    virtual std::optional<Room> find_by_name_exact_ci(const std::string& name) = 0;
+    virtual Room create(const std::string& name, bool is_public) = 0;
 };
 
 class IMessageRepository {
@@ -83,4 +85,3 @@ public:
 };
 
 } // namespace server::core::storage
-

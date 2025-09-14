@@ -6,6 +6,10 @@
 #include "server/core/util/log.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
+// storage
+#include "server/core/storage/connection_pool.hpp"
+#include "server/core/storage/repositories.hpp"
+#include "server/storage/redis/client.hpp"
 
 using namespace server::core;
 namespace proto = server::core::protocol;
@@ -134,6 +138,39 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         body.assign(bytes.begin(), bytes.end());
     }
     s.async_send(proto::MSG_STATE_SNAPSHOT, body, 0);
+}
+
+} // namespace server::app::chat
+
+// 별도 구현부: 저장소 보조 함수
+namespace server::app::chat {
+
+std::string ChatService::ensure_room_id_ci(const std::string& room_name) {
+    if (!db_pool_) return std::string();
+    // 캐시 확인
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        auto it = state_.room_ids.find(room_name);
+        if (it != state_.room_ids.end()) return it->second;
+    }
+    try {
+        auto uow = db_pool_->make_unit_of_work();
+        auto found = uow->rooms().find_by_name_exact_ci(room_name);
+        std::string id;
+        if (found) {
+            id = found->id;
+        } else {
+            auto created = uow->rooms().create(room_name, true);
+            id = created.id;
+        }
+        uow->commit();
+        std::lock_guard<std::mutex> lk2(state_.mu);
+        state_.room_ids.emplace(room_name, id);
+        return id;
+    } catch (const std::exception& e) {
+        corelog::error(std::string("ensure_room_id_ci 실패: ") + e.what());
+        return std::string();
+    }
 }
 
 } // namespace server::app::chat
