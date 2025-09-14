@@ -50,8 +50,12 @@ int run_server(int argc, char** argv) {
         SetConsoleCP(CP_UTF8);
         std::setlocale(LC_ALL, ".UTF-8");
 #endif
-        // .env 로드(있으면): 기존 환경변수는 보존
-        server::core::config::load_dotenv(".env", false);
+        // .env가 있으면 이를 우선(override=true), 없으면 OS 환경변수 사용
+        if (server::core::config::load_dotenv(".env", true)) {
+            corelog::info("Loaded .env (override existing env = true)");
+        } else {
+            corelog::info(".env not found — using OS environment variables");
+        }
 
         unsigned short port = 5000;
         if (argc >= 2) {
