@@ -30,3 +30,10 @@ add_library(server_storage_pg STATIC
 )
 target_include_directories(server_storage_pg PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(server_storage_pg PUBLIC server_core)
+
+# Redis client/pool (skeleton)
+add_library(server_storage_redis STATIC
+    src/storage/redis/client.cpp
+)
+target_include_directories(server_storage_redis PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(server_storage_redis PUBLIC server_core)

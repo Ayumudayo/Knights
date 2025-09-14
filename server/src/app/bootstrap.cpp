@@ -30,6 +30,8 @@
 // 저장소 DI: Postgres 커넥션 풀 팩토리
 #include "server/storage/postgres/connection_pool.hpp"
 #include "server/core/storage/connection_pool.hpp"
+// 캐시/팬아웃: Redis 클라이언트(스켈레톤)
+#include "server/storage/redis/client.hpp"
 
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
@@ -88,6 +90,23 @@ int run_server(int argc, char** argv) {
 
         server::app::chat::ChatService chat(io, job_queue);
         // TODO: ChatService에 저장소 주입(후속 단계)
+
+        // Redis 클라이언트 구성(환경 변수 기반)
+        std::shared_ptr<server::storage::redis::IRedisClient> redis;
+        if (const char* ruri = std::getenv("REDIS_URI"); ruri && *ruri) {
+            corelog::info(std::string("REDIS_URI 감지: ") + ruri);
+            server::storage::redis::Options ropts{};
+            if (const char* v = std::getenv("REDIS_POOL_MAX")) ropts.pool_max = static_cast<std::size_t>(std::strtoul(v, nullptr, 10));
+            if (const char* v = std::getenv("REDIS_USE_STREAMS")) ropts.use_streams = (std::strcmp(v, "0") != 0);
+            redis = server::storage::redis::make_redis_client(ruri, ropts);
+            if (!redis || !redis->health_check()) {
+                corelog::error("Redis 헬스체크 실패 — REDIS_URI를 확인하세요.");
+            } else {
+                corelog::info("Redis 클라이언트 초기화 완료.");
+            }
+        } else {
+            corelog::warn("REDIS_URI 미설정 — Redis 연동 비활성(후속 단계에서 필요)");
+        }
 
         register_routes(dispatcher, chat);
 
