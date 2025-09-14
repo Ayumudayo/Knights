@@ -62,6 +62,9 @@ public:
     virtual std::optional<User> find_by_id(const std::string& user_id) = 0;
     virtual std::vector<User> find_by_name_ci(const std::string& name, std::size_t limit) = 0;
     virtual User create_guest(const std::string& name) = 0;
+    virtual void update_last_login(const std::string& user_id,
+                                   const std::string& ip,
+                                   const std::string& user_agent) = 0;
 };
 
 class IRoomRepository {

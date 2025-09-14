@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   name text NOT NULL,
   password_hash text NOT NULL,
+  last_login_ip inet,
+  last_login_at timestamptz,
+  last_login_ua text,
   created_at timestamptz NOT NULL DEFAULT now()
 );
 

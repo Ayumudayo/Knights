@@ -9,6 +9,9 @@ create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   password_hash text not null,
+  last_login_ip inet,
+  last_login_at timestamptz,
+  last_login_ua text,
   created_at timestamptz not null default now()
 );
 

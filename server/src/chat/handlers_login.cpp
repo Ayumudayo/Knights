@@ -63,6 +63,14 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                     std::lock_guard<std::mutex> lk(state_.mu);
                     state_.user_uuid[session_sp.get()] = uid;
                 }
+                // users 테이블에 마지막 로그인 IP/시각/UA 기록
+                {
+                    auto ip = session_sp->remote_ip();
+                    auto ua = std::string(); // 현재 UA 정보 미수집
+                    auto uow3 = db_pool_->make_unit_of_work();
+                    uow3->users().update_last_login(uid, ip, ua);
+                    uow3->commit();
+                }
                 // 현재 룸의 room_id 확보 후 시스템 메시지로 IP 기록
                 auto rid = ensure_room_id_ci("lobby");
                 if (!rid.empty()) {
