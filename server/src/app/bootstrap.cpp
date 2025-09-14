@@ -27,6 +27,9 @@
 #include "server/core/concurrent/thread_manager.hpp"
 #include "server/core/memory/memory_pool.hpp"
 #include "server/chat/chat_service.hpp"
+// 저장소 DI: Postgres 커넥션 풀 팩토리
+#include "server/storage/postgres/connection_pool.hpp"
+#include "server/core/storage/connection_pool.hpp"
 
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
@@ -59,7 +62,32 @@ int run_server(int argc, char** argv) {
         options->heartbeat_interval_ms = 10'000;
         auto state = std::make_shared<core::SharedState>();
 
+        // DB 커넥션 풀 구성(환경 변수 기반)
+        std::shared_ptr<core::storage::IConnectionPool> db_pool;
+        {
+            const char* uri = std::getenv("DB_URI");
+            if (uri && *uri) {
+                corelog::info(std::string("DB_URI 감지: ") + uri);
+                core::storage::PoolOptions popts{};
+                if (const char* v = std::getenv("DB_POOL_MIN")) popts.min_size = static_cast<std::size_t>(std::strtoul(v, nullptr, 10));
+                if (const char* v = std::getenv("DB_POOL_MAX")) popts.max_size = static_cast<std::size_t>(std::strtoul(v, nullptr, 10));
+                if (const char* v = std::getenv("DB_CONN_TIMEOUT_MS")) popts.connect_timeout_ms = static_cast<std::uint32_t>(std::strtoul(v, nullptr, 10));
+                if (const char* v = std::getenv("DB_QUERY_TIMEOUT_MS")) popts.query_timeout_ms = static_cast<std::uint32_t>(std::strtoul(v, nullptr, 10));
+                if (const char* v = std::getenv("DB_PREPARE_STATEMENTS")) popts.prepare_statements = (std::strcmp(v, "0") != 0);
+
+                db_pool = server::storage::postgres::make_connection_pool(uri, popts);
+                if (!db_pool || !db_pool->health_check()) {
+                    corelog::error("DB 헬스체크 실패 — DB_URI를 확인하세요.");
+                    return 2;
+                }
+                corelog::info("DB 커넥션 풀 초기화 완료.");
+            } else {
+                corelog::warn("DB_URI 미설정 — DB 연동 비활성(후속 단계에서 필요)");
+            }
+        }
+
         server::app::chat::ChatService chat(io, job_queue);
+        // TODO: ChatService에 저장소 주입(후속 단계)
 
         register_routes(dispatcher, chat);
 
@@ -112,4 +140,3 @@ int run_server(int argc, char** argv) {
 }
 
 } // namespace server::app
-

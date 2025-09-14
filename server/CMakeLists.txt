@@ -10,7 +10,7 @@ add_executable(server_app
     src/chat/handlers_chat.cpp
 )
 target_include_directories(server_app PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
-target_link_libraries(server_app PRIVATE server_core wire_proto)
+target_link_libraries(server_app PRIVATE server_core wire_proto server_storage_pg)
 # protobuf 생성 헤더 경로 추가
 target_include_directories(server_app PRIVATE ${CMAKE_BINARY_DIR}/proto)
 
