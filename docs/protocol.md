@@ -58,6 +58,10 @@
   - Auth: `Login`, `ValidateToken`, `RefreshToken`.
   - Chat: `JoinRoom`, `LeaveRoom`, `SendMessage`, `ListRooms`.
   - Presence: `SetOnline`, `SetOffline`, `GetPresence`.
+\n+### 채팅 브로드캐스트 규칙(추가)
+- 시스템 메시지의 sender는 "(system)"을 사용한다.
+- `sender_sid`는 시스템 메시지일 경우 0.
+- `ts_ms`는 UTC epoch milliseconds.
 - 공통 메타데이터: `trace_id`, `correlation_id`, `tenant`, `user_id`.
 
 ### 이벤트(Event Bus)

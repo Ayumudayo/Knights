@@ -73,3 +73,9 @@
 - Room Presence: 입장 시 SADD presence:room:{room_id} {user_id}, 퇴장/세션종료 시 SREM 처리.
 - Pub/Sub 채널: anout:room:{room_name}. USE_REDIS_PUBSUB!=0일 때 Protobuf 바이트를 그대로 publish. 추후 self-echo 방지(envelope + gateway_id) 보강 예정.
 
+
+## 운영/설정 키(추가)
+- PRESENCE_TTL_SEC (기본 30): presence:user:{user_id} TTL
+- USE_REDIS_PUBSUB (기본 0): 0이 아니면 Pub/Sub 발행 활성화
+- PRESENCE_CLEAN_ON_START (기본 0): 부팅 시 prefix + presence:room:* 정리(개발/단일 인스턴스 사용 권장)
+

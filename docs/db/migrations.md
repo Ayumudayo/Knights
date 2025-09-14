@@ -41,3 +41,13 @@
 - 기본 원칙: 파일 단위 트랜잭션으로 원자성 보장
 - 예외: `CREATE INDEX CONCURRENTLY`는 트랜잭션 외부에서 실행. 러너에 예외 플래그 필요
 - 운영 환경에서는 `lock_timeout`, `statement_timeout`을 적절히 설정
+\n## 러너 사용법(추가)
+- 실행 파일: `migrations_runner`
+- 환경변수 또는 인자로 DB URI 지정
+  - 예: `DB_URI="postgres://user:pass@host/db" migrations_runner --dry-run`
+  - 예: `migrations_runner --db-uri postgres://user:pass@host/db`
+- 동작 요약:
+  - `tools/migrations/*.sql`에서 `000N_*.sql`을 버전순으로 적용
+  - 적용된 버전은 `schema_migrations(version bigint, applied_at timestamptz)`에 기록
+  - SQL에 `CONCURRENTLY`가 포함되면 non-transactional로 실행
+  - `--dry-run`은 계획만 출력하고 적용하지 않음
