@@ -24,6 +24,11 @@ if(WIN32)
         $<TARGET_FILE_DIR:server_app>)
 endif()
 
+# Enforce libpqxx as a hard requirement
+if (NOT TARGET libpqxx::pqxx AND NOT TARGET unofficial::libpqxx::libpqxx)
+    message(FATAL_ERROR "libpqxx not found — PostgreSQL storage requires libpqxx")
+endif()
+
 # Postgres storage adapter (skeleton)
 add_library(server_storage_pg STATIC
     src/storage/postgres/connection_pool.cpp

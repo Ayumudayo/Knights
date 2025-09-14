@@ -13,6 +13,11 @@ if (MSVC)
     add_compile_options(/utf-8)
 endif()
 
+# Enforce libpqxx for migrations_runner target
+if (NOT TARGET libpqxx::pqxx AND NOT TARGET unofficial::libpqxx::libpqxx)
+  message(FATAL_ERROR "libpqxx not found — migrations_runner requires libpqxx")
+endif()
+
 # write-behind worker (optional)
 add_executable(wb_worker tools/wb_worker/main.cpp)
 target_include_directories(wb_worker PRIVATE ${CMAKE_SOURCE_DIR}/core/include ${CMAKE_SOURCE_DIR}/server/include)
