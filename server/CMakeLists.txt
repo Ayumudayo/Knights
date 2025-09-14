@@ -23,3 +23,10 @@ if(WIN32)
         "${CMAKE_SOURCE_DIR}/vcpkg_installed/x64-windows/$<$<CONFIG:Debug>:debug/>bin/abseil_dll.dll"
         $<TARGET_FILE_DIR:server_app>)
 endif()
+
+# Postgres storage adapter (skeleton)
+add_library(server_storage_pg STATIC
+    src/storage/postgres/connection_pool.cpp
+)
+target_include_directories(server_storage_pg PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(server_storage_pg PUBLIC server_core)
