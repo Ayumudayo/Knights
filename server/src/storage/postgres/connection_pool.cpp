@@ -336,12 +336,3 @@ make_connection_pool(const std::string& db_uri, const PoolOptions& opts) {
 
 } // namespace server::storage::postgres
 
-    User create_guest(const std::string& name) override {
-#if defined(HAVE_LIBPQXX)
-        auto r = w_->exec_params("insert into users(id, name, password_hash, created_at) values (gen_random_uuid(), , '', now()) returning id::text, (extract(epoch from created_at)*1000)::bigint", name);
-        User u{}; u.id = r[0][0].c_str(); u.name = name; u.created_at_ms = r[0][1].as<std::int64_t>();
-        return u;
-#else
-        (void)name; return {};
-#endif
-    }
