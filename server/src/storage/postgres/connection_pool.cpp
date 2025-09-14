@@ -244,6 +244,8 @@ private:
 
 
 
+// Forward declaration to allow member declaration
+class PgMembershipRepository;
 class PgUnitOfWork final : public IUnitOfWork {
 public:
 #if defined(HAVE_LIBPQXX)
