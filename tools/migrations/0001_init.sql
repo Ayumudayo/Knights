@@ -36,6 +36,7 @@ create table if not exists memberships (
 create table if not exists messages (
   id bigserial primary key,
   room_id uuid not null references rooms(id) on delete cascade,
+  room_name text,
   user_id uuid references users(id) on delete set null,
   content text not null,
   created_at timestamptz not null default now()
@@ -58,4 +59,3 @@ create table if not exists schema_migrations (
   version bigint primary key,
   applied_at timestamptz not null default now()
 );
-

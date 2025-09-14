@@ -27,6 +27,7 @@ struct Room {
 struct Message {
     std::uint64_t id{};      // bigserial
     std::string   room_id;   // UUID (text)
+    std::string   room_name; // 라벨(중복 허용) — denormalized for audit/UX
     std::optional<std::string> user_id; // NULL 허용
     std::string   content;
     std::int64_t  created_at_ms{}; // UTC epoch millis
@@ -68,6 +69,7 @@ public:
                                                       std::uint64_t since_id,
                                                       std::size_t limit) = 0;
     virtual Message create(const std::string& room_id,
+                           const std::string& room_name,
                            const std::optional<std::string>& user_id,
                            const std::string& content) = 0;
 };

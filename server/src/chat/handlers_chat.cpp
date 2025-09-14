@@ -160,7 +160,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 persisted_room_id = ensure_room_id_ci(current_room);
                 if (!persisted_room_id.empty()) {
                     auto uow = db_pool_->make_unit_of_work();
-                    auto msg = uow->messages().create(persisted_room_id, std::nullopt, text);
+                    auto msg = uow->messages().create(persisted_room_id, current_room, std::nullopt, text);
                     persisted_msg_id = msg.id;
                     uow->commit();
                 }

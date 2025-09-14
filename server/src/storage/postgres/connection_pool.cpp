@@ -41,7 +41,7 @@ public:
 
     std::optional<User> find_by_id(const std::string& user_id) override {
 #if defined(HAVE_LIBPQXX)
-        auto r = w_->exec_params("select id::text, name, extract(epoch from created_at)*1000::bigint from users where id = $1::uuid", user_id);
+        auto r = w_->exec_params("select id::text, name, (extract(epoch from created_at)*1000)::bigint from users where id = $1::uuid", user_id);
         if (r.empty()) return std::nullopt;
         User u{}; u.id = r[0][0].c_str(); u.name = r[0][1].c_str(); u.created_at_ms = r[0][2].as<std::int64_t>();
         return u;
@@ -52,7 +52,7 @@ public:
     std::vector<User> find_by_name_ci(const std::string& name, std::size_t limit) override {
 #if defined(HAVE_LIBPQXX)
         std::vector<User> out; out.reserve(limit);
-        auto r = w_->exec_params("select id::text, name, extract(epoch from created_at)*1000::bigint from users where lower(name)=lower($1) limit $2", name, static_cast<int>(limit));
+        auto r = w_->exec_params("select id::text, name, (extract(epoch from created_at)*1000)::bigint from users where lower(name)=lower($1) limit $2", name, static_cast<int>(limit));
         for (const auto& row : r) { User u{}; u.id = row[0].c_str(); u.name = row[1].c_str(); u.created_at_ms = row[2].as<std::int64_t>(); out.emplace_back(std::move(u)); }
         return out;
 #else
@@ -79,7 +79,7 @@ public:
 
     std::optional<Room> find_by_id(const std::string& room_id) override {
 #if defined(HAVE_LIBPQXX)
-        auto r = w_->exec_params("select id::text, name, is_public, is_active, extract(epoch from closed_at)*1000::bigint, extract(epoch from created_at)*1000::bigint from rooms where id=$1::uuid", room_id);
+        auto r = w_->exec_params("select id::text, name, is_public, is_active, (extract(epoch from closed_at)*1000)::bigint, (extract(epoch from created_at)*1000)::bigint from rooms where id=$1::uuid", room_id);
         if (r.empty()) return std::nullopt;
         Room rm{}; rm.id = r[0][0].c_str(); rm.name = r[0][1].c_str(); rm.is_public = r[0][2].as<bool>(); rm.is_active = r[0][3].as<bool>(); if (!r[0][4].is_null()) rm.closed_at_ms = r[0][4].as<std::int64_t>(); rm.created_at_ms = r[0][5].as<std::int64_t>();
         return rm;
@@ -90,7 +90,7 @@ public:
     std::vector<Room> search_by_name_ci(const std::string& query, std::size_t limit) override {
 #if defined(HAVE_LIBPQXX)
         std::vector<Room> out; out.reserve(limit);
-        auto r = w_->exec_params("select id::text, name, is_public, is_active, extract(epoch from created_at)*1000::bigint from rooms where lower(name) like lower($1) order by created_at desc limit $2", "%" + query + "%", static_cast<int>(limit));
+        auto r = w_->exec_params("select id::text, name, is_public, is_active, (extract(epoch from created_at)*1000)::bigint from rooms where lower(name) like lower($1) order by created_at desc limit $2", "%" + query + "%", static_cast<int>(limit));
         for (const auto& row : r) { Room rm{}; rm.id = row[0].c_str(); rm.name = row[1].c_str(); rm.is_public = row[2].as<bool>(); rm.is_active = row[3].as<bool>(); rm.created_at_ms = row[4].as<std::int64_t>(); out.emplace_back(std::move(rm)); }
         return out;
 #else
@@ -99,7 +99,7 @@ public:
     }
     std::optional<Room> find_by_name_exact_ci(const std::string& name) override {
 #if defined(HAVE_LIBPQXX)
-        auto r = w_->exec_params("select id::text, name, is_public, is_active, extract(epoch from created_at)*1000::bigint from rooms where lower(name)=lower($1) order by created_at asc limit 1", name);
+        auto r = w_->exec_params("select id::text, name, is_public, is_active, (extract(epoch from created_at)*1000)::bigint from rooms where lower(name)=lower($1) order by created_at asc limit 1", name);
         if (r.empty()) return std::nullopt;
         Room rm{}; rm.id = r[0][0].c_str(); rm.name = r[0][1].c_str(); rm.is_public = r[0][2].as<bool>(); rm.is_active = r[0][3].as<bool>(); rm.created_at_ms = r[0][4].as<std::int64_t>();
         return rm;
@@ -109,7 +109,7 @@ public:
     }
     Room create(const std::string& name, bool is_public) override {
 #if defined(HAVE_LIBPQXX)
-        auto r = w_->exec_params("insert into rooms(id, name, is_public, is_active, created_at) values (gen_random_uuid(), $1, $2, true, now()) returning id::text, extract(epoch from created_at)*1000::bigint", name, is_public);
+        auto r = w_->exec_params("insert into rooms(id, name, is_public, is_active, created_at) values (gen_random_uuid(), $1, $2, true, now()) returning id::text, (extract(epoch from created_at)*1000)::bigint", name, is_public);
         Room rm{}; rm.id = r[0][0].c_str(); rm.name = name; rm.is_public = is_public; rm.is_active = true; rm.created_at_ms = r[0][1].as<std::int64_t>();
         return rm;
 #else
@@ -140,11 +140,14 @@ public:
 #if defined(HAVE_LIBPQXX)
         std::vector<Message> out; out.reserve(limit);
         auto r = w_->exec_params(
-            "select id, room_id::text, user_id::text, content, extract(epoch from created_at)*1000::bigint "
+            "select id, room_id::text, coalesce(user_id::text, ''), content, (extract(epoch from created_at)*1000)::bigint, coalesce(room_name, '') "
             "from messages where room_id=$1::uuid and id > $2 order by id asc limit $3",
             room_id, static_cast<long long>(since_id), static_cast<int>(limit));
         for (const auto& row : r) {
-            Message m{}; m.id = row[0].as<std::uint64_t>(); m.room_id = row[1].c_str(); if (!row[2].is_null()) m.user_id = std::string(row[2].c_str()); m.content = row[3].c_str(); m.created_at_ms = row[4].as<std::int64_t>(); out.emplace_back(std::move(m));
+            Message m{}; m.id = row[0].as<std::uint64_t>(); m.room_id = row[1].c_str();
+            auto uid = row[2].c_str(); if (uid && *uid) m.user_id = std::string(uid);
+            m.content = row[3].c_str(); m.created_at_ms = row[4].as<std::int64_t>(); m.room_name = row[5].c_str();
+            out.emplace_back(std::move(m));
         }
         return out;
 #else
@@ -152,23 +155,24 @@ public:
 #endif
     }
     Message create(const std::string& room_id,
+                   const std::string& room_name,
                    const std::optional<std::string>& user_id,
                    const std::string& content) override {
 #if defined(HAVE_LIBPQXX)
         pqxx::result r;
         if (user_id) {
             r = w_->exec_params(
-                "insert into messages(room_id, user_id, content) values ($1::uuid, $2::uuid, $3) returning id, extract(epoch from created_at)*1000::bigint",
-                room_id, *user_id, content);
+                "insert into messages(room_id, room_name, user_id, content) values ($1::uuid, $2, $3::uuid, $4) returning id, (extract(epoch from created_at)*1000)::bigint",
+                room_id, room_name, *user_id, content);
         } else {
             r = w_->exec_params(
-                "insert into messages(room_id, user_id, content) values ($1::uuid, NULL, $2) returning id, extract(epoch from created_at)*1000::bigint",
-                room_id, content);
+                "insert into messages(room_id, room_name, user_id, content) values ($1::uuid, $2, NULL, $3) returning id, (extract(epoch from created_at)*1000)::bigint",
+                room_id, room_name, content);
         }
-        Message m{}; m.id = r[0][0].as<std::uint64_t>(); m.room_id = room_id; if (user_id) m.user_id = *user_id; m.content = content; m.created_at_ms = r[0][1].as<std::int64_t>();
+        Message m{}; m.id = r[0][0].as<std::uint64_t>(); m.room_id = room_id; m.room_name = room_name; if (user_id) m.user_id = *user_id; m.content = content; m.created_at_ms = r[0][1].as<std::int64_t>();
         return m;
 #else
-        (void)room_id; (void)user_id; (void)content; return {};
+        (void)room_id; (void)room_name; (void)user_id; (void)content; return {};
 #endif
     }
 #if defined(HAVE_LIBPQXX)
@@ -191,7 +195,7 @@ public:
 
     std::optional<Session> find_by_token_hash(const std::string& token_hash) override {
 #if defined(HAVE_LIBPQXX)
-        auto r = w_->exec_params("select id::text, user_id::text, encode(token_hash,'hex'), extract(epoch from created_at)*1000::bigint, extract(epoch from expires_at)*1000::bigint, extract(epoch from revoked_at)*1000::bigint from sessions where token_hash = decode($1,'hex') limit 1", token_hash);
+        auto r = w_->exec_params("select id::text, user_id::text, encode(token_hash,'hex'), (extract(epoch from created_at)*1000)::bigint, (extract(epoch from expires_at)*1000)::bigint, (extract(epoch from revoked_at)*1000)::bigint from sessions where token_hash = decode($1,'hex') limit 1", token_hash);
         if (r.empty()) return std::nullopt;
         Session s{}; s.id = r[0][0].c_str(); s.user_id = r[0][1].c_str(); s.token_hash = r[0][2].c_str(); s.created_at_ms = r[0][3].as<std::int64_t>(); s.expires_at_ms = r[0][4].as<std::int64_t>(); if (!r[0][5].is_null()) s.revoked_at_ms = r[0][5].as<std::int64_t>();
         return s;
@@ -207,7 +211,7 @@ public:
 #if defined(HAVE_LIBPQXX)
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(expires_at.time_since_epoch()).count();
         auto r = w_->exec_params(
-            "insert into sessions(id, user_id, token_hash, client_ip, user_agent, created_at, expires_at) values (gen_random_uuid(), $1::uuid, decode($2,'hex'), $3::inet, $4, now(), to_timestamp($5/1000.0)) returning id::text, extract(epoch from created_at)*1000::bigint",
+            "insert into sessions(id, user_id, token_hash, client_ip, user_agent, created_at, expires_at) values (gen_random_uuid(), $1::uuid, decode($2,'hex'), $3::inet, $4, now(), to_timestamp($5/1000.0)) returning id::text, (extract(epoch from created_at)*1000)::bigint",
             user_id, token_hash, client_ip.value_or(""), user_agent.value_or(""), static_cast<long long>(ms));
         Session s{}; s.id = r[0][0].c_str(); s.user_id = user_id; s.token_hash = token_hash; s.created_at_ms = r[0][1].as<std::int64_t>(); s.expires_at_ms = ms; return s;
 #else
