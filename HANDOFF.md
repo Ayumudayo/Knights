@@ -118,6 +118,7 @@
 - 빌드 상태: server_app, storage_pg/redis, migrations_runner, wb_worker 모두 빌드 성공
 - 문서 갱신: ROADMAP(마일스톤/DoD/진행 요약), PROTOCOL(인증/브로드캐스트 규칙), REDIS 전략(채널 명세), OBSERVABILITY(지표/파이프라인)
 - 향후 작업: Pub/Sub 구독 + echo 필터(envelope/gateway_id), Streams 기반 write-behind 구현, 스냅샷 정합성 보강
+ - Postgres 어댑터: libpqxx 필수 의존으로 강제(CMake), 코드에서 HAVE_LIBPQXX 분기 제거하고 pqxx 단일 경로로 정리
 - Postgres 빌드 오류 수정(현재 info.txt 기준)
   - `PgMembershipRepository` 누락으로 인한 컴파일 오류(C2079, C2439) 해결: 구현 추가 확인
   - 클래스/함수 재정의(C2011, C2084) 정리: 중복 정의 제거 상태 확인

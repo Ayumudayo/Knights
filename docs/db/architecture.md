@@ -53,6 +53,10 @@
 - Repositories are constructed per-request or shared as lightweight handles bound to the pool.
 - Services receive repositories (or a repository factory) via constructor injection.
 
+## 빌드 의존성(중요)
+- Postgres 어댑터는 libpqxx를 필수로 요구한다. CMake configure 단계에서 libpqxx 미발견 시 빌드를 중단한다.
+- 코드 내 전처리 분기(HAVE_LIBPQXX)는 제거되었으며, pqxx 단일 경로만 유지한다.
+
 ## Observability
 - Emit metrics: pool utilization, acquire latency, query latency (avg/95p/99p), error rate.
 - Tracing: add span/tags per handler with SQL timings.

@@ -21,6 +21,8 @@
 ## 1) DB 기초·마이그레이션 안정화 — [wip]
 - [done] SQL 마이그레이션 구성: `tools/migrations/0001..0004`
 - [done] 마이그레이션 러너: `migrations_runner` (dry-run, non-tx 인식)
+- [done] Postgres 어댑터 단일화: `libpqxx` 필수 의존, 전처리 분기 제거(HAVE_LIBPQXX 삭제)
+- [done] CMake 강제화: `server`/`migrations_runner`에서 libpqxx 미존재 시 `FATAL_ERROR`
 - [wip] 리포지토리 스켈레톤 → 기능 보강/테스트
   - [todo] Users/Rooms/Messages/Memberships/Session 경계별 단위테스트(기본 happy-path)
   - [todo] 인덱스/성능: 0002 인덱스 점검, lock_timeout/statement_timeout 설정 가이드
