@@ -14,11 +14,9 @@ namespace server::storage::redis {
 class RedisClientImpl final : public IRedisClient {
 public:
     explicit RedisClientImpl(const std::string& uri, Options opts) {
-        sw::redis::ConnectionOptions conn_opts;
-        conn_opts.uri = uri; // 지원되는 형태: redis://, rediss://, tcp:// 등
-        sw::redis::ConnectionPoolOptions pool_opts;
-        if (opts.pool_max > 0) pool_opts.size = opts.pool_max;
-        redis_ = std::make_unique<sw::redis::Redis>(conn_opts, pool_opts);
+        (void)opts;
+        // 일부 배포판에선 ConnectionOptions.uri 필드가 없을 수 있음. 간단한 URI 생성자를 사용.
+        redis_ = std::make_unique<sw::redis::Redis>(uri);
     }
 
     bool health_check() override {
