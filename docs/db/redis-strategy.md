@@ -30,7 +30,7 @@
 - 미스 시 Postgres에서 로드하여 캐시 채움
 
 4) 메시지 팬아웃
-- Pub/Sub: `pubsub:room:{room_id}` 채널. 저지연, 비내구. 서버 인스턴스가 구독 → 세션에 브로드캐스트
+- Pub/Sub: `fanout:room:{room_name}` 채널. 저지연, 비내구. 서버 인스턴스가 구독 → 세션에 브로드캐스트
 - Streams: `stream:room:{room_id}`. 내구 + 컨슈머 그룹으로 백프레셔/재처리. 보관 기간/길이 정책 설정(trim)
 - 권장: 초기에는 Postgres에 메시지 영속화 + Redis Pub/Sub로 브로드캐스트. 재전송/복구가 중요해지면 Streams로 전환
 
@@ -78,4 +78,5 @@
 - PRESENCE_TTL_SEC (기본 30): presence:user:{user_id} TTL
 - USE_REDIS_PUBSUB (기본 0): 0이 아니면 Pub/Sub 발행 활성화
 - PRESENCE_CLEAN_ON_START (기본 0): 부팅 시 prefix + presence:room:* 정리(개발/단일 인스턴스 사용 권장)
+
 

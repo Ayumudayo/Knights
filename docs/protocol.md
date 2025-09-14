@@ -120,3 +120,11 @@
 - `MSG_CHAT_BROADCAST`에 `u32 sender_sid`(cap 지원 시) + `u64 ts_ms` 포함.
 - `MSG_STATE_SNAPSHOT(0x0200)`/`MSG_ROOM_USERS(0x0201)` 도입.
 
+
+## 인증 메시지(초안)
+- MSG_REGISTER_REQ/RES: user, pw(평문 금지: pre-hash+salt 합의 필요)
+- MSG_LOGIN_REQ/RES: user + pw → session_id/token, 브루트포스 방지 가이드
+- MSG_REFRESH_REQ/RES: refresh_token → new session/token
+- MSG_LOGOUT_REQ: 세션 종료
+- 보안: TLS 강제, 평문 pw 금지, 레이트 리밋, 잠금 정책
+

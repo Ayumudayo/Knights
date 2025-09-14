@@ -269,3 +269,9 @@ sequenceDiagram
 
 ---
 본 문서는 초기 설계 가이드이며, 실제 구현 단계에서 성능/안정성 측정을 통해 스레딩/프레이밍/직렬화 전략을 재평가하고 조정한다.
+
+## 최종 아키텍처 개요(초안)
+- 구성: LB(L4/L7), Gateway(TLS/세션/라우팅), Auth, Chat(N), Redis(Presence/Cache/PubSub/Streams), PostgreSQL(+리드레플리카/샤딩), Observability
+- 흐름: Client → LB → Gateway → Chat, 부수 경로로 Auth/Gateway ↔ Redis/DB
+- 운영: 헬스체크/드레인, 롤링 배포, 스케일 신호(큐 길이/지연)
+

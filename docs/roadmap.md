@@ -11,7 +11,7 @@
 ## 마일스톤 개요
 1) DB 기초·마이그레이션 안정화 — [wip]
 2) Presence 고도화(유저 TTL + 룸 Set 정합) — [wip]
-3) Write-behind(세션/프레즌스/경량 이벤트) — [ready]
+3) Write-behind(세션/프레즌스/경량 이벤트) — [wip]
 4) 분산 브로드캐스트(Pub/Sub → Streams 확장) — [ready]
 5) 스냅샷 정합성·성능 보강 — [todo]
 6) 테스트/운영/관측성(Observability) — [todo]
@@ -51,7 +51,7 @@
 
 ---
 
-## 3) Write-behind(경량 이벤트) — [ready]
+## 3) Write-behind(경량 이벤트) — [wip]
 - [done] 워커 스켈레톤: `tools/wb_worker/main.cpp` (환경/루프)
 - [todo] Streams 키/옵션 정리: `REDIS_STREAM_KEY=session_events`, `REDIS_STREAM_MAXLEN`
 - [todo] Ingest: XADD(서버) → Consumer Group(XREADGROUP) 워커 처리
@@ -94,7 +94,33 @@
 ## 6) 테스트/운영/관측성 — [todo]
 - [todo] 최소 단위/통합 테스트 추가(리포지토리, 러너 dry-run, presence 경로)
 - [todo] 빌드 매트릭스(MSVC/GCC/Clang), 샘플 .env 기반 CI 단계
-- [todo] 로그/메트릭/트레이싱 지표 합의 및 수집(간단히 stdout → 이후 OpenTelemetry 고려)
+- [todo] 로깅 강화: 구조적 로그(JSON), 레벨/필드 표준화(trace_id, user_id, session_id, room), 회전/보존 정책
+- [todo] 모니터링: Prometheus 지표 수집 + Grafana 대시보드(또는 동등 솔루션), 핵심 지표(fanout 지연, 에러율, presence TTL 히트율, DB/Redis 지연)
+- [todo] 트레이싱: OpenTelemetry 계측(선택), 분산 트레이스 상관관계 설정
+- [todo] 파이프라인 계측: accept→write_frame 단계별 `pipeline_latency_ms{stage}` 히스토그램 구현
+- [todo] 분산 브로드캐스트 지표: publish/subscribe 카운트, subscribe lag, duplicate drop 수집
+- [todo] 대시보드: 서버/룸 패널 템플릿 구성(처리량, 지연, 오류, 리소스)
+
+---
+
+## 진행 현황(요약)
+- DB 마이그레이션 러너 구현 및 작동 확인(dry-run/적용)
+- Redis Presence: 룸 SET(SADD/SREM), 유저 TTL(SETEX), 재시작 최소 복원 옵션
+- 분산 브로드캐스트(1차): Pub/Sub 발행 옵션(채널 `fanout:room:{room_name}`)
+- Write-behind 워커: 스켈레톤 추가 및 빌드 통합
+- 문서: ROADMAP, HANDOFF, PROTOCOL, REDIS 전략, OBSERVABILITY 보강
+
+---
+
+## 프로세스/DoD(관측성 포함)
+- 기능 설계 시 관측 항목(로그/메트릭/트레이스) 함께 정의
+- 구현과 동시에 계측 추가(최소 세트: 처리량/지연/오류/동시성)
+- PR 체크리스트에 다음 항목 포함
+  - [ ] 구조적 로그 추가(필수 필드 포함: trace_id, user_id, session_id, room, server_id)
+  - [ ] 메트릭 추가(Counter/Gauge/Histogram) 및 라벨 표준 적용
+  - [ ] 대시보드 패널 추가/갱신(PR에 JSON 또는 문서 링크)
+  - [ ] 알림 임계치/런북(요약) 갱신
+  - [ ] PII/민감정보 로그 금지 확인(마스킹/익명화)
 
 ---
 
@@ -112,3 +138,20 @@
 - `docs/db/redis-strategy.md` — presence/publish/키 설계
 - `docs/protocol.md` — 브로드캐스트 포맷 규칙
 
+## 7) Auth Service — [ready]
+- 작업: Register/Login/Refresh/Logout, Argon2id 해시, 로그인 시도/락아웃, 리포지토리/마이그레이션
+- DoD: ID/PW 로그인·세션 발급·만료·로그아웃 정상 동작, 기본 레이트 리밋
+- 리스크: 해시 파라미터/마이그레이션 비용, 보안 설정 누락
+
+## 8) Gateway 고도화 — [ready]
+- 작업: TLS 종료, 헬스체크/드레인, heartbeat 경량 경로로 user TTL 갱신, Pub/Sub 구독 브릿지(envelope/gateway_id)
+- DoD: 롤링 배포 중 연결 드레인 무중단, 멀티 인스턴스에서 브로드캐스트 수신·재전파
+- 리스크: self-echo/중복, 재연결 백오프
+
+## 9) 분산 운영 가드 — [todo]
+- 작업: envelope(origin,gateway_id,room,ts), self‑echo 필터, backoff, 장애주입
+- DoD: 중복 재전파 0, 네트워크 플랩 내성
+
+## 10) DB 파티셔닝/샤딩 PoC — [todo]
+- 작업: messages/memberships 파티션(room_id), Citus PoC, 크로스 샤드 최소화
+- DoD: 파티션 플랜 검증, 주요 쿼리 성능/정합 통과

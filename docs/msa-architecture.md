@@ -63,3 +63,10 @@
 7) Client → Gateway: `MSG_CHAT_SEND`
 8) Gateway → Chat: `SendMessage` gRPC → Chat → BUS: `chat.events.message`
 9) Gateway: 룸 구독자 세션에 브로드캐스트
+
+## 서비스 경계/계약(추가)
+- Auth: Register/Login/Refresh/Logout, opaque 세션 토큰(내부는 JWT 옵션)
+- Presence: GetPresence 배치, 룸/유저 카디널리티 주의 및 폴백
+- Gateway: heartbeat 집계→Redis SETEX, Pub/Sub 브릿지(envelope: gateway_id, origin)
+- 이벤트 토픽(초안): auth.events.login, presence.events.state, chat.events.message
+

@@ -113,6 +113,11 @@
   - 분산 브로드캐스트: `USE_REDIS_PUBSUB!=0`일 때 `prefix + fanout:room:{room_name}`로 Protobuf 바이트 publish(수신 self-echo 필터는 후속 보강 예정)
   - Write-behind 워커 스켈레톤: `tools/wb_worker/main.cpp` 추가(CMake 타겟 `wb_worker`). Redis 헬스체크 후 루프 대기(Streams 연결은 후속 작업)
   - 변경 파일: `server/src/chat/handlers_login.cpp`, `server/src/chat/handlers_chat.cpp`, `server/include/server/storage/redis/client.hpp`, `server/src/storage/redis/client.cpp`, `tools/wb_worker/main.cpp`, `CMakeLists.txt`
+
+## 진행 현황 업데이트
+- 빌드 상태: server_app, storage_pg/redis, migrations_runner, wb_worker 모두 빌드 성공
+- 문서 갱신: ROADMAP(마일스톤/DoD/진행 요약), PROTOCOL(인증/브로드캐스트 규칙), REDIS 전략(채널 명세), OBSERVABILITY(지표/파이프라인)
+- 향후 작업: Pub/Sub 구독 + echo 필터(envelope/gateway_id), Streams 기반 write-behind 구현, 스냅샷 정합성 보강
 - Postgres 빌드 오류 수정(현재 info.txt 기준)
   - `PgMembershipRepository` 누락으로 인한 컴파일 오류(C2079, C2439) 해결: 구현 추가 확인
   - 클래스/함수 재정의(C2011, C2084) 정리: 중복 정의 제거 상태 확인
@@ -121,6 +126,7 @@
 ## 다음 단계 로드맵
 - 상세 계획과 진행도, DoD, 리스크/의존성은 `docs/roadmap.md`를 참조.
 - DB 우선 과제(마일스톤 1~3)가 완료되면, 분산 브로드캐스트 수신/echo 필터 → Streams 확장 순으로 본격적인 분산 서버 구현 단계로 진입.
+ - 관측성 계획은 `docs/ops/observability.md`를 참조(구조적 로깅, Prometheus/Grafana, OpenTelemetry).
 
 ## 운영/설정 키(추가/변경)
 - Redis 정리 플래그: `PRESENCE_CLEAN_ON_START` — 0이 아니면 부팅 시 프레즌스 키 일괄 정리

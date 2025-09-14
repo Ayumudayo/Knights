@@ -1,0 +1,49 @@
+# Observability 계획 — 로깅/메트릭/트레이싱
+
+## 핵심 메트릭(권장 스키마)
+- 처리량(Counter): `chat_msgs_in_total{server_id,room}`, `chat_msgs_out_total{server_id,room}`,
+  `bytes_in_total{dir=ingress|egress}`, `bytes_out_total{dir}`
+- 지연(Histogram/Summary): `pipeline_latency_ms{stage}`, `broadcast_fanout_ms{server_id,room}`,
+  `db_query_ms{op}`, `redis_op_ms{cmd}`
+- 동시성(Gauge): `connections{server_id}`, `sessions_active{server_id}`, `rooms_active{server_id}`, `room_members{room}`
+- 큐/부하(Gauge/Counter): `job_queue_depth{type}`, `cpu_utilization`, `mem_bytes`, `sockets_open`
+- 오류(Counter): `errors_total{type,stage}`, `disconnects_total{reason}`
+
+## 파이프라인 단계(지연 분해)
+- 단계: `accept` → `read_frame` → `decode` → `auth_check` → `route_lookup` → `repo_ops(db)` → `redis_ops` → `build_payload` → `fanout_send` → `write_frame`
+- 수집: 각 단계 시작/종료 타임스탬프 기록 → `pipeline_latency_ms{stage}` 집계, end-to-end는 `stage="total"`
+- fanout: 대상 수, 전송 완료까지의 지연을 `broadcast_fanout_ms{server_id,room}`로 기록
+
+## 로그 필드(구조적 JSON)
+- 공통: `ts`, `level`, `logger`, `msg`, `version`, `server_id`, `instance`, `gateway_id`, `origin`, `trace_id`, `span_id`
+- 도메인: `opcode`, `room`, `user_id`, `session_id`, `msg_id`, `sizes{in,out}`, `durations{...}`, `fanout_targets`
+- 정책: info 기본, debug 샘플링(예: 1%), 오류/지연 상위 P99는 항상 기록
+- 출력: 표준출력(JSON Line) → 수집기(예: fluent-bit/Vector) → 백엔드(ELK/ClickHouse 등)
+
+## 라벨/키 설계(분산 대비)
+- 분산 식별: `server_id`(호스트/인스턴스), `gateway_id`(브릿지), `origin`(발신), `shard`(샤드/파티션), `build_version`
+- 룸/유저: `room`, `user_id`, `session_id`
+- 운영: `env`, `region`, `az`
+
+## 복수 채팅 서버 지표
+- 서버 단위: 처리량/지연/오류율/연결 수
+- 룸 단위: `msgs_per_sec`, 멤버 수, fanout 지연 분포
+- 분산 브로드캐스트: `publish_total`, `subscribe_total`, `subscribe_lag_ms`, `duplicates_dropped_total`
+
+## 수집/표시
+- Prometheus pull 수집, Grafana 대시보드 구성
+- 권장 대시보드 패널: 서버별 처리량/지연 히스토그램, 룸별 멤버/메시지, 오류 heatmap, Redis/DB round-trip, 큐 길이/CPU/메모리
+
+## 트레이싱(선택)
+- OpenTelemetry SDK 계측 → OTLP 수집기 → Jaeger/Tempo
+- 로그/메트릭 라벨에 `trace_id`/`span_id`를 포함해 상관관계 구축
+
+## 구현 포인트(우선순위)
+- server_core: Acceptor(연결/해제 카운터+gauge, accept 지연), Session(read/write/bytes/frame, decode/encode 지연), JobQueue(큐 길이)
+- Chat 핸들러: on_chat_send 스팬/히스토, fanout 대상/지연, snapshot/rooms/users 쿼리 지연
+- Storage: Postgres op별 쿼리 지연/오류, Redis cmd별 지연/실패 카운트
+- 분산: Pub/Sub publish/subscribe 카운트, subscribe lag, self-echo drop 카운트
+
+## 게이트웨이/인증 단일 운용 가정
+- Gateway/Auth는 초기 단일(논리) 인스턴스로 운용하되, 헬스체크/드레인/설정/로그/메트릭 표준화로 active/passive 전환 용이성 확보
+- 필수 모니터링: 연결 수, 처리량, 오류율, P99 지연, 시스템 리소스, Redis/DB 헬스체크

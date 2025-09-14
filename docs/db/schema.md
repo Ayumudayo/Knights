@@ -83,3 +83,10 @@ create index if not exists idx_users_name_trgm on users using gin (lower(name) g
 - 사용자명은 고유 식별자가 아니다(중복 허용). 시스템 식별자는 `user_id(UUID)`
 - 세션은 `id(UUID)`로 식별하며, `client_ip`는 운영/보안 분석용 보조 속성
 - 전문 검색(FTS), 보관 정책은 이후 정책/테이블로 확장 가능
+
+## 인증 스키마 확장(초안)
+- users: password_hash(Argon2id), password_params(jsonb) 권장
+- sessions: refresh_token(옵션), expires_at 인덱스, ip/user_agent 인덱스
+- login_attempts: user_id/ip/ts, 복합 인덱스(락아웃 정책)
+- 파티셔닝 청사진: messages/memberships를 room_id 기준 파티션(해시/리스트)
+
