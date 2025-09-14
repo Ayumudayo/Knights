@@ -238,7 +238,58 @@ private:
     pqxx::work* w_{};
 #endif
 };
+class PgMembershipRepository final : public IMembershipRepository {
+public:
+#if defined(HAVE_LIBPQXX)
+    explicit PgMembershipRepository(pqxx::work* w) : w_(w) {}
+#else
+    PgMembershipRepository() = default;
+#endif
 
+    void upsert_join(const std::string& user_id,
+                     const std::string& room_id,
+                     const std::string& role) override {
+#if defined(HAVE_LIBPQXX)
+        w_->exec_params(
+            "insert into memberships(user_id, room_id, role, joined_at, is_member) "
+            "values (::uuid, ::uuid, , now(), true) "
+            "on conflict (user_id, room_id) do update set role=excluded.role, joined_at=now(), is_member=true, left_at=null",
+            user_id, room_id, role);
+#else
+        (void)user_id; (void)room_id; (void)role;
+#endif
+    }
+
+    void update_last_seen(const std::string& user_id,
+                          const std::string& room_id,
+                          std::uint64_t last_seen_msg_id) override {
+#if defined(HAVE_LIBPQXX)
+        w_->exec_params(
+            "update memberships set last_seen_msg_id =  where user_id=::uuid and room_id=::uuid",
+            user_id, room_id, static_cast<long long>(last_seen_msg_id));
+#else
+        (void)user_id; (void)room_id; (void)last_seen_msg_id;
+#endif
+    }
+
+    void leave(const std::string& user_id,
+               const std::string& room_id) override {
+#if defined(HAVE_LIBPQXX)
+        w_->exec_params(
+            "update memberships set is_member=false, left_at=now() where user_id=::uuid and room_id=::uuid",
+            user_id, room_id);
+#else
+        (void)user_id; (void)room_id;
+#endif
+    }
+
+#if defined(HAVE_LIBPQXX)
+private:
+    pqxx::work* w_{};
+#endif
+};
+
+class PgMembershipRepository; // forward
 class PgUnitOfWork final : public IUnitOfWork {
 public:
     PgUnitOfWork(
@@ -265,6 +316,7 @@ public:
     IUserRepository& users() override { return users_; }
     IRoomRepository& rooms() override { return rooms_; }
     IMessageRepository& messages() override { return messages_; }
+    IMembershipRepository& memberships() override { return memberships_; }
     ISessionRepository& sessions() override { return sessions_; }
 
 private:
@@ -290,6 +342,11 @@ private:
     PgSessionRepository sessions_
     #if defined(HAVE_LIBPQXX)
     { &w_ }
+    PgMembershipRepository memberships_
+    #if defined(HAVE_LIBPQXX)
+    { &w_ }
+    #endif
+    ;
     #endif
     ;
 };

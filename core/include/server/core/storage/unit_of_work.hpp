@@ -20,7 +20,7 @@ public:
     virtual IRoomRepository& rooms() = 0;
     virtual IMessageRepository& messages() = 0;
     virtual ISessionRepository& sessions() = 0;
+    virtual IMembershipRepository& memberships() = 0;
 };
 
 } // namespace server::core::storage
-

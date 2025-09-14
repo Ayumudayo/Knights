@@ -48,6 +48,8 @@ CREATE TABLE IF NOT EXISTS memberships (
   role text NOT NULL DEFAULT 'member',
   joined_at timestamptz NOT NULL DEFAULT now(),
   last_seen_msg_id bigint,
+  is_member boolean NOT NULL DEFAULT true,
+  left_at timestamptz,
   PRIMARY KEY (user_id, room_id)
 );
 

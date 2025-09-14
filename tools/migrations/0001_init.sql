@@ -29,6 +29,8 @@ create table if not exists memberships (
   role text not null default 'member',
   joined_at timestamptz not null default now(),
   last_seen_msg_id bigint,
+  is_member boolean not null default true,
+  left_at timestamptz,
   primary key (user_id, room_id)
 );
 

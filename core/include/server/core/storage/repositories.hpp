@@ -33,6 +33,17 @@ struct Message {
     std::int64_t  created_at_ms{}; // UTC epoch millis
 };
 
+// memberships SoR
+struct Membership {
+    std::string user_id;   // UUID (text)
+    std::string room_id;   // UUID (text)
+    std::string role;      // 'member' 등
+    std::int64_t joined_at_ms{};
+    std::optional<std::uint64_t> last_seen_msg_id;
+    std::optional<std::int64_t> left_at_ms; // NULL이면 현재 참여 중
+    bool is_member{true};
+};
+
 struct Session {
     std::string id;          // UUID (text)
     std::string user_id;     // UUID (text)
@@ -73,6 +84,19 @@ public:
                            const std::string& room_name,
                            const std::optional<std::string>& user_id,
                            const std::string& content) = 0;
+};
+
+class IMembershipRepository {
+public:
+    virtual ~IMembershipRepository() = default;
+    virtual void upsert_join(const std::string& user_id,
+                             const std::string& room_id,
+                             const std::string& role) = 0;
+    virtual void update_last_seen(const std::string& user_id,
+                                  const std::string& room_id,
+                                  std::uint64_t last_seen_msg_id) = 0;
+    virtual void leave(const std::string& user_id,
+                       const std::string& room_id) = 0;
 };
 
 class ISessionRepository {

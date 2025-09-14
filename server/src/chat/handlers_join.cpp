@@ -5,6 +5,9 @@
 #include "server/core/util/log.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
+// storage
+#include "server/core/storage/connection_pool.hpp"
+#include "server/core/storage/repositories.hpp"
 
 using namespace server::core;
 namespace proto = server::core::protocol;
@@ -86,6 +89,26 @@ void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
             }
         }
         for (auto& t : targets) t->async_send(proto::MSG_CHAT_BROADCAST, body, 0);
+
+        // 멤버십 영속화(upsert)
+        if (db_pool_) {
+            try {
+                std::string uid;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto it = state_.user_uuid.find(session_sp.get());
+                    if (it != state_.user_uuid.end()) uid = it->second;
+                }
+                if (!uid.empty()) {
+                    auto rid = ensure_room_id_ci(room_to_join);
+                    if (!rid.empty()) {
+                        auto uow = db_pool_->make_unit_of_work();
+                        uow->memberships().upsert_join(uid, rid, "member");
+                        uow->commit();
+                    }
+                }
+            } catch (...) {}
+        }
     });
 }
 
