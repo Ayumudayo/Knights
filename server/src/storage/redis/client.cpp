@@ -95,44 +95,7 @@ public:
         } catch (...) {}
     }
 
-    bool xgroup_create_mkstream(const std::string& key, const std::string& group) override {
-        try { redis_->xgroup_create(key, group, "0-0", true); return true; }
-        catch (const sw::redis::ReplyError& e) { std::string msg = e.what(); if (msg.find("BUSYGROUP") != std::string::npos) return true; server::core::log::warn(std::string("Redis XGROUP CREATE failed: ") + msg); return false; }
-        catch (const std::exception& e) { server::core::log::warn(std::string("Redis XGROUP CREATE failed: ") + e.what()); return false; }
-        catch (...) { server::core::log::warn("Redis XGROUP CREATE failed: unknown"); return false; }
-    }
-
-    bool xadd(const std::string& key, const std::vector<std::pair<std::string, std::string>>& fields, std::string* out_id) override {
-        try { auto id = redis_->xadd(key, "*", fields.begin(), fields.end()); if (out_id) *out_id = id; return true; }
-        catch (const std::exception& e) { server::core::log::warn(std::string("Redis XADD failed: ") + e.what()); return false; }
-        catch (...) { server::core::log::warn("Redis XADD failed: unknown"); return false; }
-    }
-
-    bool xreadgroup(const std::string& key, const std::string& group, const std::string& consumer,
-                    long long block_ms, std::size_t count, std::vector<StreamEntry>& out) override {
-        try {
-            std::vector<std::pair<std::string, std::string>> keys = {{key, ">"}};
-            std::vector<std::pair<std::string, std::vector<sw::redis::StreamEntry>>> result;
-            redis_->xreadgroup(group, consumer, keys.begin(), keys.end(), std::back_inserter(result), count, std::chrono::milliseconds(block_ms));
-            out.clear();
-            for (auto& kv : result) {
-                for (auto& e : kv.second) {
-                    StreamEntry se; se.id = e.id; se.fields.reserve(e.size());
-                    for (auto& f : e) se.fields.emplace_back(f.first, f.second);
-                    out.emplace_back(std::move(se));
-                }
-            }
-            return true;
-        } catch (const std::exception& e) { server::core::log::warn(std::string("Redis XREADGROUP failed: ") + e.what()); return false; }
-        catch (...) { server::core::log::warn("Redis XREADGROUP failed: unknown"); return false; }
-    }
-
-    bool xack(const std::string& key, const std::string& group, const std::string& id) override {
-        try { redis_->xack(key, group, id); return true; }
-        catch (const std::exception& e) { server::core::log::warn(std::string("Redis XACK failed: ") + e.what()); return false; }
-        catch (...) { server::core::log::warn("Redis XACK failed: unknown"); return false; }
-    }
-
+    bool xgroup_create_mkstream(const std::string& /*key*/, const std::string& /*group*/) override { return true; }\n\n    bool xadd(const std::string& /*key*/, const std::vector<std::pair<std::string, std::string>>& /*fields*/, std::string* /*out_id*/) override { return true; }\n\n    bool xreadgroup(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*consumer*/, long long /*block_ms*/, std::size_t /*count*/, std::vector<StreamEntry>& /*out*/) override { return true; }\n\n    bool xack(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*id*/) override { return true; }\n
     bool del(const std::string& key) override {
         try { redis_->del(key); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis DEL failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis DEL failed: unknown"); return false; }
     }
@@ -179,24 +142,6 @@ public:
     bool xgroup_create_mkstream(const std::string& key, const std::string& group) override { (void)key; (void)group; return true; }
     bool xadd(const std::string& key, const std::vector<std::pair<std::string, std::string>>& fields, std::string* out_id) override { (void)key; (void)fields; (void)out_id; return true; }
     bool xreadgroup(const std::string& key, const std::string& group, const std::string& consumer, long long block_ms, std::size_t count, std::vector<StreamEntry>& out) override { (void)key; (void)group; (void)consumer; (void)block_ms; (void)count; (void)out; return true; }
-    bool xack(const std::string& key, const std::string& group, const std::string& id) override { (void)key; (void)group; (void)id; return true; }
-    bool start_psubscribe(const std::string& pattern, std::function<void(const std::string&, const std::string&)> on_message) override { (void)pattern; (void)on_message; return true; }
-    void stop_psubscribe() override {}
-    bool del(const std::string& key) override { (void)key; return true; }
-    bool scan_del(const std::string& pattern) override { (void)pattern; return true; }
-private:
-    std::string uri_; Options opts_{};
-};
-#endif
-
-std::shared_ptr<IRedisClient> make_redis_client(const std::string& uri, const Options& opts) {
-#if defined(HAVE_REDIS_PLUS_PLUS)
-    server::core::log::info("Redis backend: redis-plus-plus (real client)");
-    return std::make_shared<RedisClientImpl>(uri, opts);
-#else
-    server::core::log::warn("Redis backend: stub (redis-plus-plus not found at build time)");
-    return std::make_shared<RedisClientStub>(uri, opts);
-#endif
-}
-
+    bool xack(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*id*/) override { return true; }\n
 } // namespace server::storage::redis
+

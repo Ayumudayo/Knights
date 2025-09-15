@@ -87,6 +87,18 @@ endif()
 add_subdirectory(core)
 add_subdirectory(proto)
 add_subdirectory(server)
+# Link wb_worker after server targets exist
+if (TARGET wb_worker)
+  if (TARGET server_core)
+    target_link_libraries(wb_worker PRIVATE server_core)
+  endif()
+  if (TARGET server_storage_pg)
+    target_link_libraries(wb_worker PRIVATE server_storage_pg)
+  endif()
+  if (TARGET server_storage_redis)
+    target_link_libraries(wb_worker PRIVATE server_storage_redis)
+  endif()
+endif()
 add_subdirectory(devclient)
 # add_subdirectory(devclient)  # 이후 단계
 # add_subdirectory(tests)      # 이후 단계
