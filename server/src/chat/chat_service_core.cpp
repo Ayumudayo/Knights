@@ -188,6 +188,30 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
 
 } // namespace server::app::chat
 
+// 추가 구현: 외부 수신 브로드캐스트를 룸에 전파
+namespace server::app::chat {
+
+void ChatService::broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, Session* self) {
+    std::vector<std::shared_ptr<Session>> targets;
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        auto it = state_.rooms.find(room);
+        if (it != state_.rooms.end()) {
+            auto& set = it->second;
+            for (auto wit = set.begin(); wit != set.end(); ) {
+                if (auto p = wit->lock()) { targets.emplace_back(std::move(p)); ++wit; }
+                else { wit = set.erase(wit); }
+            }
+        }
+    }
+    for (auto& t : targets) {
+        auto f = (self && (t.get() == self)) ? proto::FLAG_SELF : 0;
+        t->async_send(proto::MSG_CHAT_BROADCAST, body, f);
+    }
+}
+
+} // namespace server::app::chat
+
 // 별도 구현부: 저장소 보조 함수
 namespace server::app::chat {
 

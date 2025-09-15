@@ -2,6 +2,9 @@
 
 #include <memory>
 #include <utility>
+#include <thread>
+#include <atomic>
+#include <functional>
 
 #if defined(HAVE_REDIS_PLUS_PLUS)
 #include <sw/redis++/redis++.h>
@@ -61,6 +64,37 @@ public:
         try { redis_->publish(channel, message); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis PUBLISH failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis PUBLISH failed: unknown"); return false; }
     }
 
+    bool start_psubscribe(const std::string& pattern,
+                          std::function<void(const std::string& channel, const std::string& message)> on_message) override {
+        try {
+            if (sub_running_) return true;
+            subscriber_ = std::make_unique<sw::redis::Subscriber>(redis_->subscriber());
+            subscriber_->on_pmessage([cb = std::move(on_message)](std::string /*pat*/, std::string channel, std::string msg) mutable {
+                if (cb) cb(channel, msg);
+            });
+            subscriber_->psubscribe(pattern);
+            sub_running_ = true;
+            sub_thread_ = std::thread([this]() {
+                while (sub_running_) {
+                    try { subscriber_->consume(); } catch (...) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
+                }
+            });
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis PSUBSCRIBE failed: ") + e.what());
+            return false;
+        } catch (...) { server::core::log::warn("Redis PSUBSCRIBE failed: unknown"); return false; }
+    }
+
+    void stop_psubscribe() override {
+        try {
+            sub_running_ = false;
+            if (subscriber_) { try { subscriber_->punsubscribe(); } catch (...) {} }
+            if (sub_thread_.joinable()) sub_thread_.join();
+            subscriber_.reset();
+        } catch (...) {}
+    }
+
     bool del(const std::string& key) override {
         try { redis_->del(key); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis DEL failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis DEL failed: unknown"); return false; }
     }
@@ -87,6 +121,9 @@ public:
 
 private:
     std::unique_ptr<sw::redis::Redis> redis_;
+    std::unique_ptr<sw::redis::Subscriber> subscriber_;
+    std::thread sub_thread_;
+    std::atomic<bool> sub_running_{false};
 };
 #else
 class RedisClientStub final : public IRedisClient {
@@ -99,6 +136,8 @@ public:
     bool srem(const std::string& key, const std::string& member) override { (void)key; (void)member; return true; }
     bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)value; (void)ttl_sec; return true; }
     bool publish(const std::string& channel, const std::string& message) override { (void)channel; (void)message; return true; }
+    bool start_psubscribe(const std::string& pattern, std::function<void(const std::string&, const std::string&)> on_message) override { (void)pattern; (void)on_message; return true; }
+    void stop_psubscribe() override {}
     bool del(const std::string& key) override { (void)key; return true; }
     bool scan_del(const std::string& pattern) override { (void)pattern; return true; }
 private:

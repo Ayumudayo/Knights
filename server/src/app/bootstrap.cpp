@@ -160,6 +160,26 @@ int run_server(int argc, char** argv) {
         corelog::info(std::to_string(num_io_threads) + "개의 I/O 스레드를 시작합니다.");
 
         // 정상 종료(Ctrl+C) 처리
+        // Pub/Sub 분산 브로드캐스트 구독(옵션)
+        if (redis) {
+            if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
+                std::string prefix; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) prefix = p;
+                std::string pattern = prefix + std::string("fanout:room:*");
+                std::string gwid = [](){ const char* g = std::getenv("GATEWAY_ID"); if (g && *g) return std::string(g); return std::string("gw-default"); }();
+                redis->start_psubscribe(pattern, [&chat, gwid](const std::string& channel, const std::string& message){
+                    if (message.rfind("gw=", 0) == 0) {
+                        auto nl = message.find('\n'); if (nl == std::string::npos) return;
+                        std::string from = message.substr(3, nl - 3);
+                        if (from == gwid) return; // self-echo 차단
+                        std::string payload = message.substr(nl + 1);
+                        std::string room = channel; auto pos = room.rfind(':'); if (pos != std::string::npos) room = room.substr(pos + 1);
+                        std::vector<std::uint8_t> body(payload.begin(), payload.end());
+                        chat.broadcast_room(room, body, nullptr);
+                    }
+                });
+                corelog::info(std::string("Subscribed Redis pattern: ") + pattern);
+            }
+        }
         asio::signal_set signals(io, SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int) {
             corelog::info("서버 종료 신호 수신...");
