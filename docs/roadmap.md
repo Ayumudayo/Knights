@@ -54,15 +54,22 @@
 ---
 
 ## 3) Write-behind(경량 이벤트) — [wip]
-- [done] 워커 스켈레톤: `tools/wb_worker/main.cpp` (환경/루프)
-- [todo] Streams 키/옵션 정리: `REDIS_STREAM_KEY=session_events`, `REDIS_STREAM_MAXLEN`
-- [todo] Ingest: XADD(서버) → Consumer Group(XREADGROUP) 워커 처리
-- [todo] 배치 커밋: `WB_BATCH_MAX_EVENTS/BYTES/DELAY_MS` 반영, at-least-once 멱등 처리
-- [todo] DLQ/재시도: `WB_DLOUT_STREAM`, backoff
-- [todo] 관측성: 처리량/지연/실패율 메트릭
+- [done] Redis Streams 클라이언트 구현(XGROUP/XADD/XREADGROUP/XACK) — `server/src/storage/redis/client.cpp`
+- [done] 워커 스켈레톤 + .env 인식 — `tools/wb_worker/main.cpp`
+- [done] 키/옵션/운영 문서 정리 — `docs/db/write-behind.md`
+- [todo] Ingest(서버): `WRITE_BEHIND_ENABLED`가 true일 때 XADD로 생산
+  - 로그인 성공 → `server/src/chat/handlers_login.cpp`
+  - 룸 입장/퇴장 → `server/src/chat/handlers_join.cpp`, `server/src/chat/handlers_leave.cpp`
+  - 세션 종료 → `server/src/chat/session_events.cpp`
+  - 키: `REDIS_STREAM_KEY`(기본 `session_events`), 트림: `REDIS_STREAM_MAXLEN`
+- [todo] 배치 커밋(워커): `WB_BATCH_MAX_EVENTS/BYTES/DELAY_MS` 반영, Postgres 트랜잭션 커밋, 멱등 처리
+- [todo] DLQ/재시도: `WB_DLOUT_STREAM`로 이동, retry/backoff 관리
+- [todo] 관측성: `wb_batch_size`, `wb_commit_ms`, `wb_fail_total`, `wb_pending`, `wb_dlq_total`
+- [todo] 테스트: 로컬 Redis 통합 테스트(XREADGROUP 블로킹/배치·ACK), 이벤트 파싱/매핑 단위 테스트, 펜딩/재시도 시나리오
+- [todo] 운영 가이드: 로컬 검증 절차(HANDOFF 링크)와 장애 폴백 지침 정리
 
 완료 기준(DoD)
-- 이벤트를 Streams로 적재하고 워커가 배치 커밋하여 DB에 반영(샘플 이벤트: presence_heartbeat, typing 등)
+- 이벤트를 Streams로 적재하고 워커가 배치 커밋하여 DB에 반영(샘플: session_login/room_join/leave)
 
 리스크/의존성
 - Redis 장애/지연 시 처리 지연 가능 → 백오프/알람 필요

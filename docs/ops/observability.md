@@ -44,6 +44,13 @@
 - Storage: Postgres op별 쿼리 지연/오류, Redis cmd별 지연/실패 카운트
 - 분산: Pub/Sub publish/subscribe 카운트, subscribe lag, self-echo drop 카운트
 
+## Write-behind 지표(추가)
+- wb_batch_size: 배치 크기(이벤트 수) — Histogram
+- wb_commit_ms: 배치 커밋 시간(ms) — Histogram/Summary
+- wb_fail_total: 배치 실패 건수 — Counter
+- wb_pending: 컨슈머 그룹 pending length — Gauge
+- wb_dlq_total: DLQ로 이동한 이벤트 수 — Counter
+
 ## 메트릭 명세
 - pipeline_latency_ms: 히스토그램 또는 서머리. 단위 ms. 라벨 `stage`(accept|read_frame|decode|auth_check|route_lookup|repo_ops|redis_ops|build_payload|fanout_send|write_frame|total), `server_id` 선택.
 - chat_msgs_in_total: 카운터. 단위 건수. 라벨 `server_id`, `room`(또는 room_id). 입력 파이프라인에 들어온 채팅 메시지 건수.

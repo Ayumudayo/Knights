@@ -3,8 +3,30 @@
 본 문서는 현재까지의 설계 결정과 산출물, 남은 작업, 재개 절차를 한눈에 복원할 수 있도록 정리합니다. 구현은 사용자 승인 전까지 보류 상태입니다(문서만 작성됨).
 
 ## Streams 상태
-- 현재: Streams 인터페이스 준비, 구현 대기
-- 코드 기준: redis-plus-plus 1.3.15(vcpkg) 확인. 기본 Streams API(XGROUP CREATE mkstream, XADD, XREADGROUP, XACK) 는 해당 시그니처로 구현되어 있으며, triplet/버전 변경 시 시그니처 차이에 맞춰 교체 가능.
+- 현재: Redis Streams 클라이언트 인터페이스 구현 완료(redis-plus-plus 1.3.15 기준)
+  - 구현: XGROUP CREATE(mkstream), XADD, XREADGROUP(block/limit), XACK
+  - 파일: `server/src/storage/redis/client.cpp`
+- 통합 상태: 서버에서 생산(XADD) 경로 미연결, 워커는 컨슈머 그룹으로 읽고 ACK까지의 스켈레톤 준비
+  - 파일: `tools/wb_worker/main.cpp` — .env 인식 추가(REDIS_URI, REDIS_STREAM_KEY, WB_GROUP, WB_CONSUMER)
+- 버전/트립릿: vcpkg `x64-windows`, redis-plus-plus 1.3.15. 변경 시 API 시그니처 차이에 맞춘 교체 가능.
+ - 운영 키/필드 상세: `docs/db/write-behind.md` 참고(키, 그룹, 필드, 다음 과제)
+
+### 다음 과제(Streams)
+1) 서버: `WRITE_BEHIND_ENABLED` 시 세션/채팅 이벤트를 `XADD`로 생산
+2) 워커: 배치 커밋(크기/지연/바이트 임계) + Postgres 트랜잭션 처리
+3) 멱등/ACK: DB 커밋 성공 시에만 `XACK`, 고유 제약으로 중복 방지
+4) DLQ: 실패 시 `WB_DLOUT_STREAM`로 이동(원인/리트라이 카운트 포함)
+5) 트림: `REDIS_STREAM_MAXLEN` 사용한 approx trim 정책 적용
+6) 관측성: `wb_batch_size`, `wb_commit_ms`, `wb_fail_total`, `wb_pending` 등 메트릭 추가
+
+### 검증 절차(로컬)
+- Redis 기동 후 `.env` 준비: `REDIS_URI=redis://127.0.0.1:6379`, `REDIS_STREAM_KEY=session_events`, `WB_GROUP=wb_group`, `WB_CONSUMER=wb_consumer`
+- `wb_worker` 실행(.env 자동 로드) → 블로킹 대기 확인
+- 임시 생산 스모크: `redis-cli XADD session_events * type login ts 0 user_id u1 session_id s1` → 워커 로그에 처리/ACK 표시 확인
+- 펜딩 확인: `XPENDING session_events wb_group` → 비어 있음(ACK 완료)
+
+### 비상 운용
+- 장애/성능 이슈 시 `WRITE_BEHIND_ENABLED=0`으로 즉시 비활성화하고 동기 경로에 의존. 추후 재가동 시 재처리 대비.
 
 ## 핵심 결정(요약)
 - SoR(System of Record): PostgreSQL 16, 드라이버는 `libpqxx`(C++17). ORM 미도입, Prepared Statement 사용.

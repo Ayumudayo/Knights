@@ -7,10 +7,16 @@
 #include <vector>
 #include "server/storage/redis/client.hpp"
 #include "server/core/util/log.hpp"
+// .env 로더
+#include "server/core/config/dotenv.hpp"
 
 int main(int, char**) {
     using server::core::log::info;
     try {
+        // .env가 있으면 이를 우선(override=true), 없으면 OS 환경변수 사용
+        if (server::core::config::load_dotenv(".env", true)) {
+            info("Loaded .env for wb_worker (override existing env = true)");
+        }
         const char* ruri = std::getenv("REDIS_URI");
         if (!ruri || !*ruri) {
             std::cerr << "WB worker: REDIS_URI not set" << std::endl;

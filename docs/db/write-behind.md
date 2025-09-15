@@ -2,6 +2,14 @@
 
 목표: 세션에서 발생하는 고빈도 이벤트를 Redis에 임시 저장하고, 주기적으로(또는 임계 도달 시) RDB(PostgreSQL)에 배치 커밋하여 RDB I/O를 줄이고 지연을 낮춘다.
 
+## 현재 상태
+- 라이브러리: redis-plus-plus 1.3.15(vcpkg, x64-windows)
+- 구현: 클라이언트 레벨 Streams API(XGROUP CREATE mkstream, XADD, XREADGROUP(block/limit), XACK) 제공
+  - 파일: `server/src/storage/redis/client.cpp`
+- 워커: `.env` 인식 추가, 컨슈머 그룹으로 읽고 ACK하는 스켈레톤 동작
+  - 파일: `tools/wb_worker/main.cpp`
+- 미연결: 서버의 이벤트 생산(XADD) 경로, Postgres 배치 커밋/멱등 처리/DLQ/메트릭은 이후 단계
+
 ## 패턴 개요
 - 수집(ingest): 서버는 세션 이벤트를 Redis에 적재
   - 권장: Redis Streams (`stream:session_events`) + 컨슈머 그룹
@@ -63,8 +71,41 @@
   - `WRITE_BEHIND_ENABLED`: 기능 토글
   - `REDIS_STREAM_KEY`: 스트림 키 이름
   - `WB_GROUP`: 컨슈머 그룹명(예: `wb_group`)
-  - `WB_CONSUMER`: 소비자 이름 접두 또는 전체명
-  - `REDIS_STREAM_MAXLEN`: XADD 시 approx trim 임계
+- `WB_CONSUMER`: 소비자 이름 접두 또는 전체명
+- `REDIS_STREAM_MAXLEN`: XADD 시 approx trim 임계
+
+## 서버 생산자 경로(계획/적용 위치)
+- 게이트: `WRITE_BEHIND_ENABLED`가 true일 때만 Streams로 XADD 수행. 키는 `REDIS_STREAM_KEY`(기본 `session_events`).
+- 트림: `REDIS_STREAM_MAXLEN`가 설정되어 있으면 `XADD MAXLEN ~ <count>` 적용.
+- 이벤트 매핑(파일/함수 기준):
+  - 로그인 성공 → `session_login`
+    - 파일: `server/src/chat/handlers_login.cpp`
+    - 타이밍: 유저 식별자(UID) 확정 및 상태 갱신 후
+    - 필드 예: `type=session_login`, `ts`, `user_id`, `session_id`, `room_id=lobby`, `payload={ip}`
+  - 룸 입장 → `room_join`
+    - 파일: `server/src/chat/handlers_join.cpp`
+    - 타이밍: `state_.cur_room`/`rooms` 갱신 직후
+    - 필드 예: `type=room_join`, `ts`, `user_id`, `session_id`, `room_id`
+  - 룸 퇴장 → `room_leave`
+    - 파일: `server/src/chat/handlers_leave.cpp`
+    - 타이밍: 방 멤버셋에서 제거 직후(로비 이동 전/후 중 한 지점으로 표준화)
+    - 필드 예: `type=room_leave`, `ts`, `user_id`, `session_id`, `room_id`
+  - 세션 종료 → `session_close`
+    - 파일: `server/src/chat/session_events.cpp`
+    - 타이밍: 상태 정리 및 브로드캐스트 직후
+    - 필드 예: `type=session_close`, `ts`, `user_id?`, `session_id`, `room_id?`
+- 향후 후보(필요 시 도입):
+  - 채팅 송신 이벤트 요약 또는 ACK(`handlers_chat.cpp`) → 메시지 영속화와의 관계를 고려해 선택
+  - 타이핑 시작/중지(`typing_start/stop`) → 저중요 이벤트로 write-behind 1단계 도입에 적합
+- 멱등성: `idempotency_key`(예: `session_id + ts + type`) 또는 Streams ID 기반 처리. DB 고유 제약으로 중복 차단.
+
+## 다음 과제(TODO)
+- 서버 생산자 경로: `WRITE_BEHIND_ENABLED`가 true일 때 주요 이벤트(Session/Presence/Typing/Ack 등) `XADD`로 적재
+- 배치 커밋: 워커에 `WB_BATCH_MAX_EVENTS/bytes/delay` 적용 + Postgres 트랜잭션 커밋 구현
+- 멱등성: `event_id` 또는 `idempotency_key` 기반 고유 제약으로 중복 방지, 성공 시에만 `XACK`
+- DLQ: 재시도 한계 초과 시 `WB_DLOUT_STREAM`으로 이동(원인, retry_count 포함)
+- 트림: `REDIS_STREAM_MAXLEN`에 따른 approx trim 적용(`XADD MAXLEN ~`)
+- 관측성: `wb_batch_size`, `wb_commit_ms`, `wb_fail_total`, `wb_pending`, `wb_dlq_total` 등 메트릭 수집
 
 ## 모니터링
 - 레이턴시 p50/p95, 배치 크기, 커밋율, 실패율, 재시도/펜딩 길이, DLQ 길이
