@@ -205,7 +205,7 @@ void ChatService::broadcast_room(const std::string& room, const std::vector<std:
         }
     }
     for (auto& t : targets) {
-        auto f = (self && (t.get() == self)) ? proto::FLAG_SELF : 0;
+        int f = 0; // 재전파에는 self 플래그 사용 안 함
         t->async_send(proto::MSG_CHAT_BROADCAST, body, f);
     }
 }

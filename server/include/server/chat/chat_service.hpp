@@ -35,6 +35,9 @@ public:
     void on_chat_send(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_session_close(std::shared_ptr<server::core::Session> s);
 
+    // 외부(분산 브로드캐스트 등)에서 준비된 브로드캐스트 payload를 룸에 전파
+    void broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, server::core::Session* self = nullptr);
+
 private:
     using Session = server::core::Session;
     using WeakSession = std::weak_ptr<Session>;
@@ -65,7 +68,6 @@ private:
     // 내부 유틸
     std::string ensure_unique_or_error(Session& s, const std::string& desired);
     std::string gen_temp_name_uuid8();
-    void broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, Session* self = nullptr);
     void send_room_users(Session& s, const std::string& room);
     void send_rooms_list(Session& s);
     void send_snapshot(Session& s, const std::string& current);
