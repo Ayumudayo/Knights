@@ -44,6 +44,11 @@
 - Storage: Postgres op별 쿼리 지연/오류, Redis cmd별 지연/실패 카운트
 - 분산: Pub/Sub publish/subscribe 카운트, subscribe lag, self-echo drop 카운트
 
+## 메트릭 명세
+- pipeline_latency_ms: 히스토그램 또는 서머리. 단위 ms. 라벨 `stage`(accept|read_frame|decode|auth_check|route_lookup|repo_ops|redis_ops|build_payload|fanout_send|write_frame|total), `server_id` 선택.
+- chat_msgs_in_total: 카운터. 단위 건수. 라벨 `server_id`, `room`(또는 room_id). 입력 파이프라인에 들어온 채팅 메시지 건수.
+- chat_msgs_out_total: 카운터. 단위 건수. 라벨 `server_id`, `room`(또는 room_id). 클라이언트로 송신된 채팅 메시지 건수.
+
 ## 게이트웨이/인증 단일 운용 가정
 - Gateway/Auth는 초기 단일(논리) 인스턴스로 운용하되, 헬스체크/드레인/설정/로그/메트릭 표준화로 active/passive 전환 용이성 확보
 - 필수 모니터링: 연결 수, 처리량, 오류율, P99 지연, 시스템 리소스, Redis/DB 헬스체크

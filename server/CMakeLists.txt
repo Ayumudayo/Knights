@@ -14,7 +14,7 @@ target_link_libraries(server_app PRIVATE server_core wire_proto server_storage_p
 # protobuf 생성 헤더 경로 추가
 target_include_directories(server_app PRIVATE ${CMAKE_BINARY_DIR}/proto)
 
-# vcpkg DLL 자동 복사
+# vcpkg DLL 자동 복사(Windows)
 if(WIN32)
     add_custom_command(TARGET server_app POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
@@ -24,32 +24,23 @@ if(WIN32)
         $<TARGET_FILE_DIR:server_app>)
 endif()
 
-# Enforce libpqxx as a hard requirement
-if (NOT TARGET libpqxx::pqxx AND NOT TARGET unofficial::libpqxx::libpqxx)
-    message(FATAL_ERROR "libpqxx not found — PostgreSQL storage requires libpqxx")
-endif()
-
-# Postgres storage adapter (skeleton)
+# Postgres storage adapter
 add_library(server_storage_pg STATIC
     src/storage/postgres/connection_pool.cpp
 )
 target_include_directories(server_storage_pg PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(server_storage_pg PUBLIC server_core)
 
-# Try to find libpqxx (vcpkg may export either libpqxx::pqxx or unofficial::libpqxx::libpqxx)
+# libpqxx 필수: vcpkg가 libpqxx::pqxx 또는 unofficial::libpqxx::libpqxx를 제공
 find_package(libpqxx CONFIG QUIET)
-if (libpqxx_FOUND)
-    if (TARGET libpqxx::pqxx)
-        target_link_libraries(server_storage_pg PUBLIC libpqxx::pqxx)
-        
-    endif()
+if (libpqxx_FOUND AND TARGET libpqxx::pqxx)
+    target_link_libraries(server_storage_pg PUBLIC libpqxx::pqxx)
 else()
     find_package(unofficial-libpqxx CONFIG QUIET)
     if (unofficial-libpqxx_FOUND AND TARGET unofficial::libpqxx::libpqxx)
         target_link_libraries(server_storage_pg PUBLIC unofficial::libpqxx::libpqxx)
-        
     else()
-        message(WARNING "libpqxx not found — PG adapter will stay as stub (no real DB ops)")
+        message(FATAL_ERROR "libpqxx not found — PostgreSQL storage requires libpqxx")
     endif()
 endif()
 
@@ -76,5 +67,6 @@ elseif (TARGET redis++_static)
     target_link_libraries(server_storage_redis PUBLIC redis++_static)
     target_compile_definitions(server_storage_redis PUBLIC HAVE_REDIS_PLUS_PLUS)
 else()
-    message(WARNING "redis-plus-plus not found — Redis client stays as stub")
+    message(WARNING "redis-plus-plus not found ? Redis client stays as stub")
 endif()
+

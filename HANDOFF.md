@@ -2,6 +2,10 @@
 
 본 문서는 현재까지의 설계 결정과 산출물, 남은 작업, 재개 절차를 한눈에 복원할 수 있도록 정리합니다. 구현은 사용자 승인 전까지 보류 상태입니다(문서만 작성됨).
 
+## Streams 상태
+- 현재: Streams 인터페이스 준비, 구현 대기
+- 코드 기준: redis-plus-plus 1.3.15(vcpkg) 확인. 기본 Streams API(XGROUP CREATE mkstream, XADD, XREADGROUP, XACK) 는 해당 시그니처로 구현되어 있으며, triplet/버전 변경 시 시그니처 차이에 맞춰 교체 가능.
+
 ## 핵심 결정(요약)
 - SoR(System of Record): PostgreSQL 16, 드라이버는 `libpqxx`(C++17). ORM 미도입, Prepared Statement 사용.
 - 캐시/실시간 가속: Redis 사용(세션/프레즌스/최근 메시지/팬아웃). 장애 시 Postgres 폴백 가능.
@@ -118,6 +122,7 @@
 - 빌드 상태: server_app, storage_pg/redis, migrations_runner, wb_worker 모두 빌드 성공
 - 문서 갱신: ROADMAP(마일스톤/DoD/진행 요약), PROTOCOL(인증/브로드캐스트 규칙), REDIS 전략(채널 명세), OBSERVABILITY(지표/파이프라인)
 - 향후 작업: Pub/Sub 구독 + echo 필터(envelope/gateway_id), Streams 기반 write-behind 구현, 스냅샷 정합성 보강
+ - 분산 브로드캐스트: USE_REDIS_PUBSUB!=0일 때 `fanout:room:*` 패턴 구독 시작. Envelope `gw={gateway_id}\n` + Protobuf 바이트. 로컬 gw와 동일하면 드롭 후, 룸을 채널명에서 파싱하여 재브로드캐스트.
  - Postgres 어댑터: libpqxx 필수 의존으로 강제(CMake), 코드에서 HAVE_LIBPQXX 분기 제거하고 pqxx 단일 경로로 정리
 - Postgres 빌드 오류 수정(현재 info.txt 기준)
   - `PgMembershipRepository` 누락으로 인한 컴파일 오류(C2079, C2439) 해결: 구현 추가 확인

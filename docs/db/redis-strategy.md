@@ -80,3 +80,6 @@
 - PRESENCE_CLEAN_ON_START (기본 0): 부팅 시 prefix + presence:room:* 정리(개발/단일 인스턴스 사용 권장)
 
 
+
+- Envelope: gw={gateway_id}\n + Protobuf ChatBroadcast bytes. 수신 시 gw가 로컬과 같으면 드롭.
+- 설정: GATEWAY_ID(브릿지 식별자) 추가, 미설정 시 gw-default.

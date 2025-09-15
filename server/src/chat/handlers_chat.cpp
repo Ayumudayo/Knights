@@ -9,7 +9,8 @@
 // storage
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/repositories.hpp"
-#include "server/storage/redis/client.hpp"\n#include <vector>
+#include "server/storage/redis/client.hpp"
+#include <vector>
 #include <cstdlib>
 
 using namespace server::core;

@@ -51,6 +51,21 @@
 - `WB_WORKER_CONCURRENCY`, `WB_RETRY_BACKOFF_MS`
 - `WB_DLOUT_STREAM=session_events_dlq`(옵션)
 
+## Streams 운영 키/그룹/필드 정리
+- 생산 키: `session_events`(=`REDIS_STREAM_KEY`)
+- 소비 키: `session_events`(동일 스트림, 컨슈머 그룹 기반)
+- 그룹: `wb_group`(예시, 설정 키 `WB_GROUP`로 주입)
+- 컨슈머: 워커 인스턴스 식별자(예: `host-1:pid`), 설정 키 `WB_CONSUMER`
+- 필드 집합(권장 최소):
+  - `type`(예: `session_login` 등), `ts`, `user_id`, `session_id`, `room_id?`, `payload`
+  - 멱등 보강 시: `idempotency_key` 포함 고려
+- 기타 운영 키:
+  - `WRITE_BEHIND_ENABLED`: 기능 토글
+  - `REDIS_STREAM_KEY`: 스트림 키 이름
+  - `WB_GROUP`: 컨슈머 그룹명(예: `wb_group`)
+  - `WB_CONSUMER`: 소비자 이름 접두 또는 전체명
+  - `REDIS_STREAM_MAXLEN`: XADD 시 approx trim 임계
+
 ## 모니터링
 - 레이턴시 p50/p95, 배치 크기, 커밋율, 실패율, 재시도/펜딩 길이, DLQ 길이
 
@@ -63,4 +78,3 @@
 ## 트레이드오프
 - 장점: RDB 부하 감소, 지연 개선, 스파이크 흡수
 - 단점: 최종적 일관성, 운영 복잡도 증가, Redis 의존 강화 → 장애 대비 폴백/알람 필수
-

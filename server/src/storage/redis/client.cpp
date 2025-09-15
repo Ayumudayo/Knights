@@ -5,6 +5,7 @@
 #include <thread>
 #include <atomic>
 #include <functional>
+#include <initializer_list>
 
 #if defined(HAVE_REDIS_PLUS_PLUS)
 #include <sw/redis++/redis++.h>
@@ -95,7 +96,87 @@ public:
         } catch (...) {}
     }
 
-    bool xgroup_create_mkstream(const std::string& /*key*/, const std::string& /*group*/) override { return true; }\n\n    bool xadd(const std::string& /*key*/, const std::vector<std::pair<std::string, std::string>>& /*fields*/, std::string* /*out_id*/) override { return true; }\n\n    bool xreadgroup(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*consumer*/, long long /*block_ms*/, std::size_t /*count*/, std::vector<StreamEntry>& /*out*/) override { return true; }\n\n    bool xack(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*id*/) override { return true; }\n
+    // Streams 구현 (redis-plus-plus 1.3.15 기준)
+    bool xgroup_create_mkstream(const std::string& key, const std::string& group) override {
+        try {
+            // '$'로 그룹 생성하며 mkstream=true. 이미 존재 시 ReplyError(BUSYGROUP) 무시.
+            redis_->xgroup_create(key, group, "$", true);
+            return true;
+        } catch (const sw::redis::ReplyError& e) {
+            // 그룹 존재 시 성공으로 간주
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis XGROUP CREATE failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis XGROUP CREATE failed: unknown");
+            return false;
+        }
+    }
+
+    bool xadd(const std::string& key,
+              const std::vector<std::pair<std::string, std::string>>& fields,
+              std::string* out_id) override {
+        try {
+            const std::string id = redis_->xadd(key, "*", fields.begin(), fields.end());
+            if (out_id) *out_id = id;
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis XADD failed: ") + e.what());
+            return false;
+        } catch (...) { server::core::log::warn("Redis XADD failed: unknown"); return false; }
+    }
+
+    bool xreadgroup(const std::string& key,
+                    const std::string& group,
+                    const std::string& consumer,
+                    long long block_ms,
+                    std::size_t count,
+                    std::vector<StreamEntry>& out) override {
+        try {
+            // 결과 컨테이너: [[ key, [ [id, [field, val]...], ... ] ]]
+            using EntryFields = std::vector<std::pair<std::string, std::string>>;
+            using IdAndFields = std::vector<std::pair<std::string, EntryFields>>;
+            using StreamArr = std::vector<std::pair<std::string, IdAndFields>>;
+            StreamArr arr;
+
+            if (block_ms > 0) {
+                redis_->xreadgroup(group, consumer, key, ">", std::chrono::milliseconds(block_ms), static_cast<long long>(count), false,
+                                   std::back_inserter(arr));
+            } else {
+                redis_->xreadgroup(group, consumer, key, ">", static_cast<long long>(count), false,
+                                   std::back_inserter(arr));
+            }
+
+            out.clear();
+            if (arr.empty()) return true; // 데이터 없음
+
+            // 단일 key만 읽으므로 첫 요소만 사용
+            const auto& items = arr.front().second;
+            out.reserve(items.size());
+            for (const auto& id_fields : items) {
+                StreamEntry e;
+                e.id = id_fields.first;
+                e.fields = id_fields.second;
+                out.emplace_back(std::move(e));
+            }
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis XREADGROUP failed: ") + e.what());
+            return false;
+        } catch (...) { server::core::log::warn("Redis XREADGROUP failed: unknown"); return false; }
+    }
+
+    bool xack(const std::string& key, const std::string& group, const std::string& id) override {
+        try {
+            long long n = redis_->xack(key, group, std::initializer_list<std::string>{id});
+            return n > 0;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis XACK failed: ") + e.what());
+            return false;
+        } catch (...) { server::core::log::warn("Redis XACK failed: unknown"); return false; }
+    }
+
     bool del(const std::string& key) override {
         try { redis_->del(key); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis DEL failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis DEL failed: unknown"); return false; }
     }
@@ -126,7 +207,9 @@ private:
     std::thread sub_thread_;
     std::atomic<bool> sub_running_{false};
 };
-#else
+#endif
+
+// 항상 사용 가능한 안전한 폴백 Stub 구현
 class RedisClientStub final : public IRedisClient {
 public:
     explicit RedisClientStub(std::string uri, Options opts)
@@ -140,8 +223,28 @@ public:
     bool start_psubscribe(const std::string& pattern, std::function<void(const std::string&, const std::string&)> on_message) override { (void)pattern; (void)on_message; return true; }
     void stop_psubscribe() override {}
     bool xgroup_create_mkstream(const std::string& key, const std::string& group) override { (void)key; (void)group; return true; }
-    bool xadd(const std::string& key, const std::vector<std::pair<std::string, std::string>>& fields, std::string* out_id) override { (void)key; (void)fields; (void)out_id; return true; }
-    bool xreadgroup(const std::string& key, const std::string& group, const std::string& consumer, long long block_ms, std::size_t count, std::vector<StreamEntry>& out) override { (void)key; (void)group; (void)consumer; (void)block_ms; (void)count; (void)out; return true; }
-    bool xack(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*id*/) override { return true; }\n
+    bool xadd(const std::string& key, const std::vector<std::pair<std::string, std::string>>& fields, std::string* out_id) override { (void)key; (void)fields; if (out_id) *out_id = "0-0"; return true; }
+    bool xreadgroup(const std::string& key, const std::string& group, const std::string& consumer, long long block_ms, std::size_t count, std::vector<StreamEntry>& out) override { (void)key; (void)group; (void)consumer; (void)block_ms; (void)count; out.clear(); return true; }
+    bool xack(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*id*/) override { return true; }
+    bool del(const std::string& key) override { (void)key; return true; }
+    bool scan_del(const std::string& pattern) override { (void)pattern; return true; }
+private:
+    std::string uri_;
+    Options opts_;
+};
+
+std::shared_ptr<IRedisClient> make_redis_client(const std::string& uri, const Options& opts) {
+#if defined(HAVE_REDIS_PLUS_PLUS)
+    try {
+        return std::make_shared<RedisClientImpl>(uri, opts);
+    } catch (const std::exception& e) {
+        server::core::log::warn(std::string("Failed to create Redis client, fallback to stub: ") + e.what());
+        return std::make_shared<RedisClientStub>(uri, opts);
+    }
+#else
+    return std::make_shared<RedisClientStub>(uri, opts);
+#endif
+}
+
 } // namespace server::storage::redis
 
