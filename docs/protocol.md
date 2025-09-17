@@ -49,6 +49,11 @@
 - msg_id 예약 구간을 모듈별로 분배(예: 0x0000~0x0FFF: 코어, 0x1000~: 게임).
 - 스키마 변경 시: 버전 필드 추가 또는 새로운 msg_id 도입으로 하위 호환 유지.
 
+## 브로드캐스트 Envelope 규칙
+- Redis Pub/Sub 사용 시 메시지는 `gw=<gateway_id>` + `\n` + Protobuf ChatBroadcast payload로 구성한다.
+- 수신 측은 환경 변수 `GATEWAY_ID`와 비교해 동일한 식별자의 메시지는 self-echo로 드롭한다.
+- `GATEWAY_ID`를 설정하지 않으면 기본값 `gw-default`가 적용되므로, 멀티 게이트웨이 운영 시 고유 값을 부여해야 한다.
+
 ---
 
 ## 내부 프로토콜(서비스 간)
@@ -58,7 +63,8 @@
   - Auth: `Login`, `ValidateToken`, `RefreshToken`.
   - Chat: `JoinRoom`, `LeaveRoom`, `SendMessage`, `ListRooms`.
   - Presence: `SetOnline`, `SetOffline`, `GetPresence`.
-\n+### 채팅 브로드캐스트 규칙(추가)
+
+### 채팅 브로드캐스트 규칙(추가)
 - 시스템 메시지의 sender는 "(system)"을 사용한다.
 - `sender_sid`는 시스템 메시지일 경우 0.
 - `ts_ms`는 UTC epoch milliseconds.
@@ -119,7 +125,6 @@
   - 서버 구현에서 과거 10바이트로 인코딩하던 버그를 수정(힙 오염/오버리드 예방).
 - `MSG_CHAT_BROADCAST`에 `u32 sender_sid`(cap 지원 시) + `u64 ts_ms` 포함.
 - `MSG_STATE_SNAPSHOT(0x0200)`/`MSG_ROOM_USERS(0x0201)` 도입.
-
 
 ## 인증 메시지(초안)
 - MSG_REGISTER_REQ/RES: user, pw(평문 금지: pre-hash+salt 합의 필요)

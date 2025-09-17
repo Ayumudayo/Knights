@@ -71,6 +71,12 @@ limits:
 3) 설정 파일(YAML)
 4) 내장 기본값
 
+## 주요 환경 변수(샘플)
+- `DB_URI`: Postgres 연결 문자열
+- `REDIS_URI`: Redis 연결 URI
+- `USE_REDIS_PUBSUB`: 0이 아니면 Pub/Sub 발행 활성화
+- `GATEWAY_ID`: 게이트웨이 식별자(기본 `gw-default`, 멀티 인스턴스 시 고유값 권장)
+
 ## 검증/스키마(요약)
 - 타입/범위 검증: 포트(1~65535), 타임아웃/인터벌(>0), 길이/워터마크(64KB 이하 권장), 레이트(>=0).
 - 상호 제약: `send_queue_low_watermark < high_watermark <= send_queue_max`.

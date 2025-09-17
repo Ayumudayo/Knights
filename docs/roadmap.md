@@ -76,10 +76,10 @@
 
 ---
 
-## 4) 분산 브로드캐스트 — [ready]
+## 4) 분산 브로드캐스트 — [wip]
 - [done] 발행(publish): `USE_REDIS_PUBSUB!=0`일 때 `prefix + fanout:room:{room_name}`로 Protobuf 바이트 publish
 - [todo] 구독(subscribe): 구독 스레드/태스크에서 수신 → 로컬 세션에 재브로드캐스트
-- [todo] self-echo 방지: envelope에 `gateway_id`, `origin` 추가 및 필터링
+- [done] self-echo 방지: envelope에 `gateway_id`, `origin` 추가 및 필터링
 - [todo] 실패/재시도: Pub/Sub 단절/재연결 로직, backoff
 
 완료 기준(DoD)
@@ -115,7 +115,7 @@
 ## 진행 현황(요약)
 - DB 마이그레이션 러너 구현 및 작동 확인(dry-run/적용)
 - Redis Presence: 룸 SET(SADD/SREM), 유저 TTL(SETEX), 재시작 최소 복원 옵션
-- 분산 브로드캐스트(1차): Pub/Sub 발행 옵션(채널 `fanout:room:{room_name}`)
+- 분산 브로드캐스트: Pub/Sub 발행 + self-echo 방지 envelope(`gw=<id>`) 구현
 - Write-behind 워커: 스켈레톤 추가 및 빌드 통합
 - 문서: ROADMAP, HANDOFF, PROTOCOL, REDIS 전략, OBSERVABILITY 보강
 
@@ -137,6 +137,7 @@
 - Presence: `PRESENCE_TTL_SEC`(기본 30), `PRESENCE_CLEAN_ON_START`
 - Redis 키/채널 접두사: `REDIS_CHANNEL_PREFIX`
 - 분산 브로드캐스트: `USE_REDIS_PUBSUB`
+- 게이트웨이 식별자: `GATEWAY_ID` (기본 `gw-default`, 인스턴스별 고유값 권장)
 - Write-behind: `WRITE_BEHIND_ENABLED`, `REDIS_STREAM_KEY`, `REDIS_STREAM_MAXLEN`, `WB_*`
 - 마이그레이션 러너: `DB_URI`
 

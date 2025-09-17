@@ -71,15 +71,13 @@
 ## Presence/PubSub 업데이트(추가)
 - User Presence: presence:user:{user_id} 키에 1을 SETEX로 저장하여 TTL로 온라인 상태 유지(기본 PRESENCE_TTL_SEC=30). 로그인/채팅 시 갱신.
 - Room Presence: 입장 시 SADD presence:room:{room_id} {user_id}, 퇴장/세션종료 시 SREM 처리.
-- Pub/Sub 채널: anout:room:{room_name}. USE_REDIS_PUBSUB!=0일 때 Protobuf 바이트를 그대로 publish. 추후 self-echo 방지(envelope + gateway_id) 보강 예정.
+- Pub/Sub 채널: fanout:room:{room_name}. `USE_REDIS_PUBSUB`!=0일 때 Protobuf 바이트를 그대로 publish 하되, envelope(`gw={gateway_id}` + Protobuf bytes)로 self-echo를 필터링한다.
 
 
 ## 운영/설정 키(추가)
 - PRESENCE_TTL_SEC (기본 30): presence:user:{user_id} TTL
 - USE_REDIS_PUBSUB (기본 0): 0이 아니면 Pub/Sub 발행 활성화
 - PRESENCE_CLEAN_ON_START (기본 0): 부팅 시 prefix + presence:room:* 정리(개발/단일 인스턴스 사용 권장)
-
-
 
 - Envelope: gw={gateway_id}\n + Protobuf ChatBroadcast bytes. 수신 시 gw가 로컬과 같으면 드롭.
 - 설정: GATEWAY_ID(브릿지 식별자) 추가, 미설정 시 gw-default.
