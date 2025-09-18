@@ -555,3 +555,6 @@ log.txt
 
 # Env
 .env
+
+# AGENTS
+AGENTS.md

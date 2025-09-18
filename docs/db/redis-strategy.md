@@ -68,16 +68,15 @@
 - 성능/지연 최적화: Redis (세션/프레즌스/캐시/팬아웃)
 - 메시지 영속: Postgres, 브로드캐스트: Redis Pub/Sub → 필요 시 Streams
 
-## Presence/PubSub 업데이트(추가)
-- User Presence: presence:user:{user_id} 키에 1을 SETEX로 저장하여 TTL로 온라인 상태 유지(기본 PRESENCE_TTL_SEC=30). 로그인/채팅 시 갱신.
-- Room Presence: 입장 시 SADD presence:room:{room_id} {user_id}, 퇴장/세션종료 시 SREM 처리.
-- Pub/Sub 채널: fanout:room:{room_name}. `USE_REDIS_PUBSUB`!=0일 때 Protobuf 바이트를 그대로 publish 하되, envelope(`gw={gateway_id}` + Protobuf bytes)로 self-echo를 필터링한다.
+## Presence/PubSub 업데이트
+- User Presence: `presence:user:{user_id}` 키에 1을 SETEX로 저장하여 TTL로 온라인 상태 유지(기본 `PRESENCE_TTL_SEC=30`). 로그인/채팅 시 갱신한다.
+- Room Presence: 입장 시 SADD `presence:room:{room_id}` `{user_id}`, 퇴장/세션 종료 시 SREM 처리한다.
+- Pub/Sub 채널: `fanout:room:{room_name}`. `USE_REDIS_PUBSUB!=0`이면 Protobuf ChatBroadcast payload를 publish하며 Envelope(`gw=<gateway_id>\n<payload>`) 규칙을 따른다.
+- self-echo 필터: 구독 측은 로컬 `GATEWAY_ID`와 비교해 동일한 gateway에서 온 메시지를 드롭한다.
+- `GATEWAY_ID`를 설정하지 않으면 기본값 `gw-default`가 적용되므로, 멀티 게이트웨이 환경에서는 고유 값을 지정한다.
 
-
-## 운영/설정 키(추가)
-- PRESENCE_TTL_SEC (기본 30): presence:user:{user_id} TTL
-- USE_REDIS_PUBSUB (기본 0): 0이 아니면 Pub/Sub 발행 활성화
-- PRESENCE_CLEAN_ON_START (기본 0): 부팅 시 prefix + presence:room:* 정리(개발/단일 인스턴스 사용 권장)
-
-- Envelope: gw={gateway_id}\n + Protobuf ChatBroadcast bytes. 수신 시 gw가 로컬과 같으면 드롭.
-- 설정: GATEWAY_ID(브릿지 식별자) 추가, 미설정 시 gw-default.
+## 운영/설정 키
+- `PRESENCE_TTL_SEC` (기본 30): `presence:user:{user_id}` TTL
+- `USE_REDIS_PUBSUB` (기본 0): 0이 아니면 Pub/Sub 발행 활성화
+- `PRESENCE_CLEAN_ON_START` (기본 0): 부팅 시 `presence:room:*` 정리(개발/단일 인스턴스 사용 권장)
+- `GATEWAY_ID`: Pub/Sub Envelope에 삽입할 Gateway 식별자, 미설정 시 `gw-default`.

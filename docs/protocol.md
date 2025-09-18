@@ -53,6 +53,9 @@
 - Redis Pub/Sub 사용 시 메시지는 `gw=<gateway_id>` + `\n` + Protobuf ChatBroadcast payload로 구성한다.
 - 수신 측은 환경 변수 `GATEWAY_ID`와 비교해 동일한 식별자의 메시지는 self-echo로 드롭한다.
 - `GATEWAY_ID`를 설정하지 않으면 기본값 `gw-default`가 적용되므로, 멀티 게이트웨이 운영 시 고유 값을 부여해야 한다.
+- `sender_sid`는 시스템 메시지일 경우 `0`으로 채운다.
+- `ts_ms`는 UTC epoch milliseconds 기준으로 채운다.
+- 공통 메타데이터: `trace_id`, `correlation_id`, `tenant`, `user_id`.
 
 ---
 
@@ -64,16 +67,12 @@
   - Chat: `JoinRoom`, `LeaveRoom`, `SendMessage`, `ListRooms`.
   - Presence: `SetOnline`, `SetOffline`, `GetPresence`.
 
-### 채팅 브로드캐스트 규칙(추가)
-- 시스템 메시지의 sender는 "(system)"을 사용한다.
-- `sender_sid`는 시스템 메시지일 경우 0.
-- `ts_ms`는 UTC epoch milliseconds.
-- 공통 메타데이터: `trace_id`, `correlation_id`, `tenant`, `user_id`.
 
 ### 이벤트(Event Bus)
 - 주제(topic) 설계: `<service>.events.<noun>`.
 - 메시지 예시: `chat.events.message` { room_id, sender_id, text, ts, correlation_id }.
 - 멱등성 키: `idempotency_key`로 중복 처리 방지.
+- 채팅 브로드캐스트 구독 경로는 Pub/Sub Envelope 규칙을 공유하며 self-echo 필터를 반드시 적용한다.
 
 ### 보안
 - mTLS + 서비스 계정. JWT는 헤더에 전파, 서비스는 역할 기반 접근제어(RBAC).
@@ -89,9 +88,10 @@
   - `uint32 epoch_high32`(서버 UTC ms 상위 32비트; 클라가 수신 헤더의 `utc_ts_ms32`와 결합해 64비트 시각 재구성 가능)
 
 
-  - 0x0007: INVALID_PAYLOAD
-  - 0x0100: NAME_TAKEN(닉네임 중복)
-  - 필요 시 확장: MALFORMED_FRAME, FORBIDDEN, RATE_LIMITED, INTERNAL_ERROR 등은 도입 시 코드 예약 후 사용
+### MSG_ERR 코드 예약
+- 0x0007: INVALID_PAYLOAD
+- 0x0100: NAME_TAKEN(닉네임 중복)
+- 필요 시 확장: MALFORMED_FRAME, FORBIDDEN, RATE_LIMITED, INTERNAL_ERROR 등은 도입 시 코드 예약 후 사용
 
 ## 문자열/인코딩 규칙(중요)
 - 모든 문자열은 UTF-8로 인코딩한다(서버/클라 모두).
@@ -126,10 +126,10 @@
 - `MSG_CHAT_BROADCAST`에 `u32 sender_sid`(cap 지원 시) + `u64 ts_ms` 포함.
 - `MSG_STATE_SNAPSHOT(0x0200)`/`MSG_ROOM_USERS(0x0201)` 도입.
 
+
 ## 인증 메시지(초안)
 - MSG_REGISTER_REQ/RES: user, pw(평문 금지: pre-hash+salt 합의 필요)
 - MSG_LOGIN_REQ/RES: user + pw → session_id/token, 브루트포스 방지 가이드
 - MSG_REFRESH_REQ/RES: refresh_token → new session/token
 - MSG_LOGOUT_REQ: 세션 종료
 - 보안: TLS 강제, 평문 pw 금지, 레이트 리밋, 잠금 정책
-

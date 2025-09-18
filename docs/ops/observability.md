@@ -6,7 +6,7 @@
 - 지연(Histogram/Summary): `pipeline_latency_ms{stage}`, `broadcast_fanout_ms{server_id,room}`,
   `db_query_ms{op}`, `redis_op_ms{cmd}`
 - 동시성(Gauge): `connections{server_id}`, `sessions_active{server_id}`, `rooms_active{server_id}`, `room_members{room}`
-- 큐/부하(Gauge/Counter): `job_queue_depth{type}`, `cpu_utilization`, `mem_bytes`, `sockets_open`
+- 큐/부하(Gauge/Counter): `job_queue_depth{type}`, `cpu_utilization`, `mem_bytes`, `sockets_open`, `send_queue_bytes{server_id}`
 - 오류(Counter): `errors_total{type,stage}`, `disconnects_total{reason}`
 
 ## 파이프라인 단계(지연 분해)
@@ -28,7 +28,7 @@
 ## 복수 채팅 서버 지표
 - 서버 단위: 처리량/지연/오류율/연결 수
 - 룸 단위: `msgs_per_sec`, 멤버 수, fanout 지연 분포
-- 분산 브로드캐스트: `publish_total`, `subscribe_total`, `subscribe_lag_ms`, `duplicates_dropped_total`
+- 분산 브로드캐스트: `publish_total`, `subscribe_total`, `subscribe_lag_ms`, `duplicates_dropped_total`, `self_echo_drop_total`
 
 ## 수집/표시
 - Prometheus pull 수집, Grafana 대시보드 구성

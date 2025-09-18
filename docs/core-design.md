@@ -75,6 +75,7 @@ public:
 ### 송신 큐 워터마크
 - low/high watermark를 두어 배압을 점진적으로 적용.
 - high 초과: 세션 종료 또는 저우선 메시지 드롭 정책 적용.
+- `queued_bytes` 카운터는 write 완료 시 감소시켜 실제 소켓 송신 상태와 워터마크 판정이 일치하도록 유지한다.
 
 ## 에러 모델/로깅
 - 오류 표준: `boost::system::error_code` 사용. 범주: network, parse, policy, internal.
@@ -83,7 +84,7 @@ public:
 
 ### 메트릭 세부
 - net.accept.success/fail, net.accept.active_sessions
-- net.recv.bytes, net.send.bytes, net.send.queue_len
+- net.recv.bytes, net.send.bytes, net.send.queue_len, net.send.queued_bytes
 - net.read.timeout, net.write.timeout, net.heartbeat.miss
 - dispatch.missing_handler, dispatch.handler_error
 

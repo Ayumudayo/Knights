@@ -54,19 +54,21 @@
 ---
 
 ## 3) Write-behind(경량 이벤트) — [wip]
+### 구현 전 준비
 - [done] Redis Streams 클라이언트 구현(XGROUP/XADD/XREADGROUP/XACK) — `server/src/storage/redis/client.cpp`
 - [done] 워커 스켈레톤 + .env 인식 — `tools/wb_worker/main.cpp`
 - [done] 키/옵션/운영 문서 정리 — `docs/db/write-behind.md`
-- [todo] Ingest(서버): `WRITE_BEHIND_ENABLED`가 true일 때 XADD로 생산
-  - 로그인 성공 → `server/src/chat/handlers_login.cpp`
-  - 룸 입장/퇴장 → `server/src/chat/handlers_join.cpp`, `server/src/chat/handlers_leave.cpp`
-  - 세션 종료 → `server/src/chat/session_events.cpp`
-  - 키: `REDIS_STREAM_KEY`(기본 `session_events`), 트림: `REDIS_STREAM_MAXLEN`
-- [todo] 배치 커밋(워커): `WB_BATCH_MAX_EVENTS/BYTES/DELAY_MS` 반영, Postgres 트랜잭션 커밋, 멱등 처리
-- [todo] DLQ/재시도: `WB_DLOUT_STREAM`로 이동, retry/backoff 관리
-- [todo] 관측성: `wb_batch_size`, `wb_commit_ms`, `wb_fail_total`, `wb_pending`, `wb_dlq_total`
-- [todo] 테스트: 로컬 Redis 통합 테스트(XREADGROUP 블로킹/배치·ACK), 이벤트 파싱/매핑 단위 테스트, 펜딩/재시도 시나리오
-- [todo] 운영 가이드: 로컬 검증 절차(HANDOFF 링크)와 장애 폴백 지침 정리
+- [todo] 이벤트 필드/트림 정책 최종 확정(`session_login`, `room_join`, `room_leave`, `session_close`) 및 구성 키 기본값 동기화
+
+### 구현
+- [todo] 서버 Ingest 경로: `WRITE_BEHIND_ENABLED` 활성 시 XADD 생산(handlers_login/handlers_join/handlers_leave/session_events) + MAXLEN 적용
+- [todo] 워커 배치 커밋: `WB_BATCH_MAX_EVENTS/BYTES/DELAY_MS` 반영, Postgres 트랜잭션, 멱등 처리, ACK 플로우 확정
+- [todo] DLQ/재시도 경로: `WB_DLOUT_STREAM`, 재시도 백오프, 치명 오류 분기 구현
+
+### 구현 후/운영
+- [todo] 관측성 지표 및 알람: `wb_batch_size`, `wb_commit_ms`, `wb_fail_total`, `wb_pending`, `wb_dlq_total` 수집·대시보드화
+- [todo] 검증: 로컬 Redis 통합 테스트(XREADGROUP 블로킹/배치·ACK), 펜딩/재시도 시나리오, 이벤트 파싱 단위 테스트
+- [todo] 운영 가이드: 핸드오프 절차, 장애 폴백 전략, 배포 체크리스트 문서화
 
 완료 기준(DoD)
 - 이벤트를 Streams로 적재하고 워커가 배치 커밋하여 DB에 반영(샘플: session_login/room_join/leave)
@@ -77,10 +79,19 @@
 ---
 
 ## 4) 분산 브로드캐스트 — [wip]
+### 구현 전 준비
 - [done] 발행(publish): `USE_REDIS_PUBSUB!=0`일 때 `prefix + fanout:room:{room_name}`로 Protobuf 바이트 publish
-- [todo] 구독(subscribe): 구독 스레드/태스크에서 수신 → 로컬 세션에 재브로드캐스트
-- [done] self-echo 방지: envelope에 `gateway_id`, `origin` 추가 및 필터링
-- [todo] 실패/재시도: Pub/Sub 단절/재연결 로직, backoff
+- [done] self-echo 방지: Envelope에 `gw=<gateway_id>\n<payload>` 적용, 로컬 `GATEWAY_ID`와 일치하면 드롭
+- [todo] 구독 루프 설계: reconnect/backoff 정책, shutdown 처리, 멀티 스레드 안전성 정리
+
+### 구현
+- [todo] 구독(subscribe) 태스크: Redis Subscriber 연결, payload 파싱, 세션 fanout 연동
+- [todo] 장애 복구 흐름: 재연결(backoff), 누락 감지, 경고 로그/알람 수준 정의
+- [todo] 일관성 검증: 멀티 게이트웨이 환경 통합 테스트 스크립트 및 시뮬레이션 작성
+
+### 구현 후/운영
+- [todo] 관측성: `publish_total`, `subscribe_total`, `subscribe_lag_ms`, `self_echo_drop_total` 지표 수집 및 경보 설정
+- [todo] 운영 가이드: GATEWAY_ID 배포 체크리스트, Pub/Sub 장애 시 폴백 전략 정리
 
 완료 기준(DoD)
 - 멀티 인스턴스 간 동일 룸 메시지가 일관되게 팬아웃, self-echo로 인한 중복 수신 없음
@@ -112,10 +123,20 @@
 
 ---
 
+## 우선순위 제안 (개발자 메모)
+1) Pub/Sub 구독 태스크 구현 — 브리지 핵심 기능 미완성 상태 해소, 멀티 게이트웨이 실동작 확보.
+2) Pub/Sub 장애 복구/백오프 — Redis 단절 시 메시지 손실 방지를 위한 필수 내구성 확보.
+3) 멀티 게이트웨이 통합 테스트 — 구현 완료 즉시 회귀 지표 마련, 이후 변경 안정성 확보.
+4) Write-behind 서버 Ingest — Streams 생산이 있어야 워커/커밋 단계 착수 가능, 플로우 기점.
+5) 워커 배치 커밋/멱등 처리 — DB 반영이 없으면 write-behind 가치가 없으므로 인접 단계에서 이어가기.
+6) DLQ/재시도 경로 — 실패 시 메시지 유실·중단을 막는 안정성 핵심, 커밋 구현 직후 진행.
+7) 두 기능군의 관측성 지표 — 운영 감시/튜닝을 위한 최소 계측, 기능 구현 완료 직후 시행.
+8) 운영 가이드/런북 — 상위 기능과 계측이 갖춰진 후 배포·장애 대응 절차 문서화.
+
 ## 진행 현황(요약)
 - DB 마이그레이션 러너 구현 및 작동 확인(dry-run/적용)
 - Redis Presence: 룸 SET(SADD/SREM), 유저 TTL(SETEX), 재시작 최소 복원 옵션
-- 분산 브로드캐스트: Pub/Sub 발행 + self-echo 방지 envelope(`gw=<id>`) 구현
+- 분산 브로드캐스트(1차): Pub/Sub 발행 옵션(채널 `fanout:room:{room_name}`) + Envelope(`gw=<gateway_id>\n<payload>`) self-echo 필터 적용
 - Write-behind 워커: 스켈레톤 추가 및 빌드 통합
 - 문서: ROADMAP, HANDOFF, PROTOCOL, REDIS 전략, OBSERVABILITY 보강
 
@@ -136,8 +157,7 @@
 ## 환경변수/설정(요약)
 - Presence: `PRESENCE_TTL_SEC`(기본 30), `PRESENCE_CLEAN_ON_START`
 - Redis 키/채널 접두사: `REDIS_CHANNEL_PREFIX`
-- 분산 브로드캐스트: `USE_REDIS_PUBSUB`
-- 게이트웨이 식별자: `GATEWAY_ID` (기본 `gw-default`, 인스턴스별 고유값 권장)
+- 분산 브로드캐스트: `USE_REDIS_PUBSUB`, `GATEWAY_ID`
 - Write-behind: `WRITE_BEHIND_ENABLED`, `REDIS_STREAM_KEY`, `REDIS_STREAM_MAXLEN`, `WB_*`
 - 마이그레이션 러너: `DB_URI`
 
@@ -156,7 +176,7 @@
 ## 8) Gateway 고도화 — [ready]
 - 작업: TLS 종료, 헬스체크/드레인, heartbeat 경량 경로로 user TTL 갱신, Pub/Sub 구독 브릿지(envelope/gateway_id)
 - DoD: 롤링 배포 중 연결 드레인 무중단, 멀티 인스턴스에서 브로드캐스트 수신·재전파
-- 리스크: self-echo/중복, 재연결 백오프
+- 리스크: GATEWAY_ID 오배포(중복 필터 무력화), 재연결 백오프
 
 ## 9) 분산 운영 가드 — [todo]
 - 작업: envelope(origin,gateway_id,room,ts), self‑echo 필터, backoff, 장애주입

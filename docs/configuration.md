@@ -17,6 +17,7 @@ server:
   write_timeout_ms: 15000
   backlog: 512
   sticky_sessions: true     # L4 뒤에서 클라→GW 점착 필요 시 true
+  gateway_id: gw-default    # 멀티 게이트웨이 운영 시 인스턴스별 고유 값 필수
 
 security:
   tls_enabled: false
@@ -67,16 +68,16 @@ limits:
 
 ## 구성 소스/우선순위
 1) 커맨드라인 플래그(예: `--port`, `--config`)
-2) 환경변수(접두사 `SRV_`), 예: `SRV_PORT=5000`
+2) 환경변수(접두사 `SRV_`), 예: `SRV_PORT=5000`, `GATEWAY_ID=gw-kr-1`
 3) 설정 파일(YAML)
 4) 내장 기본값
-
-## 주요 환경 변수(샘플)
-- `DB_URI`: Postgres 연결 문자열
-- `REDIS_URI`: Redis 연결 URI
-- `USE_REDIS_PUBSUB`: 0이 아니면 Pub/Sub 발행 활성화
-- `GATEWAY_ID`: 게이트웨이 식별자(기본 `gw-default`, 멀티 인스턴스 시 고유값 권장)
 
 ## 검증/스키마(요약)
 - 타입/범위 검증: 포트(1~65535), 타임아웃/인터벌(>0), 길이/워터마크(64KB 이하 권장), 레이트(>=0).
 - 상호 제약: `send_queue_low_watermark < high_watermark <= send_queue_max`.
+
+
+### Gateway 식별자 관리
+- `GATEWAY_ID`는 Redis Pub/Sub Envelope에 포함되어 self-echo 필터에 사용된다.
+- 설정 파일의 `server.gateway_id` 또는 환경 변수 `GATEWAY_ID`로 지정하며, 미설정 시 기본값 `gw-default`가 사용된다.
+- 멀티 게이트웨이 환경에서는 인스턴스별 고유 값으로 설정하고 배포 시 확인 체크리스트에 포함한다.
