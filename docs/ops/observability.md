@@ -28,20 +28,20 @@
 ## 복수 채팅 서버 지표
 - 서버 단위: 처리량/지연/오류율/연결 수
 - 룸 단위: `msgs_per_sec`, 멤버 수, fanout 지연 분포
-- 분산 브로드캐스트: `publish_total`, `subscribe_total`, `subscribe_lag_ms`, `duplicates_dropped_total`, `self_echo_drop_total`
-  - 현재 구현된 최소 로그: `metric=publish_total value=<n> room=<name>`, `metric=subscribe_total value=<n> room=<name>`, `metric=self_echo_drop_total value=<n>`, `metric=subscribe_lag_ms value=<ms> room=<name>`
+- 분산 브로드캐스트: `publish_total`, `subscribe_total`, `subscribe_lag_ms`, `duplicates_dropped_total`, `self_echo_drop_total` (server/src/app/bootstrap.cpp:203, server/src/app/bootstrap.cpp:197, server/src/app/bootstrap.cpp:181)
+  - 현재 구현된 최소 로그: `metric=publish_total value=<n> room=<name>`, `metric=subscribe_total value=<n> room=<name>`, `metric=self_echo_drop_total value=<n>`, `metric=subscribe_lag_ms value=<ms> room=<name>` (server/src/app/bootstrap.cpp:203, server/src/app/bootstrap.cpp:197, server/src/app/bootstrap.cpp:181)
 
 ## 수집/표시
 - Prometheus pull 수집, Grafana 대시보드 구성
 - 권장 대시보드 패널: 서버별 처리량/지연 히스토그램, 룸별 멤버/메시지, 오류 heatmap, Redis/DB round-trip, 큐 길이/CPU/메모리
 
 ## Metrics 노출(간단 HTTP)
-- 환경 `METRICS_PORT` 설정 시 server_app이 `:METRICS_PORT/metrics`로 텍스트 포맷 노출
+- 환경 `METRICS_PORT` 설정 시 server_app이 `:METRICS_PORT/metrics`로 텍스트 포맷 노출 (server/src/app/bootstrap.cpp:215)
 - 현재 노출되는 최소 지표(전역):
-  - `chat_subscribe_total` (Counter)
-  - `chat_self_echo_drop_total` (Counter)
-  - `chat_subscribe_last_lag_ms` (Gauge)
-- 예시: `METRICS_PORT=9090` → `curl http://127.0.0.1:9090/metrics`
+  - `chat_subscribe_total` (Counter) (server/src/app/bootstrap.cpp:230)
+  - `chat_self_echo_drop_total` (Counter) (server/src/app/bootstrap.cpp:232)
+  - `chat_subscribe_last_lag_ms` (Gauge) (server/src/app/bootstrap.cpp:236)
+- 예시: `METRICS_PORT=9090` → `curl http://127.0.0.1:9090/metrics` (server/src/app/bootstrap.cpp:215)
 
 ## 트레이싱(선택)
 - OpenTelemetry SDK 계측 → OTLP 수집기 → Jaeger/Tempo
@@ -51,20 +51,20 @@
 - server_core: Acceptor(연결/해제 카운터+gauge, accept 지연), Session(read/write/bytes/frame, decode/encode 지연), JobQueue(큐 길이)
 - Chat 핸들러: on_chat_send 스팬/히스토, fanout 대상/지연, snapshot/rooms/users 쿼리 지연
 - Storage: Postgres op별 쿼리 지연/오류, Redis cmd별 지연/실패 카운트
-- 분산: Pub/Sub publish/subscribe 카운트, subscribe lag, self-echo drop 카운트
+- 분산: Pub/Sub publish/subscribe 카운트, subscribe lag, self-echo drop 카운트 (server/src/app/bootstrap.cpp:203)
 
-## Write-behind 지표(추가)
-- wb_batch_size: 배치 크기(이벤트 수) — Histogram
-- wb_commit_ms: 배치 커밋 시간(ms) — Histogram/Summary
-- wb_fail_total: 배치 실패 건수 — Counter
-- wb_pending: 컨슈머 그룹 pending length — Gauge
-- wb_dlq_total: DLQ로 이동한 이벤트 수 — Counter
-  - 현재 구현된 최소 로그(키=값): `metric=wb_flush wb_commit_ms=<ms> wb_batch_size=<n> wb_ok_total=<n> wb_fail_total=<n> wb_dlq_total=<n>`, `metric=wb_pending value=<n>`
+## Write-behind 지표(추가) (tools/wb_worker/main.cpp:138)
+- wb_batch_size: 배치 크기(이벤트 수) — Histogram (tools/wb_worker/main.cpp:138)
+- wb_commit_ms: 배치 커밋 시간(ms) — Histogram/Summary (tools/wb_worker/main.cpp:138)
+- wb_fail_total: 배치 실패 건수 — Counter (tools/wb_worker/main.cpp:138)
+- wb_pending: 컨슈머 그룹 pending length — Gauge (tools/wb_worker/main.cpp:168)
+- wb_dlq_total: DLQ로 이동한 이벤트 수 — Counter (tools/wb_worker/main.cpp:139)
+  - 현재 구현된 최소 로그(키=값): `metric=wb_flush wb_commit_ms=<ms> wb_batch_size=<n> wb_ok_total=<n> wb_fail_total=<n> wb_dlq_total=<n>`, `metric=wb_pending value=<n>` (tools/wb_worker/main.cpp:138)
 
 ## 다음 단계(권장)
 - 서버/워커에 Prometheus 지표를 직접 추가(wb_* 계열 Counter/Gauge/Histogram)
 - 대시보드 초안: 워커 배치 크기/지연, 실패율, 펜딩 길이, DLQ 길이, 서버 subscribe lag 등
-- 알람 임계치: `wb_fail_total` 증분, `wb_pending` 장시간 상승, `subscribe_lag_ms` P95 상향, `/metrics` 응답 실패
+- 알람 임계치: `wb_fail_total` 증분, `wb_pending` 장시간 상승, `subscribe_lag_ms` P95 상향, `/metrics` 응답 실패 (tools/wb_worker/main.cpp:138, server/src/app/bootstrap.cpp:197)
 - 라벨 표준: `server_id`, `gateway_id`, `room_id`(가능 시), `env`, `build_version`
 
 ## 로그 수집 가이드(키=값 패턴)

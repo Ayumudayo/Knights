@@ -1,10 +1,10 @@
 # CLI 채팅 클라이언트 설계(개요)
 
 ## 범위/목표(후순위)
-- 서버 코어 안정화 이후 구축. 텍스트 기반 CLI로 채팅/테스트/관리 기능 제공.
+- 서버 코어 안정화 이후 구축. 텍스트 기반 CLI로 채팅/테스트/관리 기능 제공. (devclient/src/main.cpp:35; devclient/src/net_client.cpp:26; devclient/include/client/net_client.hpp:11)
 
 ## 기능
-- 연결/로그인/채널 조인/메시지 전송/브로드캐스트 수신.
+- 연결/로그인/채널 조인/메시지 전송/브로드캐스트 수신. (server/src/chat/handlers_login.cpp:22; server/src/chat/handlers_chat.cpp:23; server/src/chat/handlers_join.cpp:21; server/src/chat/handlers_leave.cpp:17; server/src/chat/handlers_ping.cpp:12)
 - 스크립트/매크로(선택): 반복 시나리오 실행.
 - 프로파일링 지원: RTT 측정, 전송/수신 속도.
 - 입출력 분리 UI: 출력과 입력을 명확히 분리하여 사용성 보장.

@@ -3,10 +3,10 @@
 이 문서는 로컬 개발 환경에서 서버/워커를 실행하고, 통합 스모크 테스트까지 수행하는 최소 절차를 제공합니다.
 
 ## 요구 사항
-- Windows 10/11 또는 Linux(WSL 포함)
-- CMake 3.20+, C++20 컴파일러(MSVC 19.3x+/GCC 11+/Clang 14+)
-- vcpkg(권장) — 루트의 `vcpkg.json` 매니페스트 사용
-- Redis, PostgreSQL (로컬 또는 원격 인스턴스)
+- Windows 10/11 또는 Linux(WSL 포함) (scripts/build.ps1:39)
+- CMake 3.20+, C++20 컴파일러(MSVC 19.3x+/GCC 11+/Clang 14+) (CMakeLists.txt:1)
+- vcpkg(권장) — 루트의 `vcpkg.json` 매니페스트 사용 (vcpkg.json:1)
+- Redis, PostgreSQL (로컬 또는 원격 인스턴스) (server/src/app/bootstrap.cpp:88; server/src/app/bootstrap.cpp:111)
 
 ## 1) 의존성 설치(권장: vcpkg)
 - VCPKG_ROOT 환경변수 설정(예: `C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg`)

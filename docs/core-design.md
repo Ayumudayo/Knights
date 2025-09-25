@@ -6,14 +6,14 @@
 
 ## 상위 구성요소
 - Net
-  - Acceptor: 리슨/accept 루프, 연결 제한, IP 필터, 재시작.
-  - Session: 비동기 read/write, 프레이밍, 송신 큐, 타임아웃, heartbeat.
+  - Acceptor: 리슨/accept 루프, 연결 제한, IP 필터, 재시작. (core/src/net/acceptor.cpp:60)
+  - Session: 비동기 read/write, 프레이밍, 송신 큐, 타임아웃, heartbeat. (core/src/net/session.cpp:48)
   - Transport/Codec: 바이트 스트림 ↔ 메시지 패킷 변환.
 - Dispatch
-  - Dispatcher: `msg_id -> handler` 매핑, 핸들러 실행 컨텍스트(executor/strand) 관리.
+  - Dispatcher: `msg_id -> handler` 매핑, 핸들러 실행 컨텍스트(executor/strand) 관리. (core/src/net/dispatcher.cpp:12)
 - Utils
   - Timer: 고정 틱/지연 실행, cancel-safe.
-  - Log/Metrics: 최소한의 인터페이스(구현은 교체 가능).
+  - Log/Metrics: 최소한의 인터페이스(구현은 교체 가능). (core/src/util/log.cpp:28, core/src/metrics/metrics.cpp:19)
 
 ## 스레딩/실행 모델
 - I/O: `io_context` 스레드 풀(N=코어 수 권장)에서 모든 비동기 콜백이 수행.
@@ -102,18 +102,18 @@ public:
 - 하트비트: 서버 또는 클라 주도 가능. 서버 주기 T, 미수신 K회 → 종료.
 
 ## 테스트 전략
-- Session 단위: 프레이밍/부분 읽기/대형 패킷/타임아웃.
-- Dispatcher: 중복 등록/미등록/예외 전파.
-- Acceptor: 빠른 open/close 반복, 연결 폭주 시 정책 확인.
+- Session 단위: 프레이밍/부분 읽기/대형 패킷/타임아웃. (core/src/net/session.cpp:70)
+- Dispatcher: 중복 등록/미등록/예외 전파. (core/src/net/dispatcher.cpp:12)
+- Acceptor: 빠른 open/close 반복, 연결 폭주 시 정책 확인. (core/src/net/acceptor.cpp:46)
 - 부하: 수천 세션 echo/브로드캐스트 시나리오로 지연·스루풋 측정.
 
 ### 핸들러 계약/예외
-- 핸들러는 예외를 던지지 않는 것을 원칙으로 하나, 발생 시 Dispatcher가 잡아 로깅하고 세션을 안전 종료.
+- 핸들러는 예외를 던지지 않는 것을 원칙으로 하나, 발생 시 Dispatcher가 잡아 로깅하고 세션을 안전 종료. (core/src/net/dispatcher.cpp:16)
 - 핸들러 실행 시간 상한은 정책으로 모니터링. 장시간 블로킹 금지.
 
 ## 설정 매핑(코어 ↔ configuration.yaml)
 - `server.io_threads` → `io_context` 워커 스레드 수
-- `server.max_connections` → Acceptor 연결 상한
+- `server.max_connections` → Acceptor 연결 상한 (core/src/net/acceptor.cpp:73)
 - `server.recv_max_payload` → 프레이밍 길이 상한
 - `server.send_queue_max` → 송신 큐 바이트 상한/워터마크
 - `server.heartbeat_interval_ms`/`read_timeout_ms`/`write_timeout_ms` → 타이머 파라미터

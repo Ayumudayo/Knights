@@ -1,11 +1,11 @@
 ﻿# 빌드 가이드
 
 ## 전제
-- C++20 컴파일러(MSVC 19.3x+, GCC 11+, Clang 14+)
-- CMake 3.20+
-- Boost 1.78+ (권장: 1.89)
-- Python 3 (선택: opcode 헤더 자동 생성)
-- vcpkg(권장): FTXUI 및 의존성 설치에 사용. 매니페스트 `vcpkg.json` 제공.
+- C++20 컴파일러(MSVC 19.3x+, GCC 11+, Clang 14+) (CMakeLists.txt:8)
+- CMake 3.20+ (CMakeLists.txt:1)
+- Boost 1.78+ (권장: 1.89) (CMakeLists.txt:81)
+- Python 3 (선택: opcode 헤더 자동 생성) (CMakeLists.txt:97)
+- vcpkg(권장): FTXUI 및 의존성 설치에 사용. 매니페스트 `vcpkg.json` 제공. (scripts/build.ps1:72)
 
 ## 권장: vcpkg 매니페스트 빌드(FTXUI 포함)
 - 의존성: `vcpkg.json`에 `ftxui`가 선언되어 있습니다.
@@ -13,10 +13,10 @@
 - 기본 트리플릿: Windows `x64-windows`, Linux `x64-linux`.
 
 ### PowerShell(Windows)
-- 자동 구성/빌드/실행(서버+클라):
-  - `scripts/build.ps1 -UseVcpkg -Run both`
-- 서버만 실행: `scripts/build.ps1 -UseVcpkg -Run server -Port 5000`
-- 클라만 실행: `scripts/build.ps1 -UseVcpkg -Run client -Port 5000`
+- 자동 구성/빌드/실행(서버+클라): (scripts/build.ps1:168)
+  - `scripts/build.ps1 -UseVcpkg -Run both` (scripts/build.ps1:168)
+- 서버만 실행: `scripts/build.ps1 -UseVcpkg -Run server -Port 5000` (scripts/build.ps1:152)
+- 클라만 실행: `scripts/build.ps1 -UseVcpkg -Run client -Port 5000` (scripts/build.ps1:160)
 - 메모
   - 스크립트는 `vcpkg.json`을 감지하면 toolchain을 자동 지정하고, 필요 시 `builtin-baseline`을 주입한 뒤 `vcpkg install`을 실행합니다.
   - MSVC+vcpkg 환경에서 런타임 불일치를 피하기 위해 `RelWithDebInfo` 요청 시 자동으로 `Debug` 구성으로 빌드합니다.

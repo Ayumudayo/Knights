@@ -100,11 +100,11 @@ flowchart LR
 - 공평성: CPU 코어 수 기준 N=core_count 또는 N=core_count*2. Accept는 별도 `strand`.
 
 ### 4.2 연결 수락(Acceptor/Gateway)
-- `Acceptor`는 리스닝 소켓을 관리, `async_accept` 루프로 신규 연결 처리.
+- `Acceptor`는 리스닝 소켓을 관리, `async_accept` 루프로 신규 연결 처리. (core/src/net/acceptor.cpp:60)
 - 연결 제한: 동시 세션 수 상한, 초과 시 즉시 거절.
 - 보안: 화이트리스트/블랙리스트, 레이트 제한(초당 accept 제한), SYN flood 방어(커널 파라미터/방화벽 병행), mTLS(내부), JWT 토큰 검증(게이트웨이/인증 서비스 연계).
 
-### 4.3 세션(Session)
+### 4.3 세션(Session) (core/src/net/session.cpp:48)
 - 책임: 소켓 소유, 수신/송신 버퍼, 파싱/프레이밍, 사용자 컨텍스트, 타임아웃.
 - 수신: length-prefixed 프레이밍을 위한 고정 헤더(예: 2~4바이트 길이 + 2바이트 메시지 ID + 옵션)를 먼저 읽고, 본문을 이어서 읽는다.
 - 송신: 멀티 쓰레드 안전 큐 + `async_write` 체인. 백프레셔(큐 길이 상한) 초과 시 세션 종료.
@@ -119,7 +119,7 @@ flowchart LR
 
 ### 4.5 라우팅/디스패치
 - Gateway 레벨 디스패치: `msg_id -> route(service, rpc)` 매핑. 인증 전/후 경로 분리.
-- 서비스 레벨 디스패치: 각 서비스 내부 `Dispatcher`로 핸들러 등록.
+- 서비스 레벨 디스패치: 각 서비스 내부 `Dispatcher`로 핸들러 등록. (core/src/net/dispatcher.cpp:12)
 - 실행 모델: 세션별 직렬화(strand) + 서비스별 executor. 서비스 간 호출은 gRPC, 브로드캐스트/존 상태는 BUS 이벤트.
 
 ### 4.6 흐름 제어/백프레셔
@@ -214,17 +214,17 @@ target_link_libraries(server_tests PRIVATE server_core)
 
 ## 10. 코어 라이브러리(주요 컴포넌트)
 - Net
-  - `Acceptor`: 포트 바인딩/Accept 루프, IP 필터, 초과 연결 제어.
-  - `Session`: 비동기 read/write, 프레이밍, 큐, 타임아웃, 통계.
-  - `Dispatcher`: 메시지 라우팅/핸들러 등록.
-  - `Timer`: 틱/스케줄 유틸.
+  - `Acceptor`: 포트 바인딩/Accept 루프, IP 필터, 초과 연결 제어. (core/src/net/acceptor.cpp:46)
+  - `Session`: 비동기 read/write, 프레이밍, 큐, 타임아웃, 통계. (core/src/net/session.cpp:48)
+  - `Dispatcher`: 메시지 라우팅/핸들러 등록. (core/src/net/dispatcher.cpp:12)
+  - `Timer`: 틱/스케줄 유틸. (TODO)
 - Protocol
   - `Codec`: 헤더 인코딩/디코딩, 압축/암호화 후처리 체인.
   - `Message`: 메시지 정의/ID/팩토리.
 - Game
   - `Room`, `World`, `Entity`, `Player` 기본 골격과 이벤트 버스.
 - Utils
-  - `Log`, `Config`, `Metrics`, `IdGenerator`, `RingBuffer` 등.
+  - `Log`, `Config`, `Metrics`, `IdGenerator`, `RingBuffer` 등. (core/src/util/log.cpp:28, core/src/metrics/metrics.cpp:19, TODO)
 
 ## 11. 메시지 흐름(시퀀스)
 ```mermaid
@@ -261,7 +261,7 @@ sequenceDiagram
 - 롤링 업데이트: 커넥션 드레이닝, 상태 저장형이면 세션 마이그레이션 고려.
 
 ## 15. 초기 마일스톤
-1) 빈 골격 + CMake + 코어 `Acceptor/Session` 스켈레톤
+1) 빈 골격 + CMake + 코어 `Acceptor/Session` 스켈레톤 (core/src/net/acceptor.cpp:46, core/src/net/session.cpp:48)
 2) 에코 서버/클라로 기본 통신 성립
 3) 길이 프레이밍+디스패처+핸들러 구조화
 4) 로그인/룸 입장/채팅 MVP

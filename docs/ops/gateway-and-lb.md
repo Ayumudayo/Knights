@@ -4,8 +4,8 @@
 
 ## 현재 상태 요약
 - server_app가 게이트웨이 역할을 겸한다(클라이언트 TCP 프로토콜 수신, 분산 브로드캐스트 브릿지).
-- 멀티 인스턴스 지원: `USE_REDIS_PUBSUB=1`, 고유 `GATEWAY_ID`로 self‑echo 방지.
-- 헬스/드레인: TCP 연결 수립만으로 체크 가능. 종료 신호 시 Pub/Sub 구독 정리 로직 포함.
+- 멀티 인스턴스 지원: `USE_REDIS_PUBSUB=1`, 고유 `GATEWAY_ID`로 self‑echo 방지. (server/src/app/bootstrap.cpp:172, server/src/app/bootstrap.cpp:175)
+- 헬스/드레인: TCP 연결 수립만으로 체크 가능. 종료 신호 시 Pub/Sub 구독 정리 로직 포함. (server/src/app/bootstrap.cpp:259)
 
 권장: LB/프록시는 외부 표준 솔루션(HAProxy, Nginx Stream, Envoy)을 사용하고, 프로젝트 내에서 직접 구현하지 않는다.
 
@@ -13,10 +13,10 @@
 Client ↔ LB(HAProxy/Nginx/Envoy) ↔ server_app × N ↔ Redis/Postgres
 
 ## 환경 변수(요약)
-- `USE_REDIS_PUBSUB=1` — 분산 브로드캐스트 활성화
-- `GATEWAY_ID=gw-a` — 인스턴스 고유 ID
-- `REDIS_CHANNEL_PREFIX=knights:` — Redis 키/채널 접두사
-- `REDIS_URI=redis://host:6379` — Redis 연결
+- `USE_REDIS_PUBSUB=1` — 분산 브로드캐스트 활성화 (server/src/app/bootstrap.cpp:172)
+- `GATEWAY_ID=gw-a` — 인스턴스 고유 ID (server/src/app/bootstrap.cpp:175)
+- `REDIS_CHANNEL_PREFIX=knights:` — Redis 키/채널 접두사 (server/src/app/bootstrap.cpp:173)
+- `REDIS_URI=redis://host:6379` — Redis 연결 (TODO)
 
 ## HAProxy 샘플(tcp + TLS 종료)
 ```
@@ -74,20 +74,20 @@ stream {
 3) 프로세스 종료(Windows: Ctrl+C, Linux: SIGTERM)
 4) 재기동 후 health 통과 확인 → LB에 재등록
 
-참고: 서버는 종료 신호에서 Redis Pub/Sub 구독을 먼저 정리하여 중복/유실을 최소화한다.
+참고: 서버는 종료 신호에서 Redis Pub/Sub 구독을 먼저 정리하여 중복/유실을 최소화한다. (server/src/app/bootstrap.cpp:259)
 
 ## 헬스체크
 - 최소: TCP connect 성공 여부로 판단(option tcp-check / 단순 connect)
 - 선택: 향후 HTTP 헬스 포트 추가(예: `HEALTH_PORT` 노출, `/healthz` 200 OK) — 필요 시 구현 예정
 
 ## 스케일링 체크리스트
-- 각 인스턴스 `GATEWAY_ID` 고유값 설정(중복 self‑echo 방지)
-- 동일 `REDIS_CHANNEL_PREFIX` 유지(브로드캐스트 채널 정합)
-- `PRESENCE_CLEAN_ON_START=0`(다중 게이트웨이 환경)
+- 각 인스턴스 `GATEWAY_ID` 고유값 설정(중복 self‑echo 방지) (server/src/app/bootstrap.cpp:175)
+- 동일 `REDIS_CHANNEL_PREFIX` 유지(브로드캐스트 채널 정합) (server/src/app/bootstrap.cpp:173)
+- `PRESENCE_CLEAN_ON_START=0`(다중 게이트웨이 환경) (server/src/app/bootstrap.cpp:259)
 
 ## 로컬 멀티 인스턴스 테스트(개요)
 1) Redis 기동
-2) 서버 두 개 실행: `GATEWAY_ID=gw-a`, `GATEWAY_ID=gw-b`
+2) 서버 두 개 실행: `GATEWAY_ID=gw-a`, `GATEWAY_ID=gw-b` (server/src/app/bootstrap.cpp:175)
 3) LB(HAProxy/Nginx) 앞단 구성 후 클라이언트 다중 접속
 4) 같은 룸에서 채팅 → 상호 브로드캐스트 수신 확인
 
