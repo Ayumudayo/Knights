@@ -2,6 +2,7 @@
 #include "server/core/net/session.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
+#include "server/core/runtime_metrics.hpp"
 
 namespace server::core {
 
@@ -15,9 +16,11 @@ bool Dispatcher::dispatch(std::uint16_t msg_id, Session& s, std::span<const std:
     try {
         it->second(s, payload);
     } catch (const std::exception& ex) {
+        runtime_metrics::record_dispatch_exception();
         server::core::log::error(std::string("handler exception for msg=") + std::to_string(msg_id) + ": " + ex.what());
         try { s.send_error(server::core::protocol::errc::INTERNAL_ERROR, "internal error"); } catch (...) {}
     } catch (...) {
+        runtime_metrics::record_dispatch_exception();
         server::core::log::error(std::string("handler unknown exception for msg=") + std::to_string(msg_id));
         try { s.send_error(server::core::protocol::errc::INTERNAL_ERROR, "internal error"); } catch (...) {}
     }
@@ -25,4 +28,5 @@ bool Dispatcher::dispatch(std::uint16_t msg_id, Session& s, std::span<const std:
 }
 
 } // namespace server::core
+
 

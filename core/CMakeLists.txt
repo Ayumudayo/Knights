@@ -4,6 +4,7 @@ add_library(server_core
     src/net/dispatcher.cpp
     src/util/log.cpp
     src/metrics/metrics.cpp
+    src/runtime_metrics.cpp
     src/concurrent/job_queue.cpp
     src/concurrent/thread_manager.cpp
     src/memory/memory_pool.cpp

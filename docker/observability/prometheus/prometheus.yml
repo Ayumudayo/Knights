@@ -11,4 +11,4 @@ scrape_configs:
     metrics_path: /metrics
     static_configs:
       - targets:
-          - 'host.docker.internal:9090'  # Update to match METRICS_PORT; on Linux use host-gateway or container name.
+          - 'host.docker.internal:9100'  # Update to match METRICS_PORT; on Linux use host-gateway or container name.

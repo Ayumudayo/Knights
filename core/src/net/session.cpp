@@ -6,6 +6,7 @@
 #include "server/core/protocol/protocol_flags.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/memory/memory_pool.hpp"
+#include "server/core/runtime_metrics.hpp"
 
 #include <array>
 #include <cstring>
@@ -34,6 +35,7 @@ Session::Session(asio::ip::tcp::socket socket,
     , heartbeat_timer_(socket_.get_executor()) {
     if (state_) state_->connection_count.fetch_add(1);
     if (state_) session_id_ = state_->next_session_id.fetch_add(1);
+    runtime_metrics::record_session_start();
 }
 
 std::string Session::remote_ip() const {
@@ -61,18 +63,19 @@ void Session::stop() {
     read_timer_.cancel();
     heartbeat_timer_.cancel();
     if (state_) state_->connection_count.fetch_sub(1);
-    log::info("세션 종료: " + std::to_string(reinterpret_cast<std::uintptr_t>(this)));
+    runtime_metrics::record_session_stop();
+    log::info("Session closed: " + std::to_string(reinterpret_cast<std::uintptr_t>(this)));
     if (on_close_) {
         try { on_close_(shared_from_this()); } catch (...) {}
     }
 }
 
 void Session::async_send(BufferManager::PooledBuffer data, size_t frame_size) {
-    // data는 이미 헤더가 포함된 완전한 프레임으로 간주한다.
+    // data는 이미 헤더가 포함된 완전한 프레임을 의미한다.
     asio::dispatch(strand_, [self = shared_from_this(), data = std::move(data), frame_size]() mutable {
         if (self->stopped_) return;
         if (self->options_ && self->options_->send_queue_max > 0 && self->queued_bytes_ + frame_size > self->options_->send_queue_max) {
-            log::warn("송신 큐 상한 초과로 세션 종료");
+            log::warn("Send queue limit exceeded; stopping session");
             self->stop();
             return;
         }
@@ -103,13 +106,13 @@ std::pair<BufferManager::PooledBuffer, size_t> Session::make_frame(std::uint16_t
                                               std::uint32_t utc_ts_ms32) {
     size_t frame_size = server::core::protocol::k_header_bytes + payload.size();
     if (frame_size > buffer_manager_.GetBlockSize()) {
-        log::error("보낼 프레임이 메모리 풀 블록 크기보다 큽니다.");
+        log::error("Outgoing frame exceeds memory pool block size.");
         return {nullptr, 0};
     }
 
     auto buffer = buffer_manager_.Acquire();
     if (!buffer) {
-        log::error("메모리 풀 할당 실패");
+        log::error("Memory pool allocation failed.");
         return {nullptr, 0};
     }
 
@@ -127,29 +130,33 @@ void Session::do_read_header() {
     auto self = shared_from_this();
     read_buf_ = buffer_manager_.Acquire();
     if (!read_buf_) {
-        log::error("헤더 버퍼 할당 실패");
+        runtime_metrics::record_frame_error();
+        log::error("Failed to acquire read buffer.");
         stop();
         return;
     }
     asio::async_read(socket_, asio::buffer(read_buf_.get(), server::core::protocol::k_header_bytes),
         asio::bind_executor(strand_, [this, self](const error_code& ec, std::size_t n) {
             if (ec) {
-                log::debug(std::string("헤더 읽기 실패: ") + ec.message());
+                runtime_metrics::record_frame_error();
+                log::debug(std::string("Failed to read header: ") + ec.message());
                 stop();
                 return;
             }
             if (n != server::core::protocol::k_header_bytes) {
-                log::warn("헤더 길이 불일치");
+                runtime_metrics::record_frame_error();
+                log::warn("Header size mismatch");
                 stop();
                 return;
             }
             server::core::protocol::decode_header(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_);
             if (options_ && options_->recv_max_payload > 0 && header_.length > options_->recv_max_payload) {
+                runtime_metrics::record_frame_error();
                 send_error(server::core::protocol::errc::LENGTH_LIMIT_EXCEEDED, "payload too large");
                 stop();
                 return;
             }
-            // 수신 성공 → read 타이머 재무장
+            // 다음 읽기 전에 읽기 타임아웃을 다시 무장한다.
             arm_read_timeout();
             do_read_body(header_.length);
         }));
@@ -158,37 +165,53 @@ void Session::do_read_header() {
 void Session::do_read_body(std::size_t body_len) {
     auto self = shared_from_this();
     if (body_len == 0) {
-        // 빈 페이로드도 허용. 즉시 디스패치 시도.
-        dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>{});
+        // 읽을 본문이 없으므로 빈 span으로 즉시 디스패치한다.
+        runtime_metrics::record_frame_ok();
+        auto start = std::chrono::steady_clock::now();
+        bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>{});
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        runtime_metrics::record_dispatch_attempt(handled, elapsed);
+        if (!handled) {
+            send_error(server::core::protocol::errc::UNKNOWN_MSG_ID, "unknown msg");
+        }
         do_read_header();
         return;
     }
     if (body_len > buffer_manager_.GetBlockSize()) {
-        log::error("수신 본문이 메모리 풀 블록 크기보다 큽니다.");
+        runtime_metrics::record_frame_error();
+        log::error("Body is larger than memory pool block size.");
         stop();
         return;
     }
     read_buf_ = buffer_manager_.Acquire();
     if (!read_buf_) {
-        log::error("본문 버퍼 할당 실패");
+        runtime_metrics::record_frame_error();
+        log::error("Failed to acquire body buffer.");
         stop();
         return;
     }
     asio::async_read(socket_, asio::buffer(read_buf_.get(), body_len),
         asio::bind_executor(strand_, [this, self](const error_code& ec, std::size_t n) {
             if (ec) {
-                log::debug(std::string("본문 읽기 실패: ") + ec.message());
+                runtime_metrics::record_frame_error();
+                log::debug(std::string("Failed to read body: ") + ec.message());
                 stop();
                 return;
             }
             if (n != header_.length) {
-                log::warn("본문 길이 불일치");
+                runtime_metrics::record_frame_error();
+                log::warn("Body size mismatch");
                 stop();
                 return;
             }
-            // 수신 성공 → read 타이머 재무장
+            // 다음 읽기 전에 읽기 타임아웃을 다시 무장한다.
             arm_read_timeout();
-            if (!dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_.length))) {
+            runtime_metrics::record_frame_ok();
+            auto start = std::chrono::steady_clock::now();
+            bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_.length));
+            auto elapsed = std::chrono::steady_clock::now() - start;
+            runtime_metrics::record_dispatch_attempt(handled, elapsed);
+            if (!handled) {
                 send_error(server::core::protocol::errc::UNKNOWN_MSG_ID, "unknown msg");
             }
             do_read_header();
@@ -206,7 +229,7 @@ void Session::do_write() {
     asio::async_write(socket_, asio::buffer(front_pair.first.get(), frame_size),
         asio::bind_executor(strand_, [this, self, frame_size](const error_code& ec, std::size_t /*n*/) {
             if (ec) {
-                log::debug(std::string("쓰기 실패: ") + ec.message());
+                log::debug(std::string("Write failed: ") + ec.message());
                 stop();
                 return;
             }
@@ -222,20 +245,20 @@ void Session::do_write() {
 
 void Session::send_hello() {
     std::vector<std::uint8_t> payload_vec;
-    // HELLO payload(v1.1): proto_major(2) + proto_minor(2) + capabilities(2) + hb_x10ms(2) + epoch_high32(4) = 12 bytes
+    server::core::protocol::write_be16(1, payload_vec.data() + 2); // proto_minor (헤더 v1.1)
     payload_vec.resize(12);
     server::core::protocol::write_be16(1, payload_vec.data()); // proto_major
     server::core::protocol::write_be16(1, payload_vec.data() + 2); // proto_minor (헤더 v1.1)
-    // capabilities: 압축 지원 + sender_sid 포함
+    // capabilities: 압축 지원과 sender_sid 제공 여부를 알린다.
     std::uint16_t caps = static_cast<std::uint16_t>(server::core::protocol::CAP_COMPRESS_SUPP | server::core::protocol::CAP_SENDER_SID);
     server::core::protocol::write_be16(caps, payload_vec.data() + 4);
     unsigned hb = options_ ? options_->heartbeat_interval_ms / 10 : 0;
     server::core::protocol::write_be16(static_cast<std::uint16_t>(hb), payload_vec.data() + 6);
-    // epoch_high32: 서버 UTC ms 상위 32비트 제공(클라가 64비트 재구성 가능)
+    // epoch_high32: 클라이언트가 64비트 UTC 타임스탬프를 복원할 수 있도록 상위 32비트를 전달한다.
     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
-    std::uint32_t epoch_high32 = static_cast<std::uint32_t>((static_cast<std::uint64_t>(now64) >> 32) & 0xFFFFFFFFu);
-    server::core::protocol::write_be32(epoch_high32, payload_vec.data() + 8);
+    // epoch_high32: 클라이언트가 64비트 UTC 타임스탬프를 복원하도록 상위 32비트를 전달한다.
+    // epoch_high32: 클라이언트가 64비트 UTC 타임스탬프를 복원하도록 상위 32비트를 전달한다.
     std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
     
     auto [buffer, frame_size] = make_frame(0x0001 /*MSG_HELLO*/, 0, payload_vec, tx_seq_++, now32);
@@ -265,26 +288,42 @@ void Session::arm_read_timeout() {
     if (!options_ || options_->read_timeout_ms == 0) return;
     auto self = shared_from_this();
     asio::dispatch(strand_, [this, self]() {
-        // 기존 타이머 취소 후 재무장
+        // 기존 타이머를 취소하고 다시 무장한다.
         read_timer_.cancel();
         read_timer_.expires_after(std::chrono::milliseconds(options_->read_timeout_ms));
         read_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec){
-            if (ec || stopped_) return; // cancel 등 무시
+            if (ec || stopped_) return; // 타이머 취소 등은 무시하고 실제 타임아웃만 처리한다.
             log::warn("read timeout");
             stop();
         }));
-    });
+        // 기존 타이머를 취소하고 다시 무장한다.
 }
 
 void Session::arm_heartbeat() {
     if (!options_ || options_->heartbeat_interval_ms == 0) return;
-    heartbeat_timer_.expires_after(std::chrono::milliseconds(options_->heartbeat_interval_ms));
+            if (ec || stopped_) return; // 타이머 취소 등은 무시하고 실제 타임아웃만 처리한다.
     auto self = shared_from_this();
     heartbeat_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec){
         if (ec || stopped_) return;
-        // 서버 주도 핑은 선택. 현재는 타이머 유지만 수행.
+        // 서버가 주도하는 heartbeat는 선택 사항이며 설정된 경우에만 타이머를 유지한다.
         arm_heartbeat();
     }));
 }
 
 } // namespace server::core
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

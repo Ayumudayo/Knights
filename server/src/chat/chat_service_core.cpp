@@ -125,7 +125,7 @@ void ChatService::emit_write_behind_event(const std::string& type,
         }
     }
     if (!redis_->xadd(write_behind_.stream_key, fields, nullptr, write_behind_.maxlen, write_behind_.approximate)) {
-        corelog::warn(std::string("write-behind XADD 실패: type=") + type);
+        corelog::warn(std::string("write-behind XADD failed: type=") + type);
     }
 }
 
@@ -357,12 +357,13 @@ std::string ChatService::ensure_room_id_ci(const std::string& room_name) {
         state_.room_ids.emplace(room_name, id);
         return id;
     } catch (const std::exception& e) {
-        corelog::error(std::string("ensure_room_id_ci 실패: ") + e.what());
+        corelog::error(std::string("ensure_room_id_ci failed: ") + e.what());
         return std::string();
     }
 }
 
 } // namespace server::app::chat
+
 
 
 

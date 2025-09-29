@@ -6,6 +6,8 @@
 #include <csignal>
 #include <cstdlib> // getenv, strtoul
 #include <cstring> // strcmp
+#include <sstream>
+#include <iomanip>
 
 #include <boost/asio.hpp>
 #include <boost/asio/streambuf.hpp>
@@ -29,6 +31,7 @@
 #include "server/core/concurrent/job_queue.hpp"
 #include "server/core/concurrent/thread_manager.hpp"
 #include "server/core/memory/memory_pool.hpp"
+#include "server/core/runtime_metrics.hpp"
 #include "server/chat/chat_service.hpp"
 // Protobuf (수신 payload ts_ms 파싱용)
 #include "wire.pb.h"
@@ -64,7 +67,7 @@ int run_server(int argc, char** argv) {
         if (server::core::config::load_dotenv(".env", true)) {
             corelog::info("Loaded .env (override existing env = true)");
         } else {
-            corelog::info(".env not found — using OS environment variables");
+            corelog::info(".env not found; using existing environment variables");
         }
 
         unsigned short port = 5000;
@@ -88,7 +91,7 @@ int run_server(int argc, char** argv) {
         {
             const char* uri = std::getenv("DB_URI");
             if (uri && *uri) {
-                corelog::info(std::string("DB_URI 감지: ") + uri);
+                corelog::info(std::string("Detected DB_URI: ") + uri);
                 core::storage::PoolOptions popts{};
                 if (const char* v = std::getenv("DB_POOL_MIN")) popts.min_size = static_cast<std::size_t>(std::strtoul(v, nullptr, 10));
                 if (const char* v = std::getenv("DB_POOL_MAX")) popts.max_size = static_cast<std::size_t>(std::strtoul(v, nullptr, 10));
@@ -98,19 +101,19 @@ int run_server(int argc, char** argv) {
 
                 db_pool = server::storage::postgres::make_connection_pool(uri, popts);
                 if (!db_pool || !db_pool->health_check()) {
-                    corelog::error("DB 헬스체크 실패 — DB_URI를 확인하세요.");
+                    corelog::error("DB health check failed; please verify DB_URI.");
                     return 2;
                 }
-                corelog::info("DB 커넥션 풀 초기화 완료.");
+                corelog::info("DB connection pool initialised.");
             } else {
-                corelog::warn("DB_URI 미설정 — DB 연동 비활성(후속 단계에서 필요)");
+                corelog::warn("DB_URI is not set; database features remain disabled (configure if required).");
             }
         }
 
         // Redis 클라이언트 구성(환경 변수 기반)
         std::shared_ptr<server::storage::redis::IRedisClient> redis;
         if (const char* ruri = std::getenv("REDIS_URI"); ruri && *ruri) {
-            corelog::info(std::string("REDIS_URI 감지: ") + ruri);
+            corelog::info(std::string("Detected REDIS_URI: ") + ruri);
             server::storage::redis::Options ropts{};
             if (const char* v = std::getenv("REDIS_POOL_MAX")) ropts.pool_max = static_cast<std::size_t>(std::strtoul(v, nullptr, 10));
             if (const char* v = std::getenv("REDIS_USE_STREAMS")) ropts.use_streams = (std::strcmp(v, "0") != 0);
@@ -126,12 +129,12 @@ int run_server(int argc, char** argv) {
                 }
             }
             if (!redis || !redis->health_check()) {
-                corelog::error("Redis 헬스체크 실패 — REDIS_URI를 확인하세요.");
+                corelog::error("Redis health check failed; please verify REDIS_URI.");
             } else {
-                corelog::info("Redis 클라이언트 초기화 완료.");
+                corelog::info("Redis client initialised.");
             }
         } else {
-            corelog::warn("REDIS_URI 미설정 — Redis 연동 비활성(후속 단계에서 필요)");
+            corelog::warn("REDIS_URI is not set; Redis features remain disabled (configure if required).");
         }
 
         server::app::chat::ChatService chat(io, job_queue, db_pool, redis);
@@ -145,12 +148,12 @@ int run_server(int argc, char** argv) {
                 sess->set_on_close([&chat](std::shared_ptr<core::Session> s){ chat.on_session_close(s); });
             });
         acceptor->start();
-        corelog::info("server_app 시작: 0.0.0.0:" + std::to_string(port));
+        corelog::info("server_app listening on 0.0.0.0:" + std::to_string(port));
 
         // 워커 스레드 풀 시작
         unsigned int num_worker_threads = std::max(1u, std::thread::hardware_concurrency());
         workers.Start(num_worker_threads);
-        corelog::info(std::to_string(num_worker_threads) + "개의 워커 스레드를 시작합니다.");
+        corelog::info(std::to_string(num_worker_threads) + " worker threads started.");
 
         // I/O 스레드 풀 시작
         unsigned int num_io_threads = std::max(1u, std::thread::hardware_concurrency());
@@ -161,11 +164,11 @@ int run_server(int argc, char** argv) {
                 try {
                     io.run();
                 } catch (const std::exception& e) {
-                    corelog::error(std::string("I/O 스레드 예외: ") + e.what());
+                    corelog::error(std::string("I/O thread exception: ") + e.what());
                 }
             });
         }
-        corelog::info(std::to_string(num_io_threads) + "개의 I/O 스레드를 시작합니다.");
+        corelog::info(std::to_string(num_io_threads) + " I/O threads started.");
 
         // 정상 종료(Ctrl+C) 처리
         // Pub/Sub 분산 브로드캐스트 구독(옵션)
@@ -235,15 +238,41 @@ int run_server(int argc, char** argv) {
                                     return;
                                 }
 
-                                std::string body;
-                                body.reserve(256);
-                                body += "# TYPE chat_subscribe_total counter\nchat_subscribe_total ";
-                                body += std::to_string(g_subscribe_total.load());
-                                body += "\n# TYPE chat_self_echo_drop_total counter\nchat_self_echo_drop_total ";
-                                body += std::to_string(g_self_echo_drop_total.load());
-                                body += "\n# TYPE chat_subscribe_last_lag_ms gauge\nchat_subscribe_last_lag_ms ";
-                                body += std::to_string(g_subscribe_last_lag_ms.load());
-                                body += "\n";
+                                auto snap = server::core::runtime_metrics::snapshot();
+                                std::ostringstream stream;
+                                auto append_counter = [&](const char* name, std::uint64_t value) {
+                                    stream << "# TYPE " << name << " counter\n" << name << ' ' << value << '\n';
+                                };
+                                auto append_gauge = [&](const char* name, long double value) {
+                                    stream << "# TYPE " << name << " gauge\n" << name << ' ' << std::fixed << std::setprecision(3) << value << '\n';
+                                    stream << std::defaultfloat << std::setprecision(6);
+                                };
+
+                                append_counter("chat_subscribe_total", g_subscribe_total.load());
+                                append_counter("chat_self_echo_drop_total", g_self_echo_drop_total.load());
+                                append_gauge("chat_subscribe_last_lag_ms", static_cast<long double>(g_subscribe_last_lag_ms.load()));
+
+                                append_counter("chat_accept_total", snap.accept_total);
+                                append_counter("chat_session_started_total", snap.session_started_total);
+                                append_counter("chat_session_stopped_total", snap.session_stopped_total);
+                                append_gauge("chat_session_active", static_cast<long double>(snap.session_active));
+                                append_counter("chat_frame_total", snap.frame_total);
+                                append_counter("chat_frame_error_total", snap.frame_error_total);
+                                append_counter("chat_dispatch_total", snap.dispatch_total);
+                                append_counter("chat_dispatch_unknown_total", snap.dispatch_unknown_total);
+                                append_counter("chat_dispatch_exception_total", snap.dispatch_exception_total);
+
+                                auto last_ms = static_cast<long double>(snap.dispatch_latency_last_ns) / 1'000'000.0L;
+                                auto max_ms = static_cast<long double>(snap.dispatch_latency_max_ns) / 1'000'000.0L;
+                                auto sum_ms = static_cast<long double>(snap.dispatch_latency_sum_ns) / 1'000'000.0L;
+                                auto avg_ms = snap.dispatch_latency_count ? (sum_ms / static_cast<long double>(snap.dispatch_latency_count)) : 0.0L;
+                                append_gauge("chat_dispatch_last_latency_ms", last_ms);
+                                append_gauge("chat_dispatch_max_latency_ms", max_ms);
+                                append_gauge("chat_dispatch_latency_sum_ms", sum_ms);
+                                append_gauge("chat_dispatch_latency_avg_ms", avg_ms);
+                                append_counter("chat_dispatch_latency_count", snap.dispatch_latency_count);
+
+                                std::string body = stream.str();
                                 std::string hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n";
                                 std::vector<asio::const_buffer> bufs;
                                 bufs.emplace_back(asio::buffer(hdr));
@@ -268,7 +297,7 @@ int run_server(int argc, char** argv) {
         }
         asio::signal_set signals(io, SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int) {
-            corelog::info("서버 종료 신호 수신...");
+            corelog::info("Shutdown signal received...");
             // Redis Pub/Sub 구독 중지(있다면)
             try { if (redis) { redis->stop_psubscribe(); } } catch (...) {}
             if (metrics_io) { try { metrics_io->stop(); } catch (...) {} }
@@ -284,10 +313,17 @@ int run_server(int argc, char** argv) {
         if (metrics_thread && metrics_thread->joinable()) metrics_thread->join();
         return 0;
     } catch (const std::exception& ex) {
-        corelog::error(std::string("server_app 예외: ") + ex.what());
+        corelog::error(std::string("server_app exception: ") + ex.what());
         return 1;
     }
 }
 
 } // namespace server::app
+
+
+
+
+
+
+
 

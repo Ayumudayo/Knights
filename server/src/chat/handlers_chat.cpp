@@ -196,7 +196,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                     uow->commit();
                 }
             } catch (const std::exception& e) {
-                corelog::error(std::string("메시지 영속화 실패: ") + e.what());
+                corelog::error(std::string("Failed to persist message: ") + e.what());
             }
         }
         if (redis_ && !persisted_room_id.empty() && persisted_msg_id != 0) {
@@ -269,3 +269,4 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
 }
 
 } // namespace server::app::chat
+

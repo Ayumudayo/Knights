@@ -33,7 +33,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         std::string tracked_user_uuid;
         std::string lobby_room_id;
         std::string login_ip = session_sp->remote_ip();
-        corelog::info("LOGIN_REQ 처리 시작 (워커 스레드)");
+        corelog::info("LOGIN_REQ handling started (worker thread)");
         bool guest_mode = (user.empty() || user == "guest");
         std::string new_user = ensure_unique_or_error(*session_sp, user);
         if (new_user.empty()) return;
@@ -160,5 +160,6 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
 }
 
 } // namespace server::app::chat
+
 
 
