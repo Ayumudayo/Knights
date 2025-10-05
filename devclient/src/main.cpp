@@ -13,7 +13,6 @@
 #include <string>
 #include <vector>
 #include <thread>
-#include <mutex>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -34,6 +33,7 @@ using namespace ftxui;
 int main() {
     auto screen = ScreenInteractive::Fullscreen();
     screen.TrackMouse(true);
+    std::atomic<bool> ui_running{false};
 
     // 상태(임시: 네트워크 미연결, UI만 구성)
     std::atomic<bool> connected{false};
@@ -42,7 +42,8 @@ int main() {
     std::vector<std::string> users = {"(미접속)"};
     int users_selected = 0;
     std::vector<std::string> logs;
-    std::mutex logs_mu;
+    std::atomic<bool> log_auto_scroll{true};
+    int log_selected = 0;
     std::string input;
     int left_width = 26; // 좌측 패널 너비(←/→ 키로 조절)
     std::string current_room = "lobby";
@@ -74,20 +75,30 @@ int main() {
 
     auto append_log = [&](std::string s) {
         if (!s.empty() && s.back() == '\n') s.pop_back();
-        {
-            std::lock_guard<std::mutex> lk(logs_mu);
-            logs.emplace_back("[" + now_hms() + "] " + std::move(s));
-        }
-        request_refresh();
-        const size_t kMaxLogs = 1000;
-        {
-            std::lock_guard<std::mutex> lk(logs_mu);
+        std::string line = "[" + now_hms() + "] " + std::move(s);
+        auto update = [&, line = std::move(line)]() mutable {
+            logs.emplace_back(std::move(line));
+            const size_t kMaxLogs = 1000;
             if (logs.size() > kMaxLogs) {
-                logs.erase(logs.begin(), logs.begin() + (logs.size() - kMaxLogs));
+                const auto remove = logs.size() - kMaxLogs;
+                logs.erase(logs.begin(), logs.begin() + remove);
+                log_selected = std::max(0, log_selected - static_cast<int>(remove));
             }
+            if (log_auto_scroll.load()) {
+                log_selected = logs.empty() ? 0 : static_cast<int>(logs.size()) - 1;
+            } else if (!logs.empty()) {
+                log_selected = std::clamp(log_selected, 0, static_cast<int>(logs.size()) - 1);
+            } else {
+                log_selected = 0;
+            }
+            request_refresh();
+        };
+        if (ui_running.load()) {
+            screen.Post(std::move(update));
+        } else {
+            update();
         }
     };
-
     // 메뉴 옵션: 방 이동 시 서버에 /who 질의(미리보기). current_room은 변경하지 않음
     MenuOption rooms_opt;
     rooms_opt.on_change = [&] {
@@ -110,18 +121,23 @@ int main() {
     // 액션 버튼 제거(단축키/Enter만 사용)
     auto input_row = Container::Horizontal({ input_comp });
 
+    MenuOption log_menu_option = MenuOption::Vertical();
+    log_menu_option.underline.enabled = false;
+    log_menu_option.entries_option.transform = [](const EntryState& state) {
+        auto elem = paragraph(state.label);
+        if (state.focused) {
+            elem = elem | bold;
+        }
+        return elem;
+    };
+    log_menu_option.on_change = [&] {
+        int last_index = logs.empty() ? 0 : static_cast<int>(logs.size()) - 1;
+        log_auto_scroll.store(log_selected >= last_index);
+    };
+    auto log_menu = Menu(&logs, &log_selected, log_menu_option);
+
     // 우측(로그) 렌더러: DOM만, 포커스 없음
-    auto right_renderer = Renderer([&] {
-        Elements lines;
-        std::vector<std::string> snapshot;
-        {
-            std::lock_guard<std::mutex> lk(logs_mu);
-            snapshot = logs;
-        }
-        lines.reserve(snapshot.size());
-        for (auto& l : snapshot) {
-            lines.push_back(paragraph(l));
-        }
+    auto right_renderer = Renderer(log_menu, [&] {
         auto sz2 = Terminal::Size();
         int w2 = sz2.dimx;
         bool mid2 = w2 >= 80;
@@ -142,8 +158,8 @@ int main() {
         head.push_back(filler());
         head.push_back(text(connected.load() ? "●" : "○") | color(connected.load() ? Color::Green : Color::Red));
         auto header = hbox(std::move(head));
-
-        return vbox({ header, separator(), vbox(std::move(lines)) | vscroll_indicator | yframe }) | flex;
+        auto log_view = log_menu->Render() | vscroll_indicator | yframe | flex;
+        return vbox({ header, separator(), log_view }) | flex;
     });
 
     // 좌측 렌더러
@@ -169,9 +185,8 @@ int main() {
         return client::ui::RenderStatusBar(st);
     };
 
-    // 레이아웃 전체 렌더러(포커스 이동을 위해 빈 우측 더미 포함)
-    auto right_dummy = Renderer([] { return text(""); });
-    auto top_container = Container::Horizontal({ left_container, right_dummy });
+    // 레이아웃 전체 렌더러(좌측 목록 + 우측 로그)
+    auto top_container = Container::Horizontal({ left_container, right_renderer });
     auto main_container = Container::Vertical({ top_container, input_row });
 
     // 버튼 렌더러 제거
@@ -181,12 +196,8 @@ int main() {
         auto lines = vbox({
             text("단축키") | bold,
             separator(),
-            text("F1  : 도움말 토글"),
-            text("F2  : 방 목록 요청(/rooms)"),
-            text("F3  : 현재 방 유저 목록(/who)"),
-            text("F4  : 입력창에 '/login ' 미리 채움"),
-            text("F5  : 입력창에 '/join ' 미리 채움"),
-            text("F6  : 전체 새로고침(방/유저 동기화)"),
+            text("F1  : 도움말 전환"),
+            text("F5  : 현재 방 새로고침(/refresh)"),
             text("Enter: 메시지 전송  ESC/Ctrl+C: 종료  ←/→: 좌측 폭 조절"),
         });
         return window(text(" 도움말 "), lines) | size(WIDTH, EQUAL, 56) | size(HEIGHT, GREATER_THAN, 10) | center | bgcolor(Color::Black) | color(Color::White);
@@ -244,27 +255,11 @@ int main() {
             show_help = !show_help; request_refresh();
             return true;
         }
-        if (e == Event::F2) { // Rooms
-            if (connected.load()) { net.send_rooms(current_room); }
-            return true;
-        }
-        if (e == Event::F3) { // Who
-            if (connected.load()) { net.send_who(current_room); }
-            return true;
-        }
-        if (e == Event::F6) { // Refresh
+        if (e == Event::F5) { // Refresh
             if (connected.load()) { net.send_refresh(current_room); }
             else {
-                append_log("미연결 상태입니다.");
+                append_log("연결되지 않았습니다.");
             }
-            return true;
-        }
-        if (e == Event::F4) { // Login prefix
-            input = "/login ";
-            return true;
-        }
-        if (e == Event::F5) { // Join prefix
-            input = "/join ";
             return true;
         }
         if (e == Event::ArrowLeft) {
@@ -325,11 +320,20 @@ int main() {
                     current_room = std::move(room);
                     int idx = 0; for (int i=0;i<(int)rooms.size();++i) if (rooms[i]==current_room) { idx=i; break; }
                     rooms_selected = std::clamp(idx, 0, (int)rooms.size()-1);
-                    { std::lock_guard<std::mutex> lk(logs_mu); logs.clear(); }
+                    logs.clear();
+                    log_selected = 0;
+                    log_auto_scroll.store(true);
+                    request_refresh();
                 });
             } else if (text.rfind(username + " 님이 퇴장했습니다", 0) == 0) {
-                screen.Post([&]{ std::lock_guard<std::mutex> lk(logs_mu); logs.clear(); });
+                screen.Post([&]{
+                    logs.clear();
+                    log_selected = 0;
+                    log_auto_scroll.store(true);
+                    request_refresh();
+                });
             }
+
             net.send_refresh(current_room);
         }
         // 일반 메시지 렌더링: sender_sid 우선("me"), 없으면 FLAG_SELF 사용
@@ -366,7 +370,9 @@ int main() {
     if (net.connect("127.0.0.1", 5000)) { connected.store(true); append_log("접속됨: 127.0.0.1:5000"); net.send_login(username, ""); }
     else { append_log("연결 실패"); }
 
+    ui_running.store(true);
     screen.Loop(app_with_events);
+    ui_running.store(false);
 
     // 종료 시 정리
     net.close();
