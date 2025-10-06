@@ -255,9 +255,17 @@ int run_server(int argc, char** argv) {
                                 append_counter("chat_accept_total", snap.accept_total);
                                 append_counter("chat_session_started_total", snap.session_started_total);
                                 append_counter("chat_session_stopped_total", snap.session_stopped_total);
+                                append_counter("chat_session_timeout_total", snap.session_timeout_total);
+                                append_counter("chat_heartbeat_timeout_total", snap.heartbeat_timeout_total);
+                                append_counter("chat_send_queue_drop_total", snap.send_queue_drop_total);
                                 append_gauge("chat_session_active", static_cast<long double>(snap.session_active));
                                 append_counter("chat_frame_total", snap.frame_total);
                                 append_counter("chat_frame_error_total", snap.frame_error_total);
+                                append_counter("chat_frame_payload_sum_bytes", snap.frame_payload_sum_bytes);
+                                append_counter("chat_frame_payload_count", snap.frame_payload_count);
+                                auto payload_avg = snap.frame_payload_count ? (static_cast<long double>(snap.frame_payload_sum_bytes) / static_cast<long double>(snap.frame_payload_count)) : 0.0L;
+                                append_gauge("chat_frame_payload_avg_bytes", payload_avg);
+                                append_gauge("chat_frame_payload_max_bytes", static_cast<long double>(snap.frame_payload_max_bytes));
                                 append_counter("chat_dispatch_total", snap.dispatch_total);
                                 append_counter("chat_dispatch_unknown_total", snap.dispatch_unknown_total);
                                 append_counter("chat_dispatch_exception_total", snap.dispatch_exception_total);
@@ -271,6 +279,22 @@ int run_server(int argc, char** argv) {
                                 append_gauge("chat_dispatch_latency_sum_ms", sum_ms);
                                 append_gauge("chat_dispatch_latency_avg_ms", avg_ms);
                                 append_counter("chat_dispatch_latency_count", snap.dispatch_latency_count);
+                                append_gauge("chat_job_queue_depth", static_cast<long double>(snap.job_queue_depth));
+                                append_gauge("chat_job_queue_depth_peak", static_cast<long double>(snap.job_queue_depth_peak));
+                                append_gauge("chat_memory_pool_capacity", static_cast<long double>(snap.memory_pool_capacity));
+                                append_gauge("chat_memory_pool_in_use", static_cast<long double>(snap.memory_pool_in_use));
+                                append_gauge("chat_memory_pool_in_use_peak", static_cast<long double>(snap.memory_pool_in_use_peak));
+
+                                if (!snap.opcode_counts.empty()) {
+                                    stream << "# TYPE chat_dispatch_opcode_total counter\r\n";
+                                    for (const auto& [opcode, count] : snap.opcode_counts) {
+                                        std::ostringstream label;
+                                        label << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << opcode;
+                                        stream << "chat_dispatch_opcode_total{opcode=\"0x" << label.str() << "\"} " << count << "\r\n";
+                                    }
+                                }
+
+                                stream << std::setfill(' ') << std::dec << std::nouppercase;
 
                                 std::string body = stream.str();
                                 std::string hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n";

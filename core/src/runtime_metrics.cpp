@@ -1,7 +1,11 @@
 #include "server/core/runtime_metrics.hpp"
 
-#include <atomic>
 #include <algorithm>
+#include <array>
+#include <atomic>
+#include <cstddef>
+#include <utility>
+#include <vector>
 
 namespace server::core::runtime_metrics {
 
@@ -11,8 +15,14 @@ struct RuntimeCounters {
     std::atomic<std::uint64_t> session_started_total{0};
     std::atomic<std::uint64_t> session_stopped_total{0};
     std::atomic<std::uint64_t> session_active{0};
+    std::atomic<std::uint64_t> session_timeout_total{0};
+    std::atomic<std::uint64_t> heartbeat_timeout_total{0};
+    std::atomic<std::uint64_t> send_queue_drop_total{0};
     std::atomic<std::uint64_t> frame_total{0};
     std::atomic<std::uint64_t> frame_error_total{0};
+    std::atomic<std::uint64_t> frame_payload_sum_bytes{0};
+    std::atomic<std::uint64_t> frame_payload_count{0};
+    std::atomic<std::uint64_t> frame_payload_max_bytes{0};
     std::atomic<std::uint64_t> dispatch_total{0};
     std::atomic<std::uint64_t> dispatch_unknown_total{0};
     std::atomic<std::uint64_t> dispatch_exception_total{0};
@@ -20,6 +30,12 @@ struct RuntimeCounters {
     std::atomic<std::uint64_t> dispatch_latency_count{0};
     std::atomic<std::uint64_t> dispatch_latency_last_ns{0};
     std::atomic<std::uint64_t> dispatch_latency_max_ns{0};
+    std::atomic<std::uint64_t> job_queue_depth{0};
+    std::atomic<std::uint64_t> job_queue_depth_peak{0};
+    std::atomic<std::uint64_t> memory_pool_capacity{0};
+    std::atomic<std::uint64_t> memory_pool_in_use{0};
+    std::atomic<std::uint64_t> memory_pool_in_use_peak{0};
+    std::array<std::atomic<std::uint64_t>, 65536> opcode_counters{};
 };
 
 RuntimeCounters& counters() {
@@ -43,12 +59,39 @@ void record_session_stop() {
     counters().session_active.fetch_sub(1, std::memory_order_relaxed);
 }
 
+void record_session_timeout() {
+    counters().session_timeout_total.fetch_add(1, std::memory_order_relaxed);
+}
+
+void record_heartbeat_timeout() {
+    counters().heartbeat_timeout_total.fetch_add(1, std::memory_order_relaxed);
+}
+
+void record_send_queue_drop() {
+    counters().send_queue_drop_total.fetch_add(1, std::memory_order_relaxed);
+}
+
 void record_frame_ok() {
     counters().frame_total.fetch_add(1, std::memory_order_relaxed);
 }
 
 void record_frame_error() {
     counters().frame_error_total.fetch_add(1, std::memory_order_relaxed);
+}
+
+void record_frame_payload(std::size_t bytes) {
+    counters().frame_payload_sum_bytes.fetch_add(static_cast<std::uint64_t>(bytes), std::memory_order_relaxed);
+    counters().frame_payload_count.fetch_add(1, std::memory_order_relaxed);
+    auto& max_ref = counters().frame_payload_max_bytes;
+    std::uint64_t current = max_ref.load(std::memory_order_relaxed);
+    const std::uint64_t value = static_cast<std::uint64_t>(bytes);
+    while (current < value && !max_ref.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
+        // retry
+    }
+}
+
+void record_dispatch_opcode(std::uint16_t opcode) {
+    counters().opcode_counters[opcode].fetch_add(1, std::memory_order_relaxed);
 }
 
 void record_dispatch_attempt(bool handler_found, std::chrono::nanoseconds elapsed) {
@@ -72,6 +115,47 @@ void record_dispatch_exception() {
     counters().dispatch_exception_total.fetch_add(1, std::memory_order_relaxed);
 }
 
+void record_job_queue_depth(std::size_t depth) {
+    counters().job_queue_depth.store(static_cast<std::uint64_t>(depth), std::memory_order_relaxed);
+    auto& peak_ref = counters().job_queue_depth_peak;
+    std::uint64_t current_peak = peak_ref.load(std::memory_order_relaxed);
+    std::uint64_t value = static_cast<std::uint64_t>(depth);
+    while (current_peak < value && !peak_ref.compare_exchange_weak(current_peak, value, std::memory_order_relaxed)) {
+        // retry
+    }
+}
+
+void register_memory_pool_capacity(std::size_t capacity) {
+    const auto cap = static_cast<std::uint64_t>(capacity);
+    counters().memory_pool_capacity.store(cap, std::memory_order_relaxed);
+
+    auto& in_use_ref = counters().memory_pool_in_use;
+    auto current_in_use = in_use_ref.load(std::memory_order_relaxed);
+    if (current_in_use > cap) {
+        in_use_ref.store(cap, std::memory_order_relaxed);
+        current_in_use = cap;
+    }
+
+    auto& peak_ref = counters().memory_pool_in_use_peak;
+    auto peak = peak_ref.load(std::memory_order_relaxed);
+    if (peak > cap) {
+        peak_ref.store(cap, std::memory_order_relaxed);
+    }
+}
+
+void record_memory_pool_acquire() {
+    auto current = counters().memory_pool_in_use.fetch_add(1, std::memory_order_relaxed) + 1;
+    auto& peak_ref = counters().memory_pool_in_use_peak;
+    std::uint64_t peak = peak_ref.load(std::memory_order_relaxed);
+    while (peak < current && !peak_ref.compare_exchange_weak(peak, current, std::memory_order_relaxed)) {
+        // retry
+    }
+}
+
+void record_memory_pool_release() {
+    counters().memory_pool_in_use.fetch_sub(1, std::memory_order_relaxed);
+}
+
 Snapshot snapshot() {
     Snapshot snap{};
     auto& c = counters();
@@ -79,8 +163,14 @@ Snapshot snapshot() {
     snap.session_started_total = c.session_started_total.load(std::memory_order_relaxed);
     snap.session_stopped_total = c.session_stopped_total.load(std::memory_order_relaxed);
     snap.session_active = c.session_active.load(std::memory_order_relaxed);
+    snap.session_timeout_total = c.session_timeout_total.load(std::memory_order_relaxed);
+    snap.heartbeat_timeout_total = c.heartbeat_timeout_total.load(std::memory_order_relaxed);
+    snap.send_queue_drop_total = c.send_queue_drop_total.load(std::memory_order_relaxed);
     snap.frame_total = c.frame_total.load(std::memory_order_relaxed);
     snap.frame_error_total = c.frame_error_total.load(std::memory_order_relaxed);
+    snap.frame_payload_sum_bytes = c.frame_payload_sum_bytes.load(std::memory_order_relaxed);
+    snap.frame_payload_count = c.frame_payload_count.load(std::memory_order_relaxed);
+    snap.frame_payload_max_bytes = c.frame_payload_max_bytes.load(std::memory_order_relaxed);
     snap.dispatch_total = c.dispatch_total.load(std::memory_order_relaxed);
     snap.dispatch_unknown_total = c.dispatch_unknown_total.load(std::memory_order_relaxed);
     snap.dispatch_exception_total = c.dispatch_exception_total.load(std::memory_order_relaxed);
@@ -88,8 +178,20 @@ Snapshot snapshot() {
     snap.dispatch_latency_count = c.dispatch_latency_count.load(std::memory_order_relaxed);
     snap.dispatch_latency_last_ns = c.dispatch_latency_last_ns.load(std::memory_order_relaxed);
     snap.dispatch_latency_max_ns = c.dispatch_latency_max_ns.load(std::memory_order_relaxed);
+    snap.job_queue_depth = c.job_queue_depth.load(std::memory_order_relaxed);
+    snap.job_queue_depth_peak = c.job_queue_depth_peak.load(std::memory_order_relaxed);
+    snap.memory_pool_capacity = c.memory_pool_capacity.load(std::memory_order_relaxed);
+    snap.memory_pool_in_use = c.memory_pool_in_use.load(std::memory_order_relaxed);
+    snap.memory_pool_in_use_peak = c.memory_pool_in_use_peak.load(std::memory_order_relaxed);
+
+    for (std::size_t i = 0; i < c.opcode_counters.size(); ++i) {
+        auto value = c.opcode_counters[i].load(std::memory_order_relaxed);
+        if (value != 0) {
+            snap.opcode_counts.emplace_back(static_cast<std::uint16_t>(i), value);
+        }
+    }
+
     return snap;
 }
 
 } // namespace server::core::runtime_metrics
-

@@ -75,6 +75,7 @@ void Session::async_send(BufferManager::PooledBuffer data, size_t frame_size) {
     asio::dispatch(strand_, [self = shared_from_this(), data = std::move(data), frame_size]() mutable {
         if (self->stopped_) return;
         if (self->options_ && self->options_->send_queue_max > 0 && self->queued_bytes_ + frame_size > self->options_->send_queue_max) {
+            runtime_metrics::record_send_queue_drop();
             log::warn("Send queue limit exceeded; stopping session");
             self->stop();
             return;
@@ -165,9 +166,11 @@ void Session::do_read_body(std::size_t body_len) {
     auto self = shared_from_this();
     if (body_len == 0) {
         // payload가 비어 있으면 빈 span을 그대로 전달한다.
+        runtime_metrics::record_frame_payload(0);
         runtime_metrics::record_frame_ok();
         auto start = std::chrono::steady_clock::now();
         bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>{});
+        runtime_metrics::record_dispatch_opcode(header_.msg_id);
         auto elapsed = std::chrono::steady_clock::now() - start;
         runtime_metrics::record_dispatch_attempt(handled, elapsed);
         if (!handled) {
@@ -205,9 +208,11 @@ void Session::do_read_body(std::size_t body_len) {
             }
             // 본문까지 읽었으니 읽기 타임아웃을 재설정한다.
             arm_read_timeout();
+            runtime_metrics::record_frame_payload(header_.length);
             runtime_metrics::record_frame_ok();
             auto start = std::chrono::steady_clock::now();
             bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_.length));
+            runtime_metrics::record_dispatch_opcode(header_.msg_id);
             auto elapsed = std::chrono::steady_clock::now() - start;
             runtime_metrics::record_dispatch_attempt(handled, elapsed);
             if (!handled) {
@@ -291,6 +296,7 @@ void Session::arm_read_timeout() {
         read_timer_.expires_after(std::chrono::milliseconds(options_->read_timeout_ms));
         read_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec) {
             if (ec || stopped_) return; // 취소되었거나 세션이 종료된 경우 무시한다.
+            runtime_metrics::record_session_timeout();
             log::warn("read timeout");
             stop();
         }));
@@ -306,7 +312,9 @@ void Session::arm_heartbeat() {
         heartbeat_timer_.expires_after(std::chrono::milliseconds(options_->heartbeat_interval_ms));
         heartbeat_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec) {
             if (ec || stopped_) return; // 타이머가 취소되었거나 세션이 이미 종료된 경우 무시한다.
-            arm_heartbeat();
+            runtime_metrics::record_heartbeat_timeout();
+            log::warn("heartbeat timeout");
+            stop();
         }));
     });
 }

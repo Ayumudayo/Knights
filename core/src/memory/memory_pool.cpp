@@ -1,4 +1,6 @@
 #include "server/core/memory/memory_pool.hpp"
+#include "server/core/runtime_metrics.hpp"
+
 #include <stdexcept>
 
 namespace server::core {
@@ -8,12 +10,14 @@ namespace server::core {
 MemoryPool::MemoryPool(size_t blockSize, size_t blockCount)
     : blockSize_(blockSize) {
     if (blockSize == 0 || blockCount == 0) {
+        runtime_metrics::register_memory_pool_capacity(0);
         return;
     }
     memoryChunk_.resize(blockSize * blockCount);
     for (size_t i = 0; i < blockCount; ++i) {
         freeList_.push(memoryChunk_.data() + i * blockSize);
     }
+    runtime_metrics::register_memory_pool_capacity(freeList_.size());
 }
 
 MemoryPool::~MemoryPool() {}
@@ -27,6 +31,7 @@ void* MemoryPool::Acquire() {
     }
     void* ptr = freeList_.top();
     freeList_.pop();
+    runtime_metrics::record_memory_pool_acquire();
     return ptr;
 }
 
@@ -35,8 +40,8 @@ void MemoryPool::Release(void* ptr) {
     std::lock_guard<std::mutex> lock(mutex_);
     // Optional: Check if the pointer belongs to our chunk for safety.
     freeList_.push(ptr);
+    runtime_metrics::record_memory_pool_release();
 }
-
 
 // --- BufferManager Implementation ---
 
