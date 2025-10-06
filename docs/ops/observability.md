@@ -82,3 +82,20 @@
 - 필수 모니터링: 연결 수, 처리량, 오류율, P99 지연, 시스템 리소스, Redis/DB 헬스체크
 \n## Redis Pub/Sub 테스트 주의사항\n- 서버 인스턴스를 2개 이상 띄우고 분산 브로드캐스트를 검증하려면 USE_REDIS_PUBSUB=1, 동일한 REDIS_URI/REDIS_CHANNEL_PREFIX를 설정한다.\n- 각 인스턴스는 고유한 GATEWAY_ID와 겹치지 않는 METRICS_PORT를 사용해 /metrics 충돌을 피한다.\n- 두 인스턴스가 같은 Redis 채널을 통해 메시지를 주고받아야 chat_subscribe_total, chat_self_echo_drop_total, chat_subscribe_last_lag_ms 값이 변한다.\n- 현재 노출된 메트릭은 Pub/Sub 경로에 한정돼 있으므로 세션 처리, 핸들러 실행, DB/Redis I/O 지연 등을 측정하려면 추가 계측이 필요하다.\n
 - 서버는 /metrics에서 chat_accept_total, chat_session_active, chat_dispatch_latency_* 등 런타임 지표를 노출한다. Prometheus → Grafana 기본 대시보드(server-metrics.json)를 통해 즉시 확인할 수 있다.
+## Runtime Metrics (/metrics) 현황 (2025-10)
+- `server_app`는 `METRICS_PORT` 설정 시 `http://<host>:METRICS_PORT/metrics`에서 Prometheus 텍스트 포맷을 노출합니다.
+- 노출 지표 범주:
+  - **세션/구독**: `chat_subscribe_total`, `chat_self_echo_drop_total`, `chat_subscribe_last_lag_ms`, `chat_accept_total`, `chat_session_started_total`, `chat_session_stopped_total`, `chat_session_timeout_total`, `chat_heartbeat_timeout_total`, `chat_send_queue_drop_total`, `chat_session_active`.
+  - **프레임/디스패치**: `chat_frame_total`, `chat_frame_error_total`, `chat_frame_payload_sum_bytes`, `chat_frame_payload_count`, `chat_frame_payload_avg_bytes`, `chat_frame_payload_max_bytes`, `chat_dispatch_total`, `chat_dispatch_unknown_total`, `chat_dispatch_exception_total`, `chat_dispatch_last_latency_ms`, `chat_dispatch_max_latency_ms`, `chat_dispatch_latency_sum_ms`, `chat_dispatch_latency_avg_ms`, `chat_dispatch_latency_count`.
+  - **인프라**: `chat_job_queue_depth`, `chat_job_queue_depth_peak`, `chat_memory_pool_capacity`, `chat_memory_pool_in_use`, `chat_memory_pool_in_use_peak`.
+  - **Opcode 카운터**: `chat_dispatch_opcode_total{opcode="0xNNNN"}` (핸들러별 누적 호출 수).
+- 텍스트 포맷은 `\n` 줄바꿈만 사용해야 하며, `\r`이 섞이면 Prometheus에서 `invalid metric type` 경고가 발생합니다.
+
+## Grafana 대시보드 (server-metrics.json)
+- `docker/observability/grafana/dashboards/server-metrics.json`을 프로비저닝하면 다음 패널을 확인할 수 있습니다.
+  - 세션/연결: `Active Sessions`, `Accepted Connections`, `Subscribe Lag (ms)`, `Session Churn (/s)`
+  - 디스패치 지연/예외: `Dispatch Avg Latency`, `Dispatch Latency (ms)`, `Dispatch Exceptions`
+  - 처리량: `Frame Throughput (/s)`, `Dispatch Throughput (/s)`, `Timeouts & Drops (/s)`
+  - 리소스: `Job Queue Depth`, `Memory Pool Usage`
+  - 분포/기타: `Frame Payload Size (bytes)`, `Frame Payload Volume (/s)`, `Dispatch Opcode Totals`(테이블)
+- JSON을 수정했을 경우 Grafana 인스턴스를 재시작하거나 대시보드를 재import해야 반영됩니다.

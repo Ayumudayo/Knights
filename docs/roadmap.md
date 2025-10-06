@@ -114,6 +114,9 @@
 
 ## 6) 테스트/운영/관측성 — [todo]
 - [todo] 최소 단위/통합 테스트 추가(리포지토리, 러너 dry-run, presence 경로)
+- [done] 런타임 메트릭 확장(/metrics) 및 Grafana 기본 대시보드 반영 (2025-10)
+- [done] Heartbeat 타이머 동작 복원 및 관련 메트릭 정정
+- [done] devclient 도움말 오버레이 UX 개선(F1 토글)
 - [todo] 빌드 매트릭스(MSVC/GCC/Clang), 샘플 .env 기반 CI 단계
 - [todo] 로깅 강화: 구조적 로그(JSON), 레벨/필드 표준화(trace_id, user_id, session_id, room), 회전/보존 정책
 - [todo] 모니터링: Prometheus 지표 수집 + Grafana 대시보드(또는 동등 솔루션), 핵심 지표(fanout 지연, 에러율, presence TTL 히트율, DB/Redis 지연)
@@ -169,21 +172,36 @@
 - `docs/db/redis-strategy.md` — presence/publish/키 설계
 - `docs/protocol.md` — 브로드캐스트 포맷 규칙
 
-## 7) Auth Service — [ready]
+## 7) 귓속말/잠금 방 — [todo]
+- [todo] 로그인 사용자 간 `/whisper <user> <text>` 명령 지원 — 미로그인/대상 없음은 에러 응답
+- [todo] 서버 로그에 `[whisper]` 형태로 송신·수신 기록 남기기(추후 마스킹 정책 검토)
+- [todo] devclient 입력창 명령 파서 추가, 수신 메시지는 `[whisper from/to]` 접두어로 구분
+- [todo] 비밀번호 보호 방 생성/입장 흐름(`/join <room> <password>`), 참가자 목록 요청 차단
+- [todo] 잠금 방 표식(방 목록에서 `🔒 room` 형태) 및 잘못된 비밀번호 안내 메시지
+
+완료 기준(DoD)
+- 인증된 사용자 간 귓속말이 정상 교환되고 로그에 남음
+- 잠금 방 생성/입장/거부 시나리오가 문서화된 명령으로 동작
+
+리스크/의존성
+- 사용자명이 중복될 수 있으므로 세션별 구분 정책 필요(동명이인 처리)
+- 귓속말 로그에 민감 정보가 포함될 수 있음 → 정책/보관 기한 정의 필요
+
+## 8) Auth Service — [ready]
 - 작업: Register/Login/Refresh/Logout, Argon2id 해시, 로그인 시도/락아웃, 리포지토리/마이그레이션
 - DoD: ID/PW 로그인·세션 발급·만료·로그아웃 정상 동작, 기본 레이트 리밋
 - 리스크: 해시 파라미터/마이그레이션 비용, 보안 설정 누락
 
-## 8) Gateway 고도화 — [ready]
+## 9) Gateway 고도화 — [ready]
 - 작업: TLS 종료, 헬스체크/드레인, heartbeat 경량 경로로 user TTL 갱신, Pub/Sub 구독 브릿지(envelope/gateway_id)
 - DoD: 롤링 배포 중 연결 드레인 무중단, 멀티 인스턴스에서 브로드캐스트 수신·재전파
 - 리스크: GATEWAY_ID 오배포(중복 필터 무력화), 재연결 백오프
 
-## 9) 분산 운영 가드 — [todo]
+## 10) 분산 운영 가드 — [todo]
 - 작업: envelope(origin,gateway_id,room,ts), self‑echo 필터, backoff, 장애주입
 - DoD: 중복 재전파 0, 네트워크 플랩 내성
 
-## 10) DB 파티셔닝/샤딩 PoC — [todo]
+## 11) DB 파티셔닝/샤딩 PoC — [todo]
 - 작업: messages/memberships 파티션(room_id), Citus PoC, 크로스 샤드 최소화
 - DoD: 파티션 플랜 검증, 주요 쿼리 성능/정합 통과
 
