@@ -1,4 +1,3 @@
-// UTF-8, 한국어 주석
 #include "server/chat/chat_service.hpp"
 #include "server/core/protocol/opcodes.hpp"
 #include "server/core/protocol/frame.hpp"
@@ -6,7 +5,7 @@
 #include "server/core/util/log.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
-// storage
+// 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/repositories.hpp"
 #include "server/storage/redis/client.hpp"
@@ -153,7 +152,7 @@ std::string ChatService::ensure_unique_or_error(Session& s, const std::string& d
         }
         return desired;
     }
-    // 임시 닉 생성: UUID 앞 8자(랜덤 32비트 근사)
+    // 임시 닉네임은 UUID의 앞 8자를 잘라 32비트 난수 근사로 사용한다.
     for (int i=0;i<4;++i) {
         std::string cand = gen_temp_name_uuid8();
         if (!state_.by_user.count(cand) || state_.by_user[cand].empty()) return cand;
@@ -265,12 +264,12 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
             }
         }
     }
-    // 최근 메시지 로딩(DB 경로)
+    // DB에서 최근 메시지를 불러온다.
     if (db_pool_) {
         try {
             std::string rid = ensure_room_id_ci(current);
             if (!rid.empty()) {
-                // 환경 기반 제한값
+                // 환경 변수로 최대 개수를 제한한다.
                 std::size_t limit = 20; if (const char* v = std::getenv("SNAPSHOT_RECENT_LIMIT")) { unsigned long n = std::strtoul(v, nullptr, 10); if (n >= 5 && n <= 200) limit = static_cast<std::size_t>(n); }
                 std::size_t fetch_factor = 3; if (const char* v = std::getenv("SNAPSHOT_FETCH_FACTOR")) { unsigned long n = std::strtoul(v, nullptr, 10); if (n >= 1 && n <= 10) fetch_factor = static_cast<std::size_t>(n); }
 
@@ -294,10 +293,10 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                     if (last_seen == 0) {
                         since_id = (last_id > limit) ? (last_id - limit) : 0;
                     } else if (last_seen >= last_id) {
-                        // 모두 읽은 상태: 최근 limit만
+                        // 모든 메시지를 이미 읽었다면 최신 limit개만 반환한다.
                         since_id = (last_id > limit) ? (last_id - limit) : 0;
                     } else {
-                        // 일부 미읽음 존재: 컨텍스트 포함하여 제한 배수만큼 여유롭게 조회
+                        // 일부 미읽음이 남아 있다면 컨텍스트를 포함해 제한 배수만큼 조회한다.
                         std::uint64_t context = static_cast<std::uint64_t>(limit) * static_cast<std::uint64_t>(fetch_factor);
                         if (last_id > context) {
                             std::uint64_t cut = last_id - context;
@@ -309,7 +308,7 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                 }
 
                 auto msgs = uow->messages().fetch_recent_by_room(rid, since_id, static_cast<std::size_t>(limit * fetch_factor));
-                // 필요한 만큼만(마지막 limit개) 응답에 포함
+                // 응답에는 필요한 만큼만(마지막 limit개) 포함한다.
                 if (msgs.size() > limit) {
                     msgs.erase(msgs.begin(), msgs.end() - static_cast<std::ptrdiff_t>(limit));
                 }
@@ -336,7 +335,7 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
 
 } // namespace server::app::chat
 
-// 추가 구현: 외부 수신 브로드캐스트를 룸에 전파
+// 외부에서 수신한 브로드캐스트를 방에 전달한다.
 namespace server::app::chat {
 
 void ChatService::broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, Session* self) {
@@ -353,14 +352,14 @@ void ChatService::broadcast_room(const std::string& room, const std::vector<std:
         }
     }
     for (auto& t : targets) {
-        int f = 0; // 재전파에는 self 플래그 사용 안 함
+        int f = 0; // 재전파에는 self 플래그를 사용하지 않는다.
         t->async_send(proto::MSG_CHAT_BROADCAST, body, f);
     }
 }
 
 } // namespace server::app::chat
 
-// 별도 구현부: 저장소 보조 함수
+// 저장소 보조 함수를 별도 섹션으로 분리한다.
 namespace server::app::chat {
 
 void ChatService::send_system_notice(Session& s, const std::string& text) {
@@ -534,6 +533,3 @@ std::string ChatService::ensure_room_id_ci(const std::string& room_name) {
 }
 
 } // namespace server::app::chat
-
-
-

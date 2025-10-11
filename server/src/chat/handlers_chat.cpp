@@ -1,4 +1,3 @@
-// UTF-8, 한국어 주석
 #include "server/chat/chat_service.hpp"
 #include "server/core/protocol/opcodes.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
@@ -6,7 +5,7 @@
 #include "server/core/util/log.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
-// storage
+// 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/repositories.hpp"
 #include "server/storage/redis/client.hpp"
@@ -46,7 +45,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
     auto session_sp = s.shared_from_this();
     job_queue_.Push([this, session_sp, room, text]() {
         corelog::info(std::string("CHAT_SEND: room=") + (room.empty()?"(empty)":room) + ", text=" + text);
-        // /refresh는 인증 없이도 허용(스냅샷 반환)
+        // 채팅 입력에서 /refresh 명령을 직접 처리해 현재 방 스냅샷을 갱신한다.
         if (text == "/refresh") {
             std::string current;
             {
@@ -55,7 +54,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 current = (itcr != state_.cur_room.end()) ? itcr->second : std::string("lobby");
             }
             send_snapshot(*session_sp, current); 
-            // 읽음 처리: 현재 방의 마지막 메시지 id로 last_seen 갱신
+            // 스냅샷 응답 후 membership.last_seen을 최신 메시지 id로 갱신한다.
             if (db_pool_) {
                 try {
                     std::string uid;
@@ -79,7 +78,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             }
             return;
         }
-        // 인증 체크
+        // 인증 상태와 현재 방 정보를 확인한다.
         std::string current_room = room;
         {
             std::lock_guard<std::mutex> lk(state_.mu);
@@ -96,7 +95,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 current_room = it->second;
             }
         }
-        // 슬래시 명령
+        // 슬래시 명령 분기를 처리한다.
         if (!text.empty() && text[0] == '/') {
             if (text == "/rooms") { send_rooms_list(*session_sp); return; }
             if (text.rfind("/who", 0) == 0) {
@@ -136,7 +135,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 return;
             }
         }
-        // 일반 채팅
+        // 일반 채널 브로드캐스트 경로.
         std::vector<std::shared_ptr<Session>> targets;
         std::string sender;
         {
@@ -168,7 +167,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); 
         pb.set_ts_ms(static_cast<std::uint64_t>(now64));
         std::string bytes; pb.SerializeToString(&bytes);
-        // 영속화(최소 경로): Postgres 메시지 저장 + Redis 최근 리스트 추가
+        // 영속화(옵션): Postgres 메시지 저장 후 Redis 최근 목록을 갱신한다.
         std::string persisted_room_id;
         std::uint64_t persisted_msg_id = 0;
         if (db_pool_) {
@@ -191,7 +190,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             }
         }
         if (redis_ && !persisted_room_id.empty() && persisted_msg_id != 0) {
-            // 매우 단순한 JSON 문자열 구성(스냅샷 포맷과 별개, 스모크용)
+            // Redis에는 최근 메시지를 단순 JSON 문자열 형태로 적재한다.
             std::string json = std::string("{") +
                 "\"id\":" + std::to_string(persisted_msg_id) + "," +
                 "\"sender\":\"" + sender + "\"," +
@@ -210,7 +209,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 t->async_send(proto::MSG_CHAT_BROADCAST, std::vector<std::uint8_t>(bytes.begin(), bytes.end()), f); 
             } 
         }
-        // 프레즌스(user) heartbeat(옵션 TTL 갱신)
+        // 사용자 프레즌스 heartbeat TTL을 갱신한다.
         if (redis_) {
             try {
                 std::string uid; { std::lock_guard<std::mutex> lk(state_.mu); auto it = state_.user_uuid.find(session_sp.get()); if (it != state_.user_uuid.end()) uid = it->second; }
@@ -221,7 +220,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 }
             } catch (...) {}
         }
-        // Redis Pub/Sub 분산 브로드캐스트(옵션)
+        // Redis Pub/Sub 팬아웃(옵션)을 수행한다.
         if (redis_) {
             try {
                 if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
@@ -240,7 +239,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 }
             } catch (...) {}
         }
-        // 본인이 보낸 메시지는 읽음 처리: last_seen = persisted_msg_id
+        // 마지막으로 본 메시지 id를 membership.last_seen에 반영한다.
         if (db_pool_ && persisted_msg_id > 0 && !persisted_room_id.empty()) {
             try {
                 std::string uid;
