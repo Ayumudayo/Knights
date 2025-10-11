@@ -1,11 +1,10 @@
-// UTF-8, 한국어 주석
 #include "server/chat/chat_service.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/protocol/opcodes.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
-// storage
+// 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/repositories.hpp"
 #include <algorithm>
@@ -59,10 +58,10 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
             state_.rooms[room].insert(session_sp);
         }
 
-        // 게스트/로그인 사용자 모두에 대해 UUID 부여 및 IP 기록(최소 경로)
+        // 게스트와 로그인 사용자를 모두 UUID로 식별하고 IP를 기록한다.
         if (db_pool_) {
             try {
-                // UUID가 없으면 게스트 유저 생성
+                // UUID가 없으면 게스트 사용자 레코드를 생성한다.
                 std::string uid;
                 {
                     std::lock_guard<std::mutex> lk(state_.mu);
@@ -77,9 +76,9 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                     std::lock_guard<std::mutex> lk(state_.mu);
                     state_.user_uuid[session_sp.get()] = uid;
                 }
-                // 추적용 user_uuid 세팅(Write-behind 이벤트에 반영)
+                // write-behind 이벤트용 user_uuid를 저장한다.
                 if (!uid.empty()) { tracked_user_uuid = uid; }
-                // 게스트 모드라면 닉네임을 UUID 앞 8자로 정규화
+                // 게스트라면 닉네임을 UUID 앞 8자로 정규화한다.
                 if (guest_mode && !uid.empty()) {
                     std::string uuid8 = uid;
                     uuid8.erase(std::remove(uuid8.begin(), uuid8.end(), '-'), uuid8.end());
@@ -96,17 +95,17 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                     new_user = uuid8;
                 }
 
-                // users 테이블에 마지막 로그인 IP/시각 기록
+                // users 테이블에 마지막 로그인 IP와 시각을 기록한다.
                 {
                     auto ip = login_ip;
                     auto uow3 = db_pool_->make_unit_of_work();
                     uow3->users().update_last_login(uid, ip);
                     uow3->commit();
                 }
-                // 현재 룸의 room_id 확보 후 시스템 메시지로 IP 기록
+                // 현재 방의 room_id를 확보한 뒤 시스템 메시지로 IP를 남긴다.
                 auto rid = ensure_room_id_ci("lobby");
                 if (!rid.empty()) {
-                    lobby_room_id = rid; // write-behind 필드에 사용
+                    lobby_room_id = rid; // write-behind 이벤트에 활용한다.
                     auto ip = login_ip;
                     auto uow2 = db_pool_->make_unit_of_work();
                     std::string sys = std::string("(login ip=") + ip + ")";
@@ -125,7 +124,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         std::vector<std::uint8_t> res(bytes.begin(), bytes.end());
         session_sp->async_send(proto::MSG_LOGIN_RES, res, 0);
 
-        // 프레즌스(user) TTL 유지: presence:user:{user_id} = 1, TTL
+        // 프레즌스 TTL 유지를 위해 presence:user:{user_id} 키를 갱신한다.
         if (redis_) {
             try {
                 std::string uid;
@@ -134,16 +133,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                     auto it = state_.user_uuid.find(session_sp.get());
                     if (it != state_.user_uuid.end()) uid = it->second;
                 }
-                if (!uid.empty()) {
-                    unsigned int ttl = 30; // 기본 30초
-                    if (const char* v = std::getenv("PRESENCE_TTL_SEC")) {
-                        unsigned long t = std::strtoul(v, nullptr, 10);
-                        if (t > 0 && t < 3600) ttl = static_cast<unsigned int>(t);
-                    }
-                    std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
-                    std::string key = pfx + std::string("presence:user:") + uid;
-                    redis_->setex(key, "1", ttl);
-                }
+                touch_user_presence(uid);
             } catch (...) {}
         }
         std::optional<std::string> uid_opt;

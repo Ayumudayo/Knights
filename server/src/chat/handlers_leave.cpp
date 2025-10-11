@@ -1,4 +1,3 @@
-// UTF-8, 한국어 주석
 #include "server/chat/chat_service.hpp"
 #include "server/core/protocol/opcodes.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
@@ -17,7 +16,7 @@ namespace server::app::chat {
 void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
     auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
     std::string room;
-    proto::read_lp_utf8(sp, room); // 방 이름 파싱은 실패해도 진행
+    proto::read_lp_utf8(sp, room); // 방 이름 파싱은 실패해도 계속 진행한다.
 
     auto session_sp = s.shared_from_this();
     job_queue_.Push([this, session_sp, room]() {
@@ -54,17 +53,14 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
                 auto itb = state_.rooms.find(room_to_leave);
                 if (itb != state_.rooms.end()) {
                     auto& set = itb->second;
-                    for (auto wit = set.begin(); wit != set.end(); ) {
-                        if (auto p = wit->lock()) { targets.emplace_back(std::move(p)); ++wit; }
-                        else { wit = set.erase(wit); }
-                    }
+                    collect_room_sessions(set, targets);
                     if (set.empty() && room_to_leave != std::string("lobby")) { state_.rooms.erase(itb); state_.room_passwords.erase(room_to_leave); }
                 }
             }
             state_.cur_room[session_sp.get()] = std::string("lobby");
             state_.rooms["lobby"].insert(session_sp);
         }
-        // 방 퇴장 브로드캐스트(Protobuf)
+        // 방 퇴장 브로드캐스트 메시지를 구성한다.
         if (!room_to_leave.empty()) {
             server::wire::v1::ChatBroadcast pb;
             pb.set_room(room_to_leave);
@@ -81,7 +77,7 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
                 t->async_send(proto::MSG_CHAT_BROADCAST, body, f);
             }
         }
-        // Redis presence: 방 SET에서 제거
+        // Redis 프레즌스 SET에서 사용자를 제거한다.
         if (redis_ && !room_to_leave.empty()) {
             try {
                 std::string uid;
@@ -94,14 +90,12 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
                     auto rid = ensure_room_id_ci(room_to_leave);
                     room_uuid = rid;
                     if (!rid.empty()) {
-                        std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
-                        std::string pkey = pfx + std::string("presence:room:") + rid;
-                        redis_->srem(pkey, uid);
+                        redis_->srem(make_presence_key("presence:room:", rid), uid);
                     }
                 }
             } catch (...) {}
         }
-        // 로비 입장 알림(Protobuf)
+        // 로비 입장 알림 메시지를 전송한다.
         std::vector<std::shared_ptr<Session>> t2;
         std::vector<std::uint8_t> body2;
         {
@@ -109,10 +103,7 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
             auto itb = state_.rooms.find("lobby");
             if (itb != state_.rooms.end()) {
                 auto& set = itb->second;
-                for (auto wit = set.begin(); wit != set.end(); ) {
-                    if (auto p = wit->lock()) { t2.emplace_back(std::move(p)); ++wit; }
-                    else { wit = set.erase(wit); }
-                }
+                collect_room_sessions(set, t2);
             }
         }
         server::wire::v1::ChatBroadcast pb2;

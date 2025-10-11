@@ -1,4 +1,3 @@
-// UTF-8, 한국어 주석
 #include "server/chat/chat_service.hpp"
 #include "server/core/protocol/opcodes.hpp"
 #include "wire.pb.h"
@@ -36,7 +35,7 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                 if (itset != state_.by_user.end()) { itset->second.erase(s); }
             }
             state_.user.erase(s.get());
-            // 세션 UUID 정리
+            // 세션 UUID 매핑을 정리한다.
             state_.session_uuid.erase(s.get());
             auto itcr = state_.cur_room.find(s.get());
             if (itcr != state_.cur_room.end()) {
@@ -57,10 +56,7 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                     auto itb = state_.rooms.find(room_left);
                     if (itb != state_.rooms.end()) {
                         auto& set = itb->second;
-                        for (auto wit = set.begin(); wit != set.end(); ) {
-                            if (auto p = wit->lock()) { targets.emplace_back(std::move(p)); ++wit; }
-                            else { wit = set.erase(wit); }
-                        }
+                        collect_room_sessions(set, targets);
                         if (set.empty() && room_left != std::string("lobby")) state_.rooms.erase(itb);
                     }
                 }
@@ -68,7 +64,7 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
             }
         }
         for (auto& t : targets) { t->async_send(proto::MSG_CHAT_BROADCAST, body, 0); }
-        // Redis presence: 세션 종료 시 방 SET에서 제거
+        // Redis 프레즌스 SET에서 사용자를 제거한다.
         if (redis_ && !room_left.empty()) {
             try {
                 std::string uid;
@@ -81,9 +77,7 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                     auto rid = ensure_room_id_ci(room_left);
                     room_uuid = rid;
                     if (!rid.empty()) {
-                        std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
-                        std::string pkey = pfx + std::string("presence:room:") + rid;
-                        redis_->srem(pkey, uid);
+                        redis_->srem(make_presence_key("presence:room:", rid), uid);
                     }
                 }
             } catch (...) {}

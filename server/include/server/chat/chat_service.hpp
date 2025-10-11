@@ -1,20 +1,19 @@
-// UTF-8, 한국어 주석
 #pragma once
+
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <set>
+#include <span>
 #include <string>
-#include <vector>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
-#include <set>
-#include <mutex>
-#include <memory>
-#include <span>
-#include <optional>
-#include <unordered_map>
+#include <vector>
 
 #include <boost/asio.hpp>
 
 #include "server/core/net/session.hpp"
-// Opcodes are defined in generated header
 #include "server/core/protocol/opcodes.hpp"
 
 namespace server::core { class JobQueue; }
@@ -38,7 +37,7 @@ public:
     void on_ping(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_session_close(std::shared_ptr<server::core::Session> s);
 
-    // 외부(분산 브로드캐스트 등)에서 준비된 브로드캐스트 payload를 룸에 전파
+    // 외부(fanout 등)에서 재사용할 룸 브로드캐스트 helper
     void broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, server::core::Session* self = nullptr);
 
 private:
@@ -57,29 +56,35 @@ private:
         bool approximate{true};
     };
 
+    struct PresenceConfig {
+        unsigned int ttl{30};
+        std::string prefix;
+    };
+
     struct State {
         std::mutex mu;
         std::unordered_map<std::string, RoomSet> rooms;
-        std::unordered_map<Session*, std::string> user;      // 세션별 사용자명
-        std::unordered_map<Session*, std::string> user_uuid;  // 세션별 사용자 UUID
-        std::unordered_map<Session*, std::string> session_uuid; // 세션별 세션 UUID(v4)
-        std::unordered_map<Session*, std::string> cur_room;  // 세션별 현재 룸
-        std::unordered_set<Session*> authed;                 // 로그인 완료 세션
-        std::unordered_set<Session*> guest;                  // 게스트 세션
-        std::unordered_map<std::string, RoomSet> by_user;    // 사용자명→세션들
-        std::unordered_map<std::string, std::string> room_ids; // 룸 이름 -> room_id(UUID)
+        std::unordered_map<Session*, std::string> user;          // 세션별 사용자 닉네임
+        std::unordered_map<Session*, std::string> user_uuid;     // 세션별 사용자 UUID
+        std::unordered_map<Session*, std::string> session_uuid;  // 세션별 세션 UUID(v4)
+        std::unordered_map<Session*, std::string> cur_room;      // 세션별 현재 방 이름
+        std::unordered_set<Session*> authed;                     // 인증 완료 세션
+        std::unordered_set<Session*> guest;                      // 게스트 모드 세션
+        std::unordered_map<std::string, RoomSet> by_user;        // 닉네임 -> 세션 목록
+        std::unordered_map<std::string, std::string> room_ids;   // 방 이름 -> room_id(UUID)
         std::unordered_map<std::string, std::string> room_passwords;
     } state_;
 
     boost::asio::io_context* io_{};
     server::core::JobQueue& job_queue_;
-    std::shared_ptr<server::core::storage::IConnectionPool> db_pool_{}; // 선택 주입
-    std::shared_ptr<server::storage::redis::IRedisClient> redis_{};      // 선택 주입
+    std::shared_ptr<server::core::storage::IConnectionPool> db_pool_{};
+    std::shared_ptr<server::storage::redis::IRedisClient> redis_{};
     std::string gateway_id_{"gw-default"};
     std::unordered_map<std::string, std::shared_ptr<Strand>> room_strands_;
     Strand& strand_for(const std::string& room);
 
     WriteBehindConfig write_behind_;
+    PresenceConfig presence_{};
 
     bool write_behind_enabled() const;
     std::string generate_uuid_v4();
@@ -90,19 +95,22 @@ private:
                                  const std::optional<std::string>& room_id,
                                  std::vector<std::pair<std::string, std::string>> extra_fields = {});
 
-    // 내부 유틸
+    // 내부 유틸리티
     std::string ensure_unique_or_error(Session& s, const std::string& desired);
     std::string gen_temp_name_uuid8();
     void send_room_users(Session& s, const std::string& room);
     void send_rooms_list(Session& s);
     void send_snapshot(Session& s, const std::string& current);
-
-    // 저장소 보조: 룸 이름으로 UUID 확보(없으면 생성)
     void dispatch_whisper(std::shared_ptr<Session> sender, const std::string& target_user, const std::string& text);
     void send_system_notice(Session& s, const std::string& text);
     std::string hash_room_password(const std::string& password);
     void send_whisper_result(Session& s, bool ok, const std::string& reason);
     std::string ensure_room_id_ci(const std::string& room_name);
+
+    static void collect_room_sessions(RoomSet& set, std::vector<std::shared_ptr<Session>>& out);
+    unsigned int presence_ttl() const;
+    std::string make_presence_key(std::string_view category, const std::string& id) const;
+    void touch_user_presence(const std::string& uid);
 };
 
 } // namespace server::app::chat

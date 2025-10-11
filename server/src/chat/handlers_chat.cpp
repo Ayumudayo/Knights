@@ -148,15 +148,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             }
             auto it = state_.rooms.find(current_room); 
             if (it != state_.rooms.end()) { 
-                auto& set = it->second; 
-                for (auto wit = set.begin(); wit != set.end(); ) { 
-                    if (auto p = wit->lock()) { 
-                        targets.emplace_back(std::move(p)); 
-                        ++wit; 
-                    } else { 
-                        wit = set.erase(wit); 
-                    } 
-                } 
+                collect_room_sessions(it->second, targets);
             }
         }
         server::wire::v1::ChatBroadcast pb; 
@@ -212,12 +204,13 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         // 사용자 프레즌스 heartbeat TTL을 갱신한다.
         if (redis_) {
             try {
-                std::string uid; { std::lock_guard<std::mutex> lk(state_.mu); auto it = state_.user_uuid.find(session_sp.get()); if (it != state_.user_uuid.end()) uid = it->second; }
-                if (!uid.empty()) {
-                    unsigned int ttl = 30; if (const char* v = std::getenv("PRESENCE_TTL_SEC")) { unsigned long t = std::strtoul(v, nullptr, 10); if (t > 0 && t < 3600) ttl = static_cast<unsigned int>(t); }
-                    std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
-                    std::string key = pfx + std::string("presence:user:") + uid; redis_->setex(key, "1", ttl);
+                std::string uid;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto it = state_.user_uuid.find(session_sp.get());
+                    if (it != state_.user_uuid.end()) uid = it->second;
                 }
+                touch_user_presence(uid);
             } catch (...) {}
         }
         // Redis Pub/Sub 팬아웃(옵션)을 수행한다.
@@ -225,15 +218,14 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             try {
                 if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
                     static std::atomic<std::uint64_t> publish_total{0};
-                    std::string pfx; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) pfx = p;
-                    std::string ch = pfx + std::string("fanout:room:") + current_room;
+                    std::string channel = presence_.prefix + std::string("fanout:room:") + current_room;
                     std::string payload(reinterpret_cast<const char*>(bytes.data()), bytes.size());
                     std::string message;
                     message.reserve(3 + gateway_id_.size() + payload.size());
                     message.append("gw=").append(gateway_id_);
                     message.push_back('\n');
                     message.append(payload);
-                    redis_->publish(ch, std::move(message));
+                    redis_->publish(channel, std::move(message));
                     auto n = ++publish_total;
                     corelog::info(std::string("metric=publish_total value=") + std::to_string(n) + " room=" + current_room);
                 }

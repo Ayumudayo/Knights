@@ -10,8 +10,10 @@
 #include "server/core/storage/repositories.hpp"
 #include "server/storage/redis/client.hpp"
 
+#include <array>
 #include <cstdlib>
 #include <sstream>
+#include <utility>
 
 using namespace server::core;
 namespace proto = server::core::protocol;
@@ -44,6 +46,15 @@ ChatService::ChatService(boost::asio::io_context& io,
         if (std::string(approx) == "0") {
             write_behind_.approximate = false;
         }
+    }
+    if (const char* ttl = std::getenv("PRESENCE_TTL_SEC"); ttl && *ttl) {
+        unsigned long t = std::strtoul(ttl, nullptr, 10);
+        if (t > 0 && t < 3600) {
+            presence_.ttl = static_cast<unsigned int>(t);
+        }
+    }
+    if (const char* prefix = std::getenv("REDIS_CHANNEL_PREFIX"); prefix && *prefix) {
+        presence_.prefix = prefix;
     }
     if (write_behind_.enabled) {
         corelog::info(std::string("Write-behind enabled: stream=") + write_behind_.stream_key +
@@ -127,6 +138,37 @@ void ChatService::emit_write_behind_event(const std::string& type,
     if (!redis_->xadd(write_behind_.stream_key, fields, nullptr, write_behind_.maxlen, write_behind_.approximate)) {
         corelog::warn(std::string("write-behind XADD failed: type=") + type);
     }
+}
+
+void ChatService::collect_room_sessions(RoomSet& set, std::vector<std::shared_ptr<Session>>& out) {
+    for (auto it = set.begin(); it != set.end(); ) {
+        if (auto session_sp = it->lock()) {
+            out.emplace_back(std::move(session_sp));
+            ++it;
+        } else {
+            it = set.erase(it);
+        }
+    }
+}
+
+unsigned int ChatService::presence_ttl() const {
+    return presence_.ttl;
+}
+
+std::string ChatService::make_presence_key(std::string_view category, const std::string& id) const {
+    std::string key;
+    key.reserve(presence_.prefix.size() + category.size() + id.size());
+    key.append(presence_.prefix);
+    key.append(category);
+    key.append(id);
+    return key;
+}
+
+void ChatService::touch_user_presence(const std::string& uid) {
+    if (!redis_ || uid.empty()) {
+        return;
+    }
+    redis_->setex(make_presence_key("presence:user:", uid), "1", presence_ttl());
 }
 
 std::string ChatService::gen_temp_name_uuid8() {
@@ -344,15 +386,11 @@ void ChatService::broadcast_room(const std::string& room, const std::vector<std:
         std::lock_guard<std::mutex> lk(state_.mu);
         auto it = state_.rooms.find(room);
         if (it != state_.rooms.end()) {
-            auto& set = it->second;
-            for (auto wit = set.begin(); wit != set.end(); ) {
-                if (auto p = wit->lock()) { targets.emplace_back(std::move(p)); ++wit; }
-                else { wit = set.erase(wit); }
-            }
+            collect_room_sessions(it->second, targets);
         }
     }
     for (auto& t : targets) {
-        int f = 0; // 재전파에는 self 플래그를 사용하지 않는다.
+        int f = 0; // 재전파에서는 self 플래그를 사용하지 않는다.
         t->async_send(proto::MSG_CHAT_BROADCAST, body, f);
     }
 }
