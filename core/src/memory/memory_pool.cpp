@@ -5,7 +5,7 @@
 
 namespace server::core {
 
-// --- MemoryPool Implementation ---
+// --- MemoryPool 구현 ---
 
 MemoryPool::MemoryPool(size_t blockSize, size_t blockCount)
     : blockSize_(blockSize) {
@@ -25,8 +25,8 @@ MemoryPool::~MemoryPool() {}
 void* MemoryPool::Acquire() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (freeList_.empty()) {
-        // In a real-world scenario, you might want to handle this more gracefully,
-        // e.g., by allocating more chunks. For now, we'll return nullptr.
+        // 실제 서비스라면 추가 블록을 확장하는 등의 처리가 필요할 수 있지만,
+        // 현재 구현에서는 nullptr 을 반환하여 호출자가 처리하도록 한다.
         return nullptr;
     }
     void* ptr = freeList_.top();
@@ -38,12 +38,12 @@ void* MemoryPool::Acquire() {
 void MemoryPool::Release(void* ptr) {
     if (ptr == nullptr) return;
     std::lock_guard<std::mutex> lock(mutex_);
-    // Optional: Check if the pointer belongs to our chunk for safety.
+    // 안전 검사를 추가하려면 포인터가 우리 pool 에 속하는지 확인할 수 있다.
     freeList_.push(ptr);
     runtime_metrics::record_memory_pool_release();
 }
 
-// --- BufferManager Implementation ---
+// --- BufferManager 구현 ---
 
 BufferManager::BufferManager(size_t blockSize, size_t blockCount)
     : pool_(blockSize, blockCount), blockSize_(blockSize) {}
@@ -51,11 +51,11 @@ BufferManager::BufferManager(size_t blockSize, size_t blockCount)
 BufferManager::PooledBuffer BufferManager::Acquire() {
     std::byte* raw_ptr = static_cast<std::byte*>(pool_.Acquire());
     if (!raw_ptr) {
-        // Pool is exhausted. Return an empty ptr.
+        // Pool 이 고갈되었다. 비어 있는 포인터를 반환한다.
         return nullptr;
     }
 
-    // Create a unique_ptr with a custom deleter that returns the memory to the pool.
+    // pool 로 복귀시키는 custom deleter 를 가진 unique_ptr 을 만든다.
     return PooledBuffer(raw_ptr, [this](std::byte* p) {
         pool_.Release(p);
     });

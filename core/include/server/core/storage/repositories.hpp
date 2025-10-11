@@ -1,55 +1,54 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
-#include <optional>
-#include <chrono>
 
 namespace server::core::storage {
 
-// 도메인 DTO(저장소 경계 전용)
+// 저장소 DTO 정의
 struct User {
-    std::string id;          // UUID (text)
-    std::string name;        // 중복 허용 라벨
-    std::int64_t created_at_ms{}; // UTC epoch millis(표기 편의를 위한 변환 값)
+    std::string id;                 // UUID (text)
+    std::string name;               // 고유 닉네임
+    std::int64_t created_at_ms{};   // UTC epoch milliseconds
 };
 
 struct Room {
-    std::string id;          // UUID (text)
-    std::string name;        // 라벨(중복 허용)
+    std::string id;                 // UUID (text)
+    std::string name;               // 방 이름(고유)
     bool        is_public{true};
     bool        is_active{true};
-    std::optional<std::int64_t> closed_at_ms; // UTC epoch millis
+    std::optional<std::int64_t> closed_at_ms; // UTC epoch milliseconds
     std::int64_t created_at_ms{};
 };
 
 struct Message {
-    std::uint64_t id{};      // bigserial
-    std::string   room_id;   // UUID (text)
-    std::string   room_name; // 라벨(중복 허용) — denormalized for audit/UX
-    std::optional<std::string> user_id; // NULL 허용
-    std::optional<std::string> user_name; // 표시용 닉네임(LEFT JOIN users.name)
+    std::uint64_t id{};                 // PostgreSQL bigserial 컬럼
+    std::string   room_id;              // UUID (text)
+    std::string   room_name;            // 감사/UX 용 denormalized 필드
+    std::optional<std::string> user_id;   // NULL 허용
+    std::optional<std::string> user_name; // LEFT JOIN users.name 결과
     std::string   content;
-    std::int64_t  created_at_ms{}; // UTC epoch millis
+    std::int64_t  created_at_ms{};      // UTC epoch milliseconds
 };
 
-// memberships SoR
 struct Membership {
-    std::string user_id;   // UUID (text)
-    std::string room_id;   // UUID (text)
-    std::string role;      // 'member' 등
+    std::string user_id;                      // UUID (text)
+    std::string room_id;                      // UUID (text)
+    std::string role;                         // 예: "member"
     std::int64_t joined_at_ms{};
     std::optional<std::uint64_t> last_seen_msg_id;
-    std::optional<std::int64_t> left_at_ms; // NULL이면 현재 참여 중
+    std::optional<std::int64_t> left_at_ms;   // NULL이면 여전히 참여 중
     bool is_member{true};
 };
 
 struct Session {
-    std::string id;          // UUID (text)
-    std::string user_id;     // UUID (text)
-    std::string token_hash;  // 저장소에는 해시만 저장
-    std::optional<std::string> client_ip; // inet -> string 표현
+    std::string id;                          // UUID (text)
+    std::string user_id;                     // UUID (text)
+    std::string token_hash;                  // 해시된 토큰
+    std::optional<std::string> client_ip;    // inet 컬럼을 문자열로 표현
     std::optional<std::string> user_agent;
     std::int64_t created_at_ms{};
     std::int64_t expires_at_ms{};
@@ -79,7 +78,7 @@ public:
 class IMessageRepository {
 public:
     virtual ~IMessageRepository() = default;
-    // 워터마크(since_id) 초과분만 오름차순으로 최대 limit개 반환
+    // since_id 이후의 메시지를 최신 순으로 limit 만큼 돌려준다.
     virtual std::vector<Message> fetch_recent_by_room(const std::string& room_id,
                                                       std::uint64_t since_id,
                                                       std::size_t limit) = 0;
@@ -87,7 +86,7 @@ public:
                            const std::string& room_name,
                            const std::optional<std::string>& user_id,
                            const std::string& content) = 0;
-    // 해당 방의 마지막 메시지 id(없으면 0)
+    // 해당 방의 마지막 메시지 ID(없으면 0)를 반환한다.
     virtual std::uint64_t get_last_id(const std::string& room_id) = 0;
 };
 
@@ -119,3 +118,4 @@ public:
 };
 
 } // namespace server::core::storage
+

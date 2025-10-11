@@ -26,22 +26,20 @@ Acceptor::Acceptor(asio::io_context& io,
       state_(std::move(state)), 
       on_new_session_(std::move(on_new_session)) {
     error_code ec;
+    auto fail = [&](const char* stage) {
+        if (!ec) return false;
+        log::error(std::string("acceptor ") + stage + " failed: " + ec.message());
+        return true;
+    };
+
     acceptor_.open(ep.protocol(), ec);
-    if (ec) {
-        log::error("acceptor open failed: " + ec.message());
-        return;
-    }
+    if (fail("open")) return;
     acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true), ec);
+    if (fail("set_option")) return;
     acceptor_.bind(ep, ec);
-    if (ec) {
-        log::error("acceptor bind failed: " + ec.message());
-        return;
-    }
+    if (fail("bind")) return;
     acceptor_.listen(asio::socket_base::max_listen_connections, ec);
-    if (ec) {
-        log::error("acceptor listen failed: " + ec.message());
-        return;
-    }
+    if (fail("listen")) return;
 }
 
 void Acceptor::start() {
@@ -70,7 +68,6 @@ void Acceptor::do_accept() {
                 return;
             }
 
-            // 동시 연결 상한을 검사한다.
             if (self->state_ && self->state_->max_connections > 0) {
                 auto cur = self->state_->connection_count.load();
                 if (cur >= self->state_->max_connections) {
@@ -83,7 +80,6 @@ void Acceptor::do_accept() {
                 }
             }
 
-            // 새로운 세션을 생성하고 시작한다.
             runtime_metrics::record_accept();
             try {
                 auto session = std::make_shared<Session>(std::move(socket), self->dispatcher_, self->buffer_manager_, self->options_, self->state_);
@@ -93,13 +89,11 @@ void Acceptor::do_accept() {
                 log::error(std::string("session creation threw: ") + ex.what());
             }
 
-            // 다음 연결 요청을 계속 수락한다.
             self->do_accept();
         });
 }
 
 } // namespace server::core
-
 
 
 

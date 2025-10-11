@@ -9,13 +9,13 @@
 
 namespace server::core {
 
-// A simple thread-safe memory pool for fixed-size blocks.
+// 고정 크기 블록을 관리하는 thread-safe memory pool.
 class MemoryPool {
 public:
     MemoryPool(size_t blockSize, size_t blockCount);
     ~MemoryPool();
 
-    // Non-copyable
+    // 복사 불가
     MemoryPool(const MemoryPool&) = delete;
     MemoryPool& operator=(const MemoryPool&) = delete;
 
@@ -30,10 +30,10 @@ private:
 };
 
 
-// A manager that provides RAII-style buffers from a MemoryPool
+// MemoryPool 에서 RAII 방식 버퍼를 제공하는 관리자
 class BufferManager {
 public:
-    // A smart pointer that automatically returns the buffer to the pool on destruction.
+    // 소멸 시 자동으로 버퍼를 pool 로 반환하는 스마트 포인터
     using PooledBuffer = std::unique_ptr<std::byte[], std::function<void(std::byte*)>>;
 
     BufferManager(size_t blockSize, size_t blockCount);
@@ -47,4 +47,3 @@ private:
 };
 
 } // namespace server::core
-

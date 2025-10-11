@@ -1,9 +1,9 @@
-// UTF-8, 한국어 주석
 #pragma once
-#include <string>
-#include <utility>
+
 #include <initializer_list>
 #include <memory>
+#include <string>
+#include <utility>
 
 namespace server::core::metrics {
 
@@ -30,7 +30,7 @@ public:
     virtual void observe(double value, Labels labels = {}) = 0;
 };
 
-// 전역 레지스트리 접근자(현재는 no-op 구현 반환)
+// 등록된 외부 구현이 없으면 no-op 객체를 돌려준다.
 Counter& get_counter(const std::string& name);
 Gauge& get_gauge(const std::string& name);
 Histogram& get_histogram(const std::string& name);

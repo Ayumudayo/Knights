@@ -1,4 +1,3 @@
-// UTF-8
 #include "server/core/metrics/metrics.hpp"
 #include <unordered_map>
 #include <mutex>
@@ -32,5 +31,3 @@ Histogram& get_histogram(const std::string& name) {
 }
 
 } // namespace server::core::metrics
-
-

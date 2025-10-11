@@ -18,7 +18,7 @@ Job JobQueue::Pop() {
 
     if (stopping_ && jobs_.empty()) {
         runtime_metrics::record_job_queue_depth(jobs_.size());
-        return nullptr; // Sentinel for stopping
+        return nullptr; // nullptr 이면 종료 신호
     }
 
     Job job = std::move(jobs_.front());

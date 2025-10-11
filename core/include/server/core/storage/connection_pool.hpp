@@ -1,9 +1,9 @@
 #pragma once
 
-#include <memory>
 #include <cstddef>
+#include <memory>
 #include <string>
-#include <optional>
+
 #include "server/core/storage/unit_of_work.hpp"
 
 namespace server::core::storage {
@@ -16,17 +16,16 @@ struct PoolOptions {
     bool prepare_statements{true};
 };
 
-// 커넥션 풀 SPI. 구현체는 DB 드라이버에 의존한다.
+// 데이터베이스 연결 생명주기를 관리하는 SPI 인터페이스
 class IConnectionPool {
 public:
     virtual ~IConnectionPool() = default;
 
-    // 트랜잭션 단위를 생성한다. 구현은 내부적으로 커넥션 할당/반납을 관리한다.
+    // 트랜잭션 단위를 생성하고, 소멸 시 연결 반환과 롤백을 책임진다.
     virtual std::unique_ptr<IUnitOfWork> make_unit_of_work() = 0;
 
-    // 헬스체크/간단 쿼리 수행(옵션)
+    // 연결이 유효한지 여부를 점검한다(선택 사항).
     virtual bool health_check() = 0;
 };
 
 } // namespace server::core::storage
-

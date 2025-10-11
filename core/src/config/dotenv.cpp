@@ -1,21 +1,29 @@
 #include "server/core/config/dotenv.hpp"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
-#include <sstream>
 #include <string>
 
 namespace server::core::config {
 
 namespace {
-static inline void rtrim(std::string& s) {
-    while (!s.empty() && (s.back() == ' ' || s.back() == '\t' || s.back() == '\r' || s.back() == '\n')) s.pop_back();
+
+inline bool is_space(unsigned char ch) {
+    return std::isspace(ch) != 0;
 }
-static inline void ltrim(std::string& s) {
-    size_t i = 0; while (i < s.size() && (s[i] == ' ' || s[i] == '\t')) ++i; if (i) s.erase(0, i);
+
+inline void trim(std::string& s) {
+    auto begin = std::find_if_not(s.begin(), s.end(), is_space);
+    auto end = std::find_if_not(s.rbegin(), s.rend(), is_space).base();
+    if (begin == s.end()) {
+        s.clear();
+        return;
+    }
+    s.assign(begin, end);
 }
-static inline void trim(std::string& s) { rtrim(s); ltrim(s); }
+
 static inline std::string unquote(const std::string& v) {
     if (v.size() >= 2) {
         char q = v.front();
@@ -43,10 +51,10 @@ bool load_dotenv(const std::string& path, bool override_existing) {
     if (!in.is_open()) return false;
     std::string line;
     while (std::getline(in, line)) {
-        // trim and skip comments/empty
+        // 공백과 주석 줄을 제거한다.
         trim(line);
         if (line.empty() || line[0] == '#') continue;
-        // support optional 'export '
+        // 'export ' 접두어를 허용한다.
         const std::string export_kw = "export ";
         if (line.rfind(export_kw, 0) == 0) line.erase(0, export_kw.size());
         auto pos = line.find('=');

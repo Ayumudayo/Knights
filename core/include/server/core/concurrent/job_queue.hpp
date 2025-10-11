@@ -6,7 +6,6 @@
 
 namespace server::core {
 
-// A simple job type.
 using Job = std::function<void()>;
 
 class JobQueue {
@@ -23,4 +22,3 @@ private:
 };
 
 } // namespace server::core
-

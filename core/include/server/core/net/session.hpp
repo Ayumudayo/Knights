@@ -1,15 +1,16 @@
 #pragma once
 
-#include <memory>
-#include <vector>
-#include <cstdint>
-#include <string>
 #include <boost/asio.hpp>
 #include <boost/asio/steady_timer.hpp>
-#include "server/core/protocol/frame.hpp"
-#include "server/core/memory/memory_pool.hpp"
+#include <cstdint>
 #include <functional>
+#include <memory>
 #include <queue>
+#include <string>
+#include <vector>
+
+#include "server/core/memory/memory_pool.hpp"
+#include "server/core/protocol/frame.hpp"
 
 namespace server::core {
 
@@ -33,15 +34,15 @@ public:
     void start();
     void stop();
 
-    // 세션 종료 시 호출될 콜백을 설정한다.
+    // 세션 종료 직전에 한 번 호출할 콜백을 등록한다.
     void set_on_close(std::function<void(std::shared_ptr<Session>)> cb) { on_close_ = std::move(cb); }
 
-    // 표준 에러 프레임 송신
+    // MSG_ERR 프레임을 만들어 전송한다.
     void send_error(std::uint16_t code, const std::string& msg);
 
-    // 완전한 프레임을 직접 전송(헤더 포함)
+    // 이미 직렬화된 프레임을 전송 큐에 추가한다.
     void async_send(BufferManager::PooledBuffer data, size_t frame_size);
-    // payload와 msg_id를 받아 프레임을 구성하여 전송
+    // msg_id 와 payload 를 받아 Frame 으로 직렬화한 뒤 전송한다.
     void async_send(std::uint16_t msg_id, const std::vector<std::uint8_t>& payload, std::uint16_t flags = 0);
 
     std::uint32_t session_id() const { return session_id_; }
@@ -51,17 +52,16 @@ private:
     void do_read_body(std::size_t body_len);
     void do_write();
     std::pair<BufferManager::PooledBuffer, size_t> make_frame(std::uint16_t msg_id,
-                                                std::uint16_t flags,
-                                                const std::vector<std::uint8_t>& payload,
-                                                std::uint32_t seq,
-                                                std::uint32_t utc_ts_ms32);
+                                                              std::uint16_t flags,
+                                                              const std::vector<std::uint8_t>& payload,
+                                                              std::uint32_t seq,
+                                                              std::uint32_t utc_ts_ms32);
     void send_hello();
-    void on_stopped();
     void arm_read_timeout();
     void arm_heartbeat();
 
 public:
-    // 클라이언트 원격 IP 문자열 반환(예: "127.0.0.1"). 오류 시 빈 문자열.
+    // 클라이언트 원격 IP 를 문자열로 반환한다. 실패하면 빈 문자열을 돌려준다.
     std::string remote_ip() const;
 
     asio::ip::tcp::socket socket_;
@@ -71,7 +71,6 @@ public:
     PacketHeader header_{};
     BufferManager::PooledBuffer read_buf_;
     std::queue<std::pair<BufferManager::PooledBuffer, size_t>> send_queue_;
-    bool writing_{false};
     std::size_t queued_bytes_{0};
     std::shared_ptr<const SessionOptions> options_;
     std::shared_ptr<SharedState> state_;
@@ -82,4 +81,6 @@ public:
     std::function<void(std::shared_ptr<Session>)> on_close_{};
     std::uint32_t session_id_{0};
 };
+
 } // namespace server::core
+

@@ -8,7 +8,6 @@
 #include "server/core/memory/memory_pool.hpp"
 #include "server/core/runtime_metrics.hpp"
 
-#include <array>
 #include <cstring>
 #include <algorithm>
 #include <chrono>
@@ -17,8 +16,6 @@
 using boost::system::error_code;
 
 namespace server::core {
-
-namespace { }
 
 Session::Session(asio::ip::tcp::socket socket,
                  Dispatcher& dispatcher,
@@ -71,7 +68,6 @@ void Session::stop() {
 }
 
 void Session::async_send(BufferManager::PooledBuffer data, size_t frame_size) {
-    // data는 풀에서 가져온 연속 버퍼이므로 그대로 큐에 넣는다.
     asio::dispatch(strand_, [self = shared_from_this(), data = std::move(data), frame_size]() mutable {
         if (self->stopped_) return;
         if (self->options_ && self->options_->send_queue_max > 0 && self->queued_bytes_ + frame_size > self->options_->send_queue_max) {
@@ -156,7 +152,6 @@ void Session::do_read_header() {
                 stop();
                 return;
             }
-            // 헤더를 읽었으니 읽기 타임아웃을 다시 설정한다.
             arm_read_timeout();
             do_read_body(header_.length);
         }));
@@ -224,7 +219,6 @@ void Session::do_read_body(std::size_t body_len) {
 
 void Session::do_write() {
     if (send_queue_.empty()) {
-        writing_ = false;
         return;
     }
     auto self = shared_from_this();
@@ -242,7 +236,7 @@ void Session::do_write() {
             } else {
                 self->queued_bytes_ = 0;
             }
-            self->send_queue_.pop(); // PooledBuffer will be released here
+            self->send_queue_.pop(); // 제거되면서 pool 로 자동 반환된다.
             self->do_write();
         }));
 }
@@ -250,14 +244,14 @@ void Session::do_write() {
 void Session::send_hello() {
     std::vector<std::uint8_t> payload_vec;
     payload_vec.resize(12);
-    server::core::protocol::write_be16(1, payload_vec.data()); // proto_major
+    server::core::protocol::write_be16(1, payload_vec.data()); // proto_major (주 프로토콜 버전)
     server::core::protocol::write_be16(1, payload_vec.data() + 2); // proto_minor (헤더 v1.1)
-    // capabilities: 클라이언트에게 sender_sid 지원 여부를 알린다.
+    // capabilities: 클라이언트에게 sender_sid 지원 여부를 알려준다.
     std::uint16_t caps = static_cast<std::uint16_t>(server::core::protocol::CAP_COMPRESS_SUPP | server::core::protocol::CAP_SENDER_SID);
     server::core::protocol::write_be16(caps, payload_vec.data() + 4);
     unsigned hb = options_ ? options_->heartbeat_interval_ms / 10 : 0;
     server::core::protocol::write_be16(static_cast<std::uint16_t>(hb), payload_vec.data() + 6);
-    // epoch_high32: 클라이언트가 64비트 UTC 타임스탬프를 복원할 수 있도록 상위 32비트를 전달한다.
+    // epoch_high32: 클라이언트가 64비트 UTC 타임스탬프를 복원할 수 있도록 상위 32비트를 보낸다.
     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::uint32_t epoch_high32 = static_cast<std::uint32_t>((static_cast<std::uint64_t>(now64) >> 32) & 0xFFFFFFFFu);
@@ -291,11 +285,11 @@ void Session::arm_read_timeout() {
     if (!options_ || options_->read_timeout_ms == 0) return;
     auto self = shared_from_this();
     asio::dispatch(strand_, [this, self]() {
-        // 읽기 타이머를 초기화하고 다시 설정한다.
+        // 읽기 타이머를 초기화한 뒤 다시 설정한다.
         read_timer_.cancel();
         read_timer_.expires_after(std::chrono::milliseconds(options_->read_timeout_ms));
         read_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec) {
-            if (ec || stopped_) return; // 취소되었거나 세션이 종료된 경우 무시한다.
+            if (ec || stopped_) return; // 타이머가 취소되었거나 세션이 종료된 경우 무시한다.
             runtime_metrics::record_session_timeout();
             if (options_ && options_->heartbeat_interval_ms > 0) {
                 runtime_metrics::record_heartbeat_timeout();
@@ -321,4 +315,3 @@ void Session::arm_heartbeat() {
 }
 
 } // namespace server::core
-

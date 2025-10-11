@@ -24,7 +24,7 @@ void ThreadManager::Stop() {
         return;
     }
 
-    job_queue_.Stop(); // Wake up any waiting threads
+    job_queue_.Stop(); // 대기 중인 스레드를 깨워 종료시킨다.
 
     for (auto& t : threads_) {
         if (t.joinable()) {
@@ -37,7 +37,7 @@ void ThreadManager::Stop() {
 void ThreadManager::WorkerLoop() {
     while (!stopped_.load(std::memory_order_acquire)) {
         Job job = job_queue_.Pop();
-        if (!job) { // nullptr job is the signal to stop
+        if (!job) { // nullptr 작업이 오면 종료한다.
             break;
         }
         job();
