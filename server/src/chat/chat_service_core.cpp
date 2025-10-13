@@ -3,6 +3,7 @@
 #include "server/core/protocol/frame.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/util/service_registry.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
 // 저장소 연동 헤더
@@ -18,6 +19,7 @@
 using namespace server::core;
 namespace proto = server::core::protocol;
 namespace corelog = server::core::log;
+namespace services = server::core::util::services;
 
 namespace server::app::chat {
 
@@ -26,6 +28,12 @@ ChatService::ChatService(boost::asio::io_context& io,
                          std::shared_ptr<server::core::storage::IConnectionPool> db_pool,
                          std::shared_ptr<server::storage::redis::IRedisClient> redis)
     : io_(&io), job_queue_(job_queue), db_pool_(std::move(db_pool)), redis_(std::move(redis)) {
+    if (!db_pool_) {
+        db_pool_ = services::get<server::core::storage::IConnectionPool>();
+    }
+    if (!redis_) {
+        redis_ = services::get<server::storage::redis::IRedisClient>();
+    }
     if (const char* gw = std::getenv("GATEWAY_ID"); gw && *gw) {
         gateway_id_ = gw;
     }

@@ -35,6 +35,10 @@ struct RuntimeCounters {
     std::atomic<std::uint64_t> memory_pool_capacity{0};
     std::atomic<std::uint64_t> memory_pool_in_use{0};
     std::atomic<std::uint64_t> memory_pool_in_use_peak{0};
+    std::atomic<std::uint64_t> db_job_queue_depth{0};
+    std::atomic<std::uint64_t> db_job_queue_depth_peak{0};
+    std::atomic<std::uint64_t> db_job_processed_total{0};
+    std::atomic<std::uint64_t> db_job_failed_total{0};
     std::array<std::atomic<std::uint64_t>, 65536> opcode_counters{};
 };
 
@@ -125,6 +129,24 @@ void record_job_queue_depth(std::size_t depth) {
     }
 }
 
+void record_db_job_queue_depth(std::size_t depth) {
+    counters().db_job_queue_depth.store(static_cast<std::uint64_t>(depth), std::memory_order_relaxed);
+    auto& peak_ref = counters().db_job_queue_depth_peak;
+    std::uint64_t current_peak = peak_ref.load(std::memory_order_relaxed);
+    std::uint64_t value = static_cast<std::uint64_t>(depth);
+    while (current_peak < value && !peak_ref.compare_exchange_weak(current_peak, value, std::memory_order_relaxed)) {
+        // retry
+    }
+}
+
+void record_db_job_processed() {
+    counters().db_job_processed_total.fetch_add(1, std::memory_order_relaxed);
+}
+
+void record_db_job_failed() {
+    counters().db_job_failed_total.fetch_add(1, std::memory_order_relaxed);
+}
+
 void register_memory_pool_capacity(std::size_t capacity) {
     const auto cap = static_cast<std::uint64_t>(capacity);
     counters().memory_pool_capacity.store(cap, std::memory_order_relaxed);
@@ -180,6 +202,10 @@ Snapshot snapshot() {
     snap.dispatch_latency_max_ns = c.dispatch_latency_max_ns.load(std::memory_order_relaxed);
     snap.job_queue_depth = c.job_queue_depth.load(std::memory_order_relaxed);
     snap.job_queue_depth_peak = c.job_queue_depth_peak.load(std::memory_order_relaxed);
+    snap.db_job_queue_depth = c.db_job_queue_depth.load(std::memory_order_relaxed);
+    snap.db_job_queue_depth_peak = c.db_job_queue_depth_peak.load(std::memory_order_relaxed);
+    snap.db_job_processed_total = c.db_job_processed_total.load(std::memory_order_relaxed);
+    snap.db_job_failed_total = c.db_job_failed_total.load(std::memory_order_relaxed);
     snap.memory_pool_capacity = c.memory_pool_capacity.load(std::memory_order_relaxed);
     snap.memory_pool_in_use = c.memory_pool_in_use.load(std::memory_order_relaxed);
     snap.memory_pool_in_use_peak = c.memory_pool_in_use_peak.load(std::memory_order_relaxed);

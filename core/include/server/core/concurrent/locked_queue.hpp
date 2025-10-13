@@ -1,0 +1,111 @@
+#pragma once
+
+#include <condition_variable>
+#include <mutex>
+#include <optional>
+#include <queue>
+#include <utility>
+
+namespace server::core::concurrent {
+
+template <typename T>
+class LockedQueue {
+public:
+    using value_type = T;
+
+    LockedQueue() = default;
+
+    LockedQueue(const LockedQueue&) = delete;
+    LockedQueue& operator=(const LockedQueue&) = delete;
+
+    void push(T item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.push(std::move(item));
+        cv_.notify_one();
+    }
+
+    void push_swap(T& item) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        queue_.emplace();
+        std::swap(queue_.back(), item);
+        cv_.notify_one();
+    }
+
+    void push_reset(T& item) {
+        push_swap(item);
+        item = T {};
+    }
+
+    std::optional<T> try_pop() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (queue_.empty()) {
+            return std::nullopt;
+        }
+        std::optional<T> result(std::move(queue_.front()));
+        queue_.pop();
+        return result;
+    }
+
+    bool try_pop(T& out) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (queue_.empty()) {
+            return false;
+        }
+        out = std::move(queue_.front());
+        queue_.pop();
+        return true;
+    }
+
+    bool empty() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return queue_.empty();
+    }
+
+    std::size_t size() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return queue_.size();
+    }
+
+protected:
+    mutable std::mutex mutex_;
+    std::condition_variable cv_;
+    std::queue<T> queue_;
+};
+
+template <typename T>
+class LockedWaitQueue : public LockedQueue<T> {
+public:
+    using typename LockedQueue<T>::value_type;
+
+    LockedWaitQueue() = default;
+
+    LockedWaitQueue(const LockedWaitQueue&) = delete;
+    LockedWaitQueue& operator=(const LockedWaitQueue&) = delete;
+
+    std::optional<T> pop_blocking() {
+        std::unique_lock<std::mutex> lock(this->mutex_);
+        this->cv_.wait(lock, [&]() { return !this->queue_.empty() || shutdown_; });
+        if (this->queue_.empty()) {
+            return std::nullopt;
+        }
+        std::optional<T> value(std::move(this->queue_.front()));
+        this->queue_.pop();
+        return value;
+    }
+
+    void stop() {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        shutdown_ = true;
+        this->cv_.notify_all();
+    }
+
+    void reset() {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        shutdown_ = false;
+    }
+
+private:
+    bool shutdown_ = false;
+};
+
+} // namespace server::core::concurrent

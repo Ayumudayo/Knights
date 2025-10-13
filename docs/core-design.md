@@ -1,137 +1,123 @@
 # 서버 코어 상세 설계
 
-## 목적/범위
-- 목적: 범용 TCP 기반(Windows IOCP/Asio) 서버 코어를 제공한다.
-- 범위: 네트워크 I/O, 프레이밍/코덱, 디스패치, 타이머, 기초 로깅/메트릭. 게임/도메인 로직은 외부 모듈.
+`core/` 모듈은 서버 공용 런타임을 제공하는 C++20 static library(`server_core`)이며, 네트워크 세션, 메시지 프레이밍, 런타임 메트릭, 공용 스토리지 SPI를 한곳에 모은다. 실제 게임/도메인 로직은 다른 모듈에서 이 라이브러리를 링크해 사용한다.
 
-## 상위 구성요소
-- Net
-  - Acceptor: 리슨/accept 루프, 연결 제한, IP 필터, 재시작. (core/src/net/acceptor.cpp:60)
-  - Session: 비동기 read/write, 프레이밍, 송신 큐, 타임아웃, heartbeat. (core/src/net/session.cpp:48)
-  - Transport/Codec: 바이트 스트림 ↔ 메시지 패킷 변환.
-- Dispatch
-  - Dispatcher: `msg_id -> handler` 매핑, 핸들러 실행 컨텍스트(executor/strand) 관리. (core/src/net/dispatcher.cpp:12)
-- Utils
-  - Timer: 고정 틱/지연 실행, cancel-safe.
-  - Log/Metrics: 최소한의 인터페이스(구현은 교체 가능). (core/src/util/log.cpp:28, core/src/metrics/metrics.cpp:19)
+## 목적 및 범위
+- Boost.Asio 기반 TCP 서버 인프라를 공통으로 제공한다.
+- 프레이밍/헤더 처리, heartbeat, 기본 백프레셔, 예외 안전한 디스패치 루프를 보장한다.
+- 런타임 상태(`runtime_metrics`)와 최소한의 로그/metrics SPI를 노출해 외부 관측 도구로 교체 가능하도록 한다.
+- 스토리지/유닛오브워크 인터페이스는 구현을 강제하지 않고, 서버/서비스 레이어에서 주입하도록 정의만 제공한다.
+- 장기적으로는 게임 서버 등 다른 도메인에도 그대로 재사용할 수 있는 범용 런타임을 목표로 한다.
 
-## 스레딩/실행 모델
-- I/O: `io_context` 스레드 풀(N=코어 수 권장)에서 모든 비동기 콜백이 수행.
-- Session 직렬화: 세션별 `strand` 또는 메시지 큐로 논리 상태 일관성 보장.
-- 핸들러 실행: 기본은 같은 `io_context`에서 실행하되, 룸/존 단위 분리 시 전용 executor를 주입.
+> **현재 적용 범위**  
+> 1차 적용 대상은 `server/app` 채팅 서버이므로, 네트워크·스토리지·메트릭 설계는 채팅 워크로드 중심으로 우선순위를 잡았다.  
+> 다른 유형의 서버에 맞춰 확장할 때는 본 문서의 모듈 구분과 SPI를 기반으로 기능을 보강한다.
 
-### 세션 직렬화 선택지
-- 기본: 세션별 직렬화는 `strand`로 보장. 동일 세션의 read/write/핸들러가 중첩 실행되지 않게 함.
-- 대안: lock-free MPSC 큐를 두고 `io_context.post`로 순차 실행. 고부하 시 튜닝 포인트.
+## 디렉터리 구성
+- `core/include/server/core/net/` : `Acceptor`, `Session`, `Dispatcher` 등 I/O 계층
+- `core/include/server/core/memory/` : 고정 블록 `MemoryPool`, `BufferManager`
+- `core/include/server/core/concurrent/` : 간단한 `JobQueue`, `ThreadManager`
+- `core/include/server/core/config/` : `.env` 로딩 유틸리티
+- `core/include/server/core/metrics/` : 노출된 Counter/Gauge/Histogram SPI
+- `core/include/server/core/runtime_metrics.hpp` : 경량 런타임 카운터 스냅샷
+- `core/include/server/core/state/` : `SharedState`
+- `core/include/server/core/protocol/` : 프레임 구조 및 opcode/flags/error 정의
+- `core/include/server/core/storage/` : Repository 및 UnitOfWork SPI
+- `core/include/server/wire/codec.hpp` : Protobuf ↔ msg_id 매핑 헬퍼
+- `core/src/**` : 각 인터페이스의 기본 구현
 
-## 패킷/프레이밍
-- Header(v1.1):
-  - `uint16 length`(본문 길이) + `uint16 msg_id` + `uint16 flags` + `uint32 seq` + `uint32 utc_ts_ms32` = 14바이트
-  - Endianness: network(big-endian).
-- 본문: 메시지별 바이너리 스키마(초기 수제, 확장 시 Protobuf/FlatBuffers 선택).
-- Heartbeat: `MSG_PING`, `MSG_PONG` 예약. 무응답 시 세션 종료.
-- 문자열: UTF-8 고정, 길이-접두(프리픽스) 방식 사용.
+## 핵심 모듈 요약
 
-### 프레이밍/코덱 플러그인 SPI
-- CodecChain 인터페이스(제안): `encode(payload) -> bytes`, `decode(bytes) -> payload`.
-- 체인 예: [암호화] → [압축] → [헤더부착]. 구성은 설정 파일로 지정.
-- 압축 기준: payload >= N바이트 시 시도, 효과 없으면 원본 유지 + `flags` 비트 클리어.
+### Net 계층 (`core/src/net`)
+- **Acceptor**(`acceptor.cpp`): 지정 endpoint에서 listen하고 `async_accept`로 세션을 만든다. `SharedState::max_connections`를 넘어가면 새 커넥션을 즉시 닫고 로그를 남긴다. 성공한 accept는 `runtime_metrics::record_accept()`로 계수한다.
+- **Session**(`session.cpp`): 세션 시작 시 `MSG_HELLO`를 송신하고, 헤더→본문 순서로 비동기 read를 반복한다.
+  - `BufferManager`로 받은 고정 블록에 헤더/본문을 저장한다.
+  - `SessionOptions` 기반으로 `recv_max_payload`, `send_queue_max`, `heartbeat_interval_ms`, `read_timeout_ms`를 적용한다. `write_timeout_ms` 필드는 아직 사용하지 않는다.
+  - 송신 큐는 `std::queue`이며 상한을 넘으면 즉시 세션을 종료하고 `runtime_metrics::record_send_queue_drop()`을 남긴다.
+  - heartbeat는 단순히 주기적으로 타이머를 재설정하여 클라이언트의 PING에 대비하도록 한다(서버가 직접 PING을 발송하지는 않는다).
+- **Dispatcher**(`dispatcher.cpp`): `msg_id -> handler` 매핑을 보관한다. 등록되지 않은 opcode는 `false`를 반환하고, 예외가 발생하면 catch하여 `MSG_ERR` 응답을 보내고 로그/메트릭을 기록한다.
 
-## API 스케치(C++)
-```cpp
-namespace server::core {
+### 메모리 & 버퍼 관리 (`memory/memory_pool.*`)
+- `MemoryPool`은 고정 크기 블록 스택을 보호하는 mutex 기반 풀이다. 부족하면 `nullptr`을 반환하여 호출자가 graceful fallback 할 수 있게 한다.
+- `BufferManager`는 `unique_ptr` + custom deleter로 풀 반환을 자동화한다. acquire/release 시 `runtime_metrics`에 사용량이 반영된다.
 
-class Dispatcher {
-public:
-  using handler_t = std::function<void(Session&, std::span<const std::byte>)>;
-  void register_handler(uint16_t msg_id, handler_t h);
-  bool dispatch(uint16_t msg_id, Session& s, std::span<const std::byte> payload);
-};
+### 런타임 상태 (`runtime_metrics.*`)
+- accept/세션/프레임/디스패치/메모리 풀 등 주요 지표를 lock-free `std::atomic`으로 축적한다.
+- `snapshot()`은 현재 카운터값과 `opcode_counts` 벡터를 복사한다. 소비자는 폴링 방식으로 노출하면 된다.
 
-class Session : public std::enable_shared_from_this<Session> {
-public:
-  void start();
-  void stop();
-  void async_send(uint16_t msg_id, std::span<const std::byte> payload);
-  asio::ip::tcp::socket& socket();
-};
+### Metrics SPI (`metrics/metrics.*`)
+- `metrics::Counter`, `Gauge`, `Histogram` 인터페이스만 정의한다.
+- 기본 구현은 no-op이므로 외부에서 어댑터를 등록하지 않으면 호출 비용만 발생한다. 런타임 메트릭은 별도(`runtime_metrics`)로 계수한다.
 
-class Acceptor : public std::enable_shared_from_this<Acceptor> {
-public:
-  void start();
-  void stop();
-  std::size_t connection_count() const;
-};
+### 동시성 유틸 (`concurrent/*.cpp`)
+- `JobQueue`는 mutex + condition_variable 기반 FIFO 큐이며, pop 시점마다 `runtime_metrics::record_job_queue_depth()`를 갱신한다.
+- `ThreadManager`는 `JobQueue`를 소비하는 워커풀 래퍼다. `Stop()`을 호출하면 큐에 종료 신호를 전파한다.
 
-} // namespace
-```
+### 설정 및 공유 상태
+- `config::load_dotenv()`는 `.env` 파일에서 `key=value`를 읽어 환경 변수에 주입한다. `export` 접두어와 각종 따옴표를 허용한다.
+- `SessionOptions`는 세션별 정책을 모아둔 구조체로, 현재 구현에서 실제로 사용하는 필드는 `recv_max_payload`, `send_queue_max`, `heartbeat_interval_ms`, `read_timeout_ms` 네 가지다.
+- `SharedState`는 전역 접속 수, 최대 허용치, 세션 ID 시퀀스를 추적한다. 세션 생성/종료 시 atomic 카운터를 증감한다.
 
-## 연결/흐름 제어 정책
-- 동시 연결 상한: 설정값 초과 시 즉시 종료.
-- 수신 크기 제한: `length` 임계치 초과 시 드롭.
-- 송신 큐 상한: 메시지 수/바이트 기준 임계치 초과 시 세션 종료(백프레셔).
-- 레이트 제한: IP별/세션별 토큰 버킷(선택)으로 남용 방지.
+### 프로토콜 보조
+- `protocol/frame.hpp`는 14바이트 고정 헤더(`FrameHeader`)와 BE 인코딩 유틸, UTF-8 길이 접두 인코더를 제공한다.
+- `protocol/opcodes.hpp`, `protocol/protocol_flags.hpp`, `protocol/protocol_errors.hpp`는 tools 스크립트로 생성되며 값 정의만 포함한다.
+- `server/wire/codec.hpp`는 Protobuf message ↔ opcode 매핑과 Encode/Decode 헬퍼를 제공한다. 현재는 서버→클라이언트 응답형 메시지 위주로 정의되어 있다.
 
-### 송신 큐 워터마크
-- low/high watermark를 두어 배압을 점진적으로 적용.
-- high 초과: 세션 종료 또는 저우선 메시지 드롭 정책 적용.
-- `queued_bytes` 카운터는 write 완료 시 감소시켜 실제 소켓 송신 상태와 워터마크 판정이 일치하도록 유지한다.
+### 스토리지 SPI (`storage/*.hpp`)
+- Repository DTO(`User`, `Room`, `Message`, `Membership`, `Session`)와 관련 추상 인터페이스를 선언한다.
+- `IUnitOfWork`는 repository accessor와 `commit/rollback`만 정의하며, 실제 구현은 server/service 모듈에서 제공해야 한다.
+- `IConnectionPool`은 `make_unit_of_work()`와 헬스체크만 정의한다.
 
-## 에러 모델/로깅
-- 오류 표준: `boost::system::error_code` 사용. 범주: network, parse, policy, internal.
-- 로깅 레벨: trace/debug/info/warn/error. PII 최소화.
-- 관측성: 핵심 카운터(accept 실패, 세션 수, 큐 길이, 처리 시간 p50/p99).
+## 세션 수명주기
+1. **생성**: `Acceptor`가 새 소켓을 성공적으로 받아오면 `Session`을 생성한다. `SharedState::connection_count`를 증가시키고 `session_id`를 할당한다.
+2. **시작**: `Session::start()`가 `send_hello()`를 호출해 `MSG_HELLO` 패킷을 전송한다.
+   - HELLO payload: `proto_major(1)`, `proto_minor(1)`, `capabilities`(현재 `CAP_COMPRESS_SUPP | CAP_SENDER_SID`), 하트비트 간격(1/10 ms), `epoch_high32`.
+3. **수신 루프**: 고정 헤더를 읽어 길이/flags/opcode를 파싱한 뒤, `recv_max_payload`와 메모리 풀 블록 크기를 동시에 검사한다.
+4. **디스패치**: `Dispatcher::dispatch`로 handler를 호출한다. 실행시간은 `runtime_metrics::record_dispatch_attempt`에 nanoseconds 단위로 기록된다.
+5. **종료**: 오류, 타임아웃, 백프레셔 위반, 외부 명령 중 하나가 발생하면 `stop()`이 호출된다. 소켓을 shutdown/close 하고 타이머를 취소한 뒤 카운터를 감소시킨다. `on_close_` 콜백이 등록되어 있으면 마지막에 실행된다.
 
-### 메트릭 세부
-- net.accept.success/fail, net.accept.active_sessions
-- net.recv.bytes, net.send.bytes, net.send.queue_len, net.send.queued_bytes
-- net.read.timeout, net.write.timeout, net.heartbeat.miss
-- dispatch.missing_handler, dispatch.handler_error
+현재 구현에는 문서상 언급되던 `Draining` 상태 머신이나 별도 write 타임아웃이 존재하지 않는다. 향후 필요 시 도입한다.
 
-## 종료/재시작
-- Graceful: accept 중단 → 신규 세션 차단 → 기존 세션 드레이닝/타임아웃 → 자원 해제.
-- Force: 타임아웃 초과 또는 관리자 명령 시 강제 종료.
+## 타임아웃과 heartbeat
+- **Read Timeout**: `Session::arm_read_timeout()`이 `read_timeout_ms`만큼 타이머를 설정하고, 만료 시 `read timeout` 로그와 함께 세션을 종료한다.
+- **Heartbeat Timer**: `heartbeat_interval_ms`가 0보다 크면 타이머를 반복 설정한다. 현재는 서버가 PING 프레임을 직접 보내지 않으므로, 클라이언트의 heartbeat 정책에 의존한다.
+- **Write Timeout**: `SessionOptions::write_timeout_ms` 필드는 정의만 되어 있고 아직 사용되지 않는다.
 
-## 세션 상태 머신/타임아웃
-- 상태: `New -> Active -> Draining -> Closed`
-  - New: 핸드셰이크/인증 전. 제한된 메시지만 허용.
-  - Active: 정상 운영. 핑-퐁/채널 조작/메시지 전송 허용.
-  - Draining: 종료 절차 중. 신규 수신 거부, 송신 큐 소진 후 종료.
-  - Closed: 소켓 종료/리소스 해제.
-- 타임아웃: `read_timeout`, `write_timeout`, `heartbeat_interval * miss_threshold`.
-- 하트비트: 서버 또는 클라 주도 가능. 서버 주기 T, 미수신 K회 → 종료.
+## 백프레셔 및 큐 정책
+- 송신 큐는 프레임 단위 FIFO다. `queued_bytes_`가 `send_queue_max`를 초과하면 더 이상 쌓지 않고 세션을 중단한다(워터마크 기반 드레인 정책은 미구현이다).
+- 수신 본문 길이가 `recv_max_payload`를 넘어가면 `MSG_ERR(LENGTH_LIMIT_EXCEEDED)`를 전송하고 세션을 종료한다.
 
-## 테스트 전략
-- Session 단위: 프레이밍/부분 읽기/대형 패킷/타임아웃. (core/src/net/session.cpp:70)
-- Dispatcher: 중복 등록/미등록/예외 전파. (core/src/net/dispatcher.cpp:12)
-- Acceptor: 빠른 open/close 반복, 연결 폭주 시 정책 확인. (core/src/net/acceptor.cpp:46)
-- 부하: 수천 세션 echo/브로드캐스트 시나리오로 지연·스루풋 측정.
+## 관측성
+- `runtime_metrics`에서 노출하는 주요 카운터는 아래와 같다.
+  - `accept_total`, `session_started_total`, `session_stopped_total`, `session_active`
+  - `session_timeout_total`, `heartbeat_timeout_total`, `send_queue_drop_total`
+  - `frame_total`, `frame_error_total`, `frame_payload_sum/count/max`
+  - `dispatch_total`, `dispatch_unknown_total`, `dispatch_exception_total`
+  - `dispatch_latency_sum/count/last/max` (단위: ns)
+  - `job_queue_depth`, `job_queue_depth_peak`
+  - `memory_pool_capacity`, `memory_pool_in_use`, `memory_pool_in_use_peak`
+  - `opcode_counts` : 사용된 opcode와 그 빈도를 벡터로 반환
+- 별도의 `metrics::Counter` 등은 현재 no-op이므로 Prometheus 등 외부 백엔드를 붙이려면 adapter를 공급해야 한다.
+- `log`는 단일 mutex로 직렬화된 stderr 출력이며, 기본 로그 레벨은 `info`다.
 
-### 핸들러 계약/예외
-- 핸들러는 예외를 던지지 않는 것을 원칙으로 하나, 발생 시 Dispatcher가 잡아 로깅하고 세션을 안전 종료. (core/src/net/dispatcher.cpp:16)
-- 핸들러 실행 시간 상한은 정책으로 모니터링. 장시간 블로킹 금지.
+## 에러 처리
+- Asio read/write 실패, 메모리 풀 고갈, payload 길이 오류 등은 `runtime_metrics::record_frame_error()`와 함께 세션 종료로 이어진다.
+- 핸들러에서 예외가 발생하면 `MSG_ERR(INTERNAL_ERROR)`를 전송하고, 세션은 즉시 종료하지 않고 다음 프레임을 읽기 위해 루프를 계속한다.
+- 알 수 없는 opcode 수신 시 `MSG_ERR(UNKNOWN_MSG_ID)`를 응답하고, 이후에도 연결은 유지된다.
 
-## 설정 매핑(코어 ↔ configuration.yaml)
-- `server.io_threads` → `io_context` 워커 스레드 수
-- `server.max_connections` → Acceptor 연결 상한 (core/src/net/acceptor.cpp:73)
-- `server.recv_max_payload` → 프레이밍 길이 상한
-- `server.send_queue_max` → 송신 큐 바이트 상한/워터마크
-- `server.heartbeat_interval_ms`/`read_timeout_ms`/`write_timeout_ms` → 타이머 파라미터
-- `security.tls_*` → TLS 콘텍스트 초기화(선택)
-- `logging.level` → 코어 로거 레벨
+## 향후 보강 항목 (TODO)
+- 송신 큐 워터마크(high/low) 기반 점진적 배압 로직.
+- 서버 주도 heartbeat(PING)과 `write_timeout_ms` 활용.
+- 문서에 소개된 Codec 체인 플러그인 SPI는 아직 구현되지 않았다. 현재는 고정 헤더 + payload 구조만 지원한다.
+- `ThreadManager`/`JobQueue`는 아직 서버 실행 경로에 직접 연결되지 않았다. 백그라운드 작업 사용 예제가 추가되면 좋은 상태다.
+- 테스트 커버리지: `core/tests`가 존재하지 않으므로 향후 GoogleTest 기반 단위 테스트를 작성해야 한다.
 
-## 확장/교체 포인트
-- Codec 체인: 압축/암호화 플러그 가능.
-- 인증 훅: 최초 메시지 교환에서 인증 모듈 연계.
-- Executor 주입: 룸/존 샤딩 시 외부 실행 컨텍스트 제공.
-- 기본 파라미터(권장 값)
-  - `io_threads`: CPU 코어 수, 최소 1.
-  - `heartbeat_interval_ms`: 10_000ms, miss 3회.
-  - `recv_max_payload`: 32KB, 최대 64KB.
-  - `send_queue_max`: 256KB, low/high = 1MB/2MB(서비스 성격에 따라 조정).
+현 시점 문서는 실제 코드(`core/src`, `core/include`) 기반으로 업데이트 되었으며, 추가 기능 구현 시 이 문서를 함께 갱신해야 한다.
 
-## 성능/안정성 목표(초안)
-- 지연: PING p50 < 2ms, p99 < 20ms(동일 AZ/로컬).
-- 동시 세션: 단일 GW 인스턴스 20k 세션 안정 유지.
-- 처리량: 채팅 브로드캐스트 10k msg/s에서 안정 동작.
-- 오류율: 0.1% 이하(서킷브레이커/재시도 제외).
+## TODO (장기 로드맵)
+- [ ] 서비스별 `io_context` 격리를 위한 Hive/Connection 추상화 도입 검토.
+- [ ] 게임/시뮬레이션 서버 공통 기능(ECS, 씬/월드 스케줄링) 사전 조사.
+- [ ] 플러그인/스크립팅 계층 설계 (Lua, WASM 등 후보 평가).
+- [ ] 인증/권한/세션 관리 기본 모듈 정의.
+- [ ] 공통 진단 파이프라인(분산 트레이싱, 로그 스트리밍) 표준화.
+

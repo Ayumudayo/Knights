@@ -8,6 +8,9 @@
 #include <cstring> // strcmp
 #include <sstream>
 #include <iomanip>
+#include <chrono>
+#include <filesystem>
+#include <type_traits>
 
 #include <boost/asio.hpp>
 #include <boost/asio/streambuf.hpp>
@@ -26,10 +29,14 @@
 #include "server/core/protocol/protocol_flags.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/util/service_registry.hpp"
+#include "server/core/util/paths.hpp"
+#include "server/core/util/crash_handler.hpp"
 #include "server/core/config/options.hpp"
 #include "server/core/state/shared_state.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "server/core/concurrent/thread_manager.hpp"
+#include "server/core/concurrent/task_scheduler.hpp"
 #include "server/core/memory/memory_pool.hpp"
 #include "server/core/runtime_metrics.hpp"
 #include "server/chat/chat_service.hpp"
@@ -38,6 +45,7 @@
 // 저장소 DI: Postgres 커넥션 풀 팩토리
 #include "server/storage/postgres/connection_pool.hpp"
 #include "server/core/storage/connection_pool.hpp"
+#include "server/core/storage/db_worker_pool.hpp"
 // 캐시/팬아웃: Redis 클라이언트(스켈레톤)
 #include "server/storage/redis/client.hpp"
 // .env 로더
@@ -48,6 +56,9 @@ using tcp = asio::ip::tcp;
 namespace core = server::core;
 namespace protocol = server::core::protocol;
 namespace corelog = server::core::log;
+namespace services = server::core::util::services;
+namespace pathutil = server::core::util::paths;
+namespace crash = server::core::util::crash;
 
 namespace server::app {
 
@@ -63,11 +74,63 @@ int run_server(int argc, char** argv) {
         SetConsoleCP(CP_UTF8);
         std::setlocale(LC_ALL, ".UTF-8");
 #endif
-        // .env가 있으면 이를 우선(override=true), 없으면 OS 환경변수 사용
-        if (server::core::config::load_dotenv(".env", true)) {
-            corelog::info("Loaded .env (override existing env = true)");
+        crash::install();
+
+        bool env_loaded = false;
+        std::filesystem::path env_path;
+        std::filesystem::path exe_dir;
+        try {
+            exe_dir = pathutil::executable_dir();
+            auto local_env = exe_dir / ".env";
+            if (std::filesystem::exists(local_env)) {
+                env_loaded = server::core::config::load_dotenv(local_env.string(), true);
+                if (env_loaded) env_path = local_env;
+            } else {
+                auto local_default = exe_dir / ".env.default";
+                if (std::filesystem::exists(local_default)) {
+                    try {
+                        std::filesystem::copy_file(local_default, local_env, std::filesystem::copy_options::overwrite_existing);
+                        corelog::info("Seeded .env next to executable from .env.default");
+                        env_loaded = server::core::config::load_dotenv(local_env.string(), true);
+                        if (env_loaded) env_path = local_env;
+                    } catch (const std::exception& copy_ex) {
+                        corelog::warn(std::string("Failed to seed .env next to executable: ") + copy_ex.what());
+                    }
+                }
+            }
+        } catch (const std::exception& ex) {
+            corelog::warn(std::string("Executable dir detection failed: ") + ex.what());
+        }
+        if (!env_loaded) {
+            std::filesystem::path repo_env{".env"};
+            if (!std::filesystem::exists(repo_env)) {
+                std::filesystem::path repo_default{".env.default"};
+                if (std::filesystem::exists(repo_default)) {
+                    try {
+                        std::filesystem::copy_file(repo_default, repo_env, std::filesystem::copy_options::overwrite_existing);
+                        corelog::info("Seeded repository .env from .env.default");
+                    } catch (const std::exception& copy_ex) {
+                        corelog::warn(std::string("Failed to seed repository .env: ") + copy_ex.what());
+                    }
+                }
+            }
+            if (std::filesystem::exists(repo_env)) {
+                env_loaded = server::core::config::load_dotenv(repo_env.string(), true);
+                if (env_loaded) env_path = std::filesystem::absolute(repo_env);
+            }
+        }
+        if (env_loaded) {
+            corelog::info(std::string("Loaded environment file: ") + env_path.string());
         } else {
-            corelog::info(".env not found; using existing environment variables");
+            corelog::info("No .env file located; using existing environment variables");
+        }
+
+        if (const char* buf_cap = std::getenv("LOG_BUFFER_CAPACITY"); buf_cap && *buf_cap) {
+            auto cap = std::strtoull(buf_cap, nullptr, 10);
+            if (cap > 0) {
+                corelog::set_buffer_capacity(static_cast<std::size_t>(cap));
+                corelog::info(std::string("Log buffer capacity set to ") + std::to_string(cap));
+            }
         }
 
         unsigned short port = 5000;
@@ -77,6 +140,7 @@ int run_server(int argc, char** argv) {
 
         asio::io_context io;
         core::JobQueue job_queue;
+        auto* job_queue_ptr = &job_queue;
         core::ThreadManager workers(job_queue);
         core::BufferManager buffer_manager(2048, 1024); // 2KB buffers, 1024 count
 
@@ -86,8 +150,21 @@ int run_server(int argc, char** argv) {
         options->heartbeat_interval_ms = 10'000;
         auto state = std::make_shared<core::SharedState>();
 
+        const auto make_ref = [](auto& instance) {
+            using T = std::remove_reference_t<decltype(instance)>;
+            return std::shared_ptr<T>(&instance, [](T*) {});
+        };
+        services::set(make_ref(io));
+        services::set(make_ref(job_queue));
+        services::set(make_ref(workers));
+        services::set(make_ref(buffer_manager));
+        services::set(make_ref(dispatcher));
+        services::set(options);
+        services::set(state);\n        core::concurrent::TaskScheduler scheduler;\n        services::set(make_ref(scheduler));\n\n        auto scheduler_timer = std::make_shared<asio::steady_timer>(io);\n        services::set(scheduler_timer);\n        auto scheduler_tick = std::make_shared<std::function<void()>>();\n        std::weak_ptr<std::function<void()>> scheduler_tick_weak = scheduler_tick;\n        *scheduler_tick = [scheduler_timer, scheduler_ptr = &scheduler, scheduler_tick_weak]() {\n            scheduler_ptr->poll(32);\n            scheduler_timer->expires_after(std::chrono::milliseconds(50));\n            scheduler_timer->async_wait([scheduler_timer, scheduler_ptr, scheduler_tick_weak](const boost::system::error_code& ec){\n                if (ec) return;\n                if (auto fn = scheduler_tick_weak.lock()) {\n                    (*fn)();\n                }\n            });\n        };\n        (*scheduler_tick)();\n
+
         // DB 커넥션 풀 구성(환경 변수 기반)
         std::shared_ptr<core::storage::IConnectionPool> db_pool;
+        std::shared_ptr<core::storage::DbWorkerPool> db_workers;
         {
             const char* uri = std::getenv("DB_URI");
             if (uri && *uri) {
@@ -108,6 +185,36 @@ int run_server(int argc, char** argv) {
             } else {
                 corelog::warn("DB_URI is not set; database features remain disabled (configure if required).");
             }
+        }
+        if (db_pool) {
+            services::set(db_pool);
+            std::size_t configured_workers = 0;
+            if (const char* env_workers = std::getenv("DB_WORKER_THREADS"); env_workers && *env_workers) {
+                configured_workers = std::strtoul(env_workers, nullptr, 10);
+            }
+            std::size_t log_workers = configured_workers;
+            if (log_workers == 0) {
+                log_workers = std::thread::hardware_concurrency();
+                if (log_workers == 0) log_workers = 1;
+            }
+            db_workers = std::make_shared<core::storage::DbWorkerPool>(db_pool);
+            db_workers->start(configured_workers);
+            services::set(db_workers);
+            corelog::info(std::string("DB worker pool started: ") + std::to_string(log_workers) + " threads.");
+
+            scheduler.schedule_every(std::chrono::seconds(60), [job_queue_ptr, db_pool]() {
+                job_queue_ptr->Push([db_pool]() {
+                    try {
+                        if (!db_pool->health_check()) {
+                            corelog::warn("Periodic DB health check failed");
+                        }
+                    } catch (const std::exception& ex) {
+                        corelog::error(std::string("Periodic DB health check exception: ") + ex.what());
+                    } catch (...) {
+                        corelog::error("Periodic DB health check unknown exception");
+                    }
+                });
+            });
         }
 
         // Redis 클라이언트 구성(환경 변수 기반)
@@ -136,8 +243,25 @@ int run_server(int argc, char** argv) {
         } else {
             corelog::warn("REDIS_URI is not set; Redis features remain disabled (configure if required).");
         }
+        if (redis) {
+            services::set(redis);
+            scheduler.schedule_every(std::chrono::seconds(60), [job_queue_ptr, redis]() {
+                job_queue_ptr->Push([redis]() {
+                    try {
+                        if (!redis->health_check()) {
+                            corelog::warn("Periodic Redis health check failed");
+                        }
+                    } catch (const std::exception& ex) {
+                        corelog::error(std::string("Periodic Redis health check exception: ") + ex.what());
+                    } catch (...) {
+                        corelog::error("Periodic Redis health check unknown exception");
+                    }
+                });
+            });
+        }
 
         server::app::chat::ChatService chat(io, job_queue, db_pool, redis);
+        services::set(make_ref(chat));
         // TODO: ChatService에 저장소 주입(후속 단계)
 
         register_routes(dispatcher, chat);
@@ -147,6 +271,7 @@ int run_server(int argc, char** argv) {
             [&chat](std::shared_ptr<core::Session> sess){
                 sess->set_on_close([&chat](std::shared_ptr<core::Session> s){ chat.on_session_close(s); });
             });
+        services::set(acceptor);
         acceptor->start();
         corelog::info("server_app listening on 0.0.0.0:" + std::to_string(port));
 
@@ -222,6 +347,8 @@ int run_server(int argc, char** argv) {
         if (metrics_port != 0) {
             metrics_io = std::make_shared<asio::io_context>();
             metrics_acc = std::make_shared<tcp::acceptor>(*metrics_io, tcp::endpoint(tcp::v4(), metrics_port));
+            services::set(metrics_io);
+            services::set(metrics_acc);
             auto do_accept = std::make_shared<std::function<void()>>();
             *do_accept = [metrics_io, metrics_acc, do_accept]() {
                 auto sock = std::make_shared<tcp::socket>(*metrics_io);
@@ -238,69 +365,111 @@ int run_server(int argc, char** argv) {
                                     return;
                                 }
 
-                                auto snap = server::core::runtime_metrics::snapshot();
-                                std::ostringstream stream;
-                                auto append_counter = [&](const char* name, std::uint64_t value) {
-                                    stream << "# TYPE " << name << " counter\n" << name << ' ' << value << '\n';
-                                };
-                                auto append_gauge = [&](const char* name, long double value) {
-                                    stream << "# TYPE " << name << " gauge\n" << name << ' ' << std::fixed << std::setprecision(3) << value << '\n';
-                                    stream << std::defaultfloat << std::setprecision(6);
-                                };
+                                std::istream request_stream(&request_buf);
+                                std::string request_line;
+                                std::getline(request_stream, request_line);
+                                if (!request_line.empty() && request_line.back() == '\r') request_line.pop_back();
 
-                                append_counter("chat_subscribe_total", g_subscribe_total.load());
-                                append_counter("chat_self_echo_drop_total", g_self_echo_drop_total.load());
-                                append_gauge("chat_subscribe_last_lag_ms", static_cast<long double>(g_subscribe_last_lag_ms.load()));
+                                std::string method;
+                                std::string target;
+                                {
+                                    std::istringstream line_stream(request_line);
+                                    line_stream >> method >> target;
+                                }
+                                if (target.empty()) target = "/metrics";
 
-                                append_counter("chat_accept_total", snap.accept_total);
-                                append_counter("chat_session_started_total", snap.session_started_total);
-                                append_counter("chat_session_stopped_total", snap.session_stopped_total);
-                                append_counter("chat_session_timeout_total", snap.session_timeout_total);
-                                append_counter("chat_heartbeat_timeout_total", snap.heartbeat_timeout_total);
-                                append_counter("chat_send_queue_drop_total", snap.send_queue_drop_total);
-                                append_gauge("chat_session_active", static_cast<long double>(snap.session_active));
-                                append_counter("chat_frame_total", snap.frame_total);
-                                append_counter("chat_frame_error_total", snap.frame_error_total);
-                                append_counter("chat_frame_payload_sum_bytes", snap.frame_payload_sum_bytes);
-                                append_counter("chat_frame_payload_count", snap.frame_payload_count);
-                                auto payload_avg = snap.frame_payload_count ? (static_cast<long double>(snap.frame_payload_sum_bytes) / static_cast<long double>(snap.frame_payload_count)) : 0.0L;
-                                append_gauge("chat_frame_payload_avg_bytes", payload_avg);
-                                append_gauge("chat_frame_payload_max_bytes", static_cast<long double>(snap.frame_payload_max_bytes));
-                                append_counter("chat_dispatch_total", snap.dispatch_total);
-                                append_counter("chat_dispatch_unknown_total", snap.dispatch_unknown_total);
-                                append_counter("chat_dispatch_exception_total", snap.dispatch_exception_total);
+                                std::string body;
+                                std::string status = "200 OK";
+                                std::string content_type = "text/plain; version=0.0.4";
 
-                                auto last_ms = static_cast<long double>(snap.dispatch_latency_last_ns) / 1'000'000.0L;
-                                auto max_ms = static_cast<long double>(snap.dispatch_latency_max_ns) / 1'000'000.0L;
-                                auto sum_ms = static_cast<long double>(snap.dispatch_latency_sum_ns) / 1'000'000.0L;
-                                auto avg_ms = snap.dispatch_latency_count ? (sum_ms / static_cast<long double>(snap.dispatch_latency_count)) : 0.0L;
-                                append_gauge("chat_dispatch_last_latency_ms", last_ms);
-                                append_gauge("chat_dispatch_max_latency_ms", max_ms);
-                                append_gauge("chat_dispatch_latency_sum_ms", sum_ms);
-                                append_gauge("chat_dispatch_latency_avg_ms", avg_ms);
-                                append_counter("chat_dispatch_latency_count", snap.dispatch_latency_count);
+                                if (target == "/logs") {
+                                    content_type = "text/plain; charset=utf-8";
+                                    auto logs = corelog::recent(200);
+                                    std::ostringstream body_stream;
+                                    if (logs.empty()) {
+                                        body_stream << "(no log entries)\n";
+                                    } else {
+                                        for (const auto& line : logs) {
+                                            body_stream << line << '\n';
+                                        }
+                                    }
+                                    body = body_stream.str();
+                                } else if (target == "/metrics" || target == "/") {
+                                    auto snap = server::core::runtime_metrics::snapshot();
+                                    std::ostringstream stream;
+                                    auto append_counter = [&](const char* name, std::uint64_t value) {
+                                        stream << "# TYPE " << name << " counter\n" << name << ' ' << value << '\n';
+                                    };
+                                    auto append_gauge = [&](const char* name, long double value) {
+                                        stream << "# TYPE " << name << " gauge\n" << name << ' ' << std::fixed << std::setprecision(3) << value << '\n';
+                                        stream << std::defaultfloat << std::setprecision(6);
+                                    };
+
+                                    append_counter("chat_subscribe_total", g_subscribe_total.load());
+                                    append_counter("chat_self_echo_drop_total", g_self_echo_drop_total.load());
+                                    append_gauge("chat_subscribe_last_lag_ms", static_cast<long double>(g_subscribe_last_lag_ms.load()));
+
+                                    append_counter("chat_accept_total", snap.accept_total);
+                                    append_counter("chat_session_started_total", snap.session_started_total);
+                                    append_counter("chat_session_stopped_total", snap.session_stopped_total);
+                                    append_counter("chat_session_timeout_total", snap.session_timeout_total);
+                                    append_counter("chat_heartbeat_timeout_total", snap.heartbeat_timeout_total);
+                                    append_counter("chat_send_queue_drop_total", snap.send_queue_drop_total);
+                                    append_gauge("chat_session_active", static_cast<long double>(snap.session_active));
+                                    append_counter("chat_frame_total", snap.frame_total);
+                                    append_counter("chat_frame_error_total", snap.frame_error_total);
+                                    append_counter("chat_frame_payload_sum_bytes", snap.frame_payload_sum_bytes);
+                                    append_counter("chat_frame_payload_count", snap.frame_payload_count);
+                                    auto payload_avg = snap.frame_payload_count ? (static_cast<long double>(snap.frame_payload_sum_bytes) / static_cast<long double>(snap.frame_payload_count)) : 0.0L;
+                                    append_gauge("chat_frame_payload_avg_bytes", payload_avg);
+                                    append_gauge("chat_frame_payload_max_bytes", static_cast<long double>(snap.frame_payload_max_bytes));
+                                    append_counter("chat_dispatch_total", snap.dispatch_total);
+                                    append_counter("chat_dispatch_unknown_total", snap.dispatch_unknown_total);
+                                    append_counter("chat_dispatch_exception_total", snap.dispatch_exception_total);
+
+                                    auto last_ms = static_cast<long double>(snap.dispatch_latency_last_ns) / 1'000'000.0L;
+                                    auto max_ms = static_cast<long double>(snap.dispatch_latency_max_ns) / 1'000'000.0L;
+                                    auto sum_ms = static_cast<long double>(snap.dispatch_latency_sum_ns) / 1'000'000.0L;
+                                    auto avg_ms = snap.dispatch_latency_count ? (sum_ms / static_cast<long double>(snap.dispatch_latency_count)) : 0.0L;
+                                    append_gauge("chat_dispatch_last_latency_ms", last_ms);
+                                    append_gauge("chat_dispatch_max_latency_ms", max_ms);
+                                    append_gauge("chat_dispatch_latency_sum_ms", sum_ms);
+                                    append_gauge("chat_dispatch_latency_avg_ms", avg_ms);
+                                    append_counter("chat_dispatch_latency_count", snap.dispatch_latency_count);
                                 append_gauge("chat_job_queue_depth", static_cast<long double>(snap.job_queue_depth));
                                 append_gauge("chat_job_queue_depth_peak", static_cast<long double>(snap.job_queue_depth_peak));
+                                append_gauge("chat_db_job_queue_depth", static_cast<long double>(snap.db_job_queue_depth));
+                                append_gauge("chat_db_job_queue_depth_peak", static_cast<long double>(snap.db_job_queue_depth_peak));
+                                append_counter("chat_db_job_processed_total", snap.db_job_processed_total);
+                                append_counter("chat_db_job_failed_total", snap.db_job_failed_total);
                                 append_gauge("chat_memory_pool_capacity", static_cast<long double>(snap.memory_pool_capacity));
-                                append_gauge("chat_memory_pool_in_use", static_cast<long double>(snap.memory_pool_in_use));
-                                append_gauge("chat_memory_pool_in_use_peak", static_cast<long double>(snap.memory_pool_in_use_peak));
+                                    append_gauge("chat_memory_pool_in_use", static_cast<long double>(snap.memory_pool_in_use));
+                                    append_gauge("chat_memory_pool_in_use_peak", static_cast<long double>(snap.memory_pool_in_use_peak));
 
-                                if (!snap.opcode_counts.empty()) {
-                                    stream << "# TYPE chat_dispatch_opcode_total counter\n";
-                                    for (const auto& [opcode, count] : snap.opcode_counts) {
-                                        std::ostringstream label;
-                                        label << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << opcode;
-                                        stream << "chat_dispatch_opcode_total{opcode=\"0x" << label.str() << "\"} " << count << "\n";
+                                    if (!snap.opcode_counts.empty()) {
+                                        stream << "# TYPE chat_dispatch_opcode_total counter\n";
+                                        for (const auto& [opcode, count] : snap.opcode_counts) {
+                                            std::ostringstream label;
+                                            label << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << opcode;
+                                            stream << "chat_dispatch_opcode_total{opcode=\"0x" << label.str() << "\"} " << count << "\n";
+                                        }
                                     }
+
+                                    stream << std::setfill(' ') << std::dec << std::nouppercase;
+                                    body = stream.str();
+                                } else {
+                                    status = "404 Not Found";
+                                    content_type = "text/plain; charset=utf-8";
+                                    body = "Not Found\r\n";
                                 }
 
-                                stream << std::setfill(' ') << std::dec << std::nouppercase;
-
-                                std::string body = stream.str();
-                                std::string hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n";
+                                std::string hdr = "HTTP/1.1 " + status + "\r\nContent-Type: " + content_type +
+                                    "\r\nContent-Length: " + std::to_string(body.size()) + "\r\nConnection: close\r\n\r\n";
                                 std::vector<asio::const_buffer> bufs;
                                 bufs.emplace_back(asio::buffer(hdr));
-                                bufs.emplace_back(asio::buffer(body));
+                                if (!body.empty()) {
+                                    bufs.emplace_back(asio::buffer(body));
+                                }
                                 asio::write(*sock, bufs);
                                 boost::system::error_code ec;
                                 sock->shutdown(tcp::socket::shutdown_both, ec);
@@ -325,6 +494,9 @@ int run_server(int argc, char** argv) {
             // Redis Pub/Sub 구독 중지(있다면)
             try { if (redis) { redis->stop_psubscribe(); } } catch (...) {}
             if (metrics_io) { try { metrics_io->stop(); } catch (...) {} }
+            scheduler.shutdown();
+            try { scheduler_timer->cancel(); } catch (...) {}
+            if (db_workers) { try { db_workers->stop(); } catch (...) {} }
             acceptor->stop();
             io.stop();
             workers.Stop();
@@ -335,14 +507,32 @@ int run_server(int argc, char** argv) {
         }
 
         if (metrics_thread && metrics_thread->joinable()) metrics_thread->join();
+        try { scheduler_timer->cancel(); } catch (...) {}
+        scheduler.shutdown();
+        if (db_workers) db_workers->stop();
+        services::clear();
         return 0;
     } catch (const std::exception& ex) {
         corelog::error(std::string("server_app exception: ") + ex.what());
+        try { scheduler_timer->cancel(); } catch (...) {}
+        scheduler.shutdown();
+        if (db_workers) db_workers->stop();
+        services::clear();
         return 1;
     }
 }
 
 } // namespace server::app
+
+
+
+
+
+
+
+
+
+
 
 
 

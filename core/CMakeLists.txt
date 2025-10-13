@@ -7,8 +7,13 @@ add_library(server_core
     src/runtime_metrics.cpp
     src/concurrent/job_queue.cpp
     src/concurrent/thread_manager.cpp
+    src/concurrent/task_scheduler.cpp
     src/memory/memory_pool.cpp
     src/config/dotenv.cpp
+    src/util/service_registry.cpp
+    src/util/paths.cpp
+    src/util/crash_handler.cpp
+    src/storage/db_worker_pool.cpp
 )
 
 target_include_directories(server_core PUBLIC include)
@@ -25,7 +30,7 @@ endif()
 
 if (WIN32)
     # Asio의 WinSock 종속성
-    target_link_libraries(server_core PUBLIC ws2_32 mswsock)
+    target_link_libraries(server_core PUBLIC ws2_32 mswsock dbghelp)
 endif()
 
 if (MSVC)
