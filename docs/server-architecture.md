@@ -97,6 +97,8 @@
 - **장애 시나리오**: Core 다운 시 Load Balancer가 해당 shard를 블랙리스트 처리 → Gateway가 세션 재협상을 요청 → 새 Core가 Redis/DB에서 상태를 복원.
 
 ### 상태 저장소 프로토타입
+- Redis 기반 인스턴스 레지스트리: `load_balancer_app`은 `LB_REDIS_URI` (또는 `REDIS_URI`) 환경 변수를 통해 Redis 연결 문자열을 받아 `RedisInstanceStateBackend`를 사용한다. 환경 변수가 설정되지 않으면 InMemory 백엔드로 자동 폴백한다.
+- Consul 연동은 선택 사항이며 추후 다중 데이터센터 환경이 필요할 때 추가한다.
 - server/state/instance_registry.hpp�� InMemoryStateBackend�� ���� �ڷᱸ���Ե��� �ڵ����� ������ ���÷δ�. 테스트�� state_instance_registry_tests.cpp���� GTest�� ����/touch/삭제 플로우�� 검증한다.
 - RedisInstanceStateBackend�� Redis의 TTL(setex)을 활용해 gateway/instances/{id} 키에 JSON 메타데이터를 기록하고, 로컬 캐시로 즉시 조회를 지원한다. make_redis_state_client() 어댑터로 기존 server_storage_redis 클라이언트를 주입한다.
 - ConsulInstanceStateBackend�� HTTP PUT/DELETE 콜백을 주입받아 Consul KV와 연동하는 패턴을 시뮬레이션하며, 향후 실제 HTTP 클라이언트로 교체 가능하다.

@@ -22,11 +22,13 @@ public:
 
 private:
     void schedule_heartbeat();
+    std::unique_ptr<server::state::IInstanceStateBackend> create_backend();
+    server::state::InstanceRecord build_smoke_record() const;
 
     boost::asio::io_context io_;
     std::shared_ptr<server::core::net::Hive> hive_;
     boost::asio::steady_timer heartbeat_timer_;
-    server::state::InMemoryStateBackend state_backend_;
+    std::unique_ptr<server::state::IInstanceStateBackend> state_backend_;
     std::atomic<bool> heartbeat_executed_{false};
 };
 
