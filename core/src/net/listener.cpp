@@ -54,6 +54,15 @@ bool Listener::is_stopped() const {
 void Listener::on_accept(std::shared_ptr<Connection>) {}
 void Listener::on_error(const boost::system::error_code&) {}
 
+boost::asio::ip::tcp::endpoint Listener::local_endpoint() const {
+    boost::system::error_code ec;
+    auto endpoint = acceptor_.local_endpoint(ec);
+    if (ec) {
+        return {};
+    }
+    return endpoint;
+}
+
 void Listener::do_accept() {
     auto self = shared_from_this();
     acceptor_.async_accept([self](const boost::system::error_code& ec, boost::asio::ip::tcp::socket socket) {

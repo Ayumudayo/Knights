@@ -1,4 +1,5 @@
 add_executable(gateway_app
+    src/gateway_connection.cpp
     src/gateway_app.cpp
     src/main.cpp
 )

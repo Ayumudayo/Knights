@@ -26,6 +26,7 @@ public:
     void start();
     void stop();
     bool is_stopped() const;
+    boost::asio::ip::tcp::endpoint local_endpoint() const;
 
 protected:
     virtual void on_accept(std::shared_ptr<Connection> connection);
