@@ -14,13 +14,15 @@ namespace gateway {
 
 namespace {
 constexpr std::uint16_t kSmokeTestPort = 0; // let the OS choose an available port
+const std::chrono::milliseconds kClientDelay{5};
 }
 
 using tcp = boost::asio::ip::tcp;
 
 GatewayApp::GatewayApp()
     : hive_(std::make_shared<server::core::net::Hive>(io_))
-    , stop_timer_(io_) {}
+    , stop_timer_(io_)
+    , authenticator_(std::make_shared<auth::NoopAuthenticator>()) {}
 
 bool GatewayApp::run_smoke_test() {
     payload_received_.store(false, std::memory_order_relaxed);
@@ -32,7 +34,7 @@ bool GatewayApp::run_smoke_test() {
 
     std::thread worker([this]() { hive_->run(); });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    std::this_thread::sleep_for(kClientDelay);
 
     boost::asio::io_context client_io;
     tcp::socket client_socket(client_io);
@@ -40,11 +42,19 @@ bool GatewayApp::run_smoke_test() {
     tcp::endpoint destination(boost::asio::ip::address_v4::loopback(), port);
     client_socket.connect(destination, ec);
     if (!ec) {
-        const std::string message = "gateway-smoke";
-        boost::asio::write(client_socket, boost::asio::buffer(message), ec);
-    } else {
-        server::core::log::warn(std::string("GatewayApp smoke client failed to connect: ") + ec.message());
+        const std::string handshake = "client1:dummy-token";
+        boost::asio::write(client_socket, boost::asio::buffer(handshake), ec);
+        if (!ec) {
+            std::this_thread::sleep_for(kClientDelay);
+            const std::string payload = "chat:ping";
+            boost::asio::write(client_socket, boost::asio::buffer(payload), ec);
+        }
     }
+    if (ec) {
+        server::core::log::warn(std::string("GatewayApp smoke client error: ") + ec.message());
+    }
+    boost::system::error_code shutdown_ec;
+    client_socket.shutdown(tcp::socket::shutdown_both, shutdown_ec);
     client_socket.close();
 
     worker.join();
@@ -60,7 +70,7 @@ bool GatewayApp::run_smoke_test() {
         payload_copy = last_payload_;
     }
     const std::string payload_str(payload_copy.begin(), payload_copy.end());
-    const bool payload_ok = payload_received_.load(std::memory_order_relaxed) && payload_str == "gateway-smoke";
+    const bool payload_ok = payload_received_.load(std::memory_order_relaxed) && payload_str == "chat:ping";
     const bool ok = payload_ok && !watchdog_fired_.load(std::memory_order_relaxed);
     if (ok) {
         server::core::log::info("GatewayApp Hive/Connection smoke test completed");
@@ -98,12 +108,13 @@ std::uint16_t GatewayApp::setup_listener(std::uint16_t port) {
         hive_->stop();
     };
 
+    auto authenticator = authenticator_;
     tcp::endpoint endpoint{tcp::v4(), port};
     listener_ = std::make_shared<server::core::net::Listener>(
         hive_,
         endpoint,
-        [payload_callback](std::shared_ptr<server::core::net::Hive> hive) {
-            return std::make_shared<GatewayConnection>(std::move(hive), payload_callback);
+        [payload_callback, authenticator](std::shared_ptr<server::core::net::Hive> hive) {
+            return std::make_shared<GatewayConnection>(std::move(hive), authenticator, payload_callback);
         });
     listener_->start();
 

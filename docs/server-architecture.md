@@ -109,7 +109,7 @@
 5. 메시지 송신 시 Core가 DB에 기록 → Redis Streams로 fan-out → 다른 Core/Gateway가 subscribe 하고, 최종적으로 대상 세션에 전달된다.
 
 ### 별도 실행 프로그램 구성
-- **Gateway 애플리케이션(`gateway_app`)**: `gateway/` 모듈에서 Hive/Connection 스켈레톤을 활용해 TLS 종료·인증·세션 등록을 담당한다. `GatewayApp::run_smoke_test()`는 `server::core::net::Listener`와 `GatewayConnection`을 사용해 로컬 루프백 접속(포트 6200)으로 실제 accept/read 플로우를 검증하고, 핸드셰이크 payload가 수신되면 Hive를 graceful stop 한다.
+- **Gateway 애플리케이션(`gateway_app`)**: `gateway/` 모듈에서 Hive/Connection 스켈레톤을 활용해 TLS 종료·인증·세션 등록을 담당한다. `GatewayApp::run_smoke_test()`는 `server::core::net::Listener`와 `GatewayConnection`을 사용해 로컬 루프백 접속(동적으로 할당된 포트)에서 인증 토큰 핸드셰이크→데이터 수신까지 검증하고, 성공 시 Hive를 graceful stop 한다.
 - **Load Balancer 애플리케이션(`load_balancer_app`)**: `load_balancer/` 모듈은 InMemory → Redis/Consul 상태 저장소로 인스턴스 정보를 관리하고, Hive 기반 health probe를 확장할 준비가 되어 있다. Smoke 테스트는 `LoadBalancerApp::run_smoke_test()`에서 인스턴스 레코드를 upsert/touch 한 뒤 Hive를 graceful stop 하며 검증한다.
 - **빌드 구성**: 루트 `CMakeLists.txt`에서 `add_subdirectory(gateway)`, `add_subdirectory(load_balancer)`를 추가해 두 실행 파일을 생성한다. 두 타깃 모두 `server_core`를 링크하며, Load Balancer는 상태 저장소 공유를 위해 `server_state` 라이브러리도 링크한다.
 

@@ -4,6 +4,7 @@
 #include <memory>
 #include <vector>
 
+#include "gateway/auth/authenticator.hpp"
 #include "server/core/net/connection.hpp"
 
 namespace gateway {
@@ -13,6 +14,7 @@ public:
     using PayloadCallback = std::function<void(std::vector<std::uint8_t>)>;
 
     GatewayConnection(std::shared_ptr<server::core::net::Hive> hive,
+                      std::shared_ptr<auth::IAuthenticator> authenticator,
                       PayloadCallback on_payload);
 
 protected:
@@ -22,7 +24,10 @@ protected:
     void on_error(const boost::system::error_code& ec) override;
 
 private:
+    std::shared_ptr<auth::IAuthenticator> authenticator_;
     PayloadCallback on_payload_;
+    bool authenticated_{false};
+    auth::AuthResult last_auth_result_{};
 };
 
 } // namespace gateway
