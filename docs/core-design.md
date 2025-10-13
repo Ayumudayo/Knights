@@ -13,6 +13,14 @@
 > 1차 적용 대상은 `server/app` 채팅 서버이므로, 네트워크·스토리지·메트릭 설계는 채팅 워크로드 중심으로 우선순위를 잡았다.  
 > 다른 유형의 서버에 맞춰 확장할 때는 본 문서의 모듈 구분과 SPI를 기반으로 기능을 보강한다.
 
+## 엔진화 목표와 현재 범위
+- **서버 엔진(Server Engine)**: ServiceRegistry, TaskScheduler, DbWorkerPool 등 코어 모듈을 공통 추상화로 유지해 향후 음성/게임/RPC 서비스까지 지원하는 확장성을 확보한다.
+- **현재 범위(채팅 중심)**: 최신 스프린트에서는 채팅 흐름에 집중하여 heartbeat, presence, 메시지 영속화와 같은 필수 기능을 우선순위에 둔다. Redis/DB 튜닝도 채팅 시나리오 기준으로 맞춘다.
+- **확장 전략**: 모듈 간 의존도를 낮추고 인터페이스 계약을 문서화하여 다양한 실시간 서비스가 동일 코어를 재활용할 수 있게 한다.
+
+## 최근 품질 보강
+- 2025-10-13: TaskScheduler, DbWorkerPool GTest 케이스를 추가해 지연·예외 경로 회귀를 방지한다.
+- 2025-10-13: Gateway → Load Balancer → Multi-instance 아키텍처 로드맵을 docs/server-architecture.md에 반영했다.
 ## 디렉터리 구성
 - `core/include/server/core/net/` : `Acceptor`, `Session`, `Dispatcher` 등 I/O 계층
 - `core/include/server/core/memory/` : 고정 블록 `MemoryPool`, `BufferManager`
@@ -114,10 +122,10 @@
 
 현 시점 문서는 실제 코드(`core/src`, `core/include`) 기반으로 업데이트 되었으며, 추가 기능 구현 시 이 문서를 함께 갱신해야 한다.
 
-## TODO (장기 로드맵)
-- [ ] 서비스별 `io_context` 격리를 위한 Hive/Connection 추상화 도입 검토.
-- [ ] 게임/시뮬레이션 서버 공통 기능(ECS, 씬/월드 스케줄링) 사전 조사.
-- [ ] 플러그인/스크립팅 계층 설계 (Lua, WASM 등 후보 평가).
-- [ ] 인증/권한/세션 관리 기본 모듈 정의.
-- [ ] 공통 진단 파이프라인(분산 트레이싱, 로그 스트리밍) 표준화.
-
+## TODO (엔진화 레이어)
+- [x] TaskScheduler/DbWorkerPool 단위 테스트 커버리지 확보 (2025-10-13).
+- [ ] 서비스 io_context 분리를 전제로 한 Hive/Connection 네트워크 추상화 PoC.
+- [ ] ECS/액터 기반 모듈식 동시성 모델 조사 및 채택 여부 결정.
+- [ ] Lua/WASM 기반 스크립팅·플러그인 샌드박스 정책 초안 수립.
+- [ ] 서비스 부트스트랩·종료 파이프라인 정비 및 표준 라이프사이클 훅 정리.
+- [ ] 운영 관측성(로그, 메트릭, 트레이싱) 일원화와 SLA 기준 정의.

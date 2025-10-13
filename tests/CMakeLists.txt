@@ -15,6 +15,20 @@ target_link_libraries(storage_basic_tests PRIVATE
     server_storage_pg
 )
 
+add_executable(core_concurrency_tests
+    task_scheduler_tests.cpp
+    db_worker_pool_tests.cpp
+    job_thread_manager_tests.cpp
+)
+target_include_directories(core_concurrency_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+    ${CMAKE_SOURCE_DIR}/server/include
+)
+target_link_libraries(core_concurrency_tests PRIVATE
+    GTest::gtest_main
+    server_core
+)
+
 include(GoogleTest)
 gtest_discover_tests(storage_basic_tests)
-
+gtest_discover_tests(core_concurrency_tests)
