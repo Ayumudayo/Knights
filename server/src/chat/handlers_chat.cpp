@@ -86,14 +86,17 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 session_sp->send_error(proto::errc::UNAUTHORIZED, "unauthorized"); 
                 return; 
             }
-            if (current_room.empty()) {
-                auto it = state_.cur_room.find(session_sp.get()); 
-                if (it == state_.cur_room.end()) { 
-                    session_sp->send_error(proto::errc::NO_ROOM, "no current room"); 
-                    return; 
-                } 
-                current_room = it->second;
+            auto it = state_.cur_room.find(session_sp.get()); 
+            if (it == state_.cur_room.end()) { 
+                session_sp->send_error(proto::errc::NO_ROOM, "no current room"); 
+                return; 
             }
+            const std::string& authoritative_room = it->second;
+            if (!current_room.empty() && current_room != authoritative_room) {
+                session_sp->send_error(proto::errc::ROOM_MISMATCH, "room mismatch");
+                return;
+            }
+            current_room = authoritative_room;
         }
         // 슬래시 명령 분기를 처리한다.
         if (!text.empty() && text[0] == '/') {
