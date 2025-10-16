@@ -7,6 +7,7 @@
 #include "wire.pb.h"
 #include <cstring>
 #include <chrono>
+#include <boost/system/error_code.hpp>
 
 using namespace std::chrono;
 namespace asio = boost::asio;
@@ -48,8 +49,21 @@ void NetClient::start_threads() {
 }
 
 void NetClient::close() {
-    running_.store(false); try { sock_.close(); } catch (...) {}
-    if (rx_thread_.joinable()) rx_thread_.join(); if (ping_thread_.joinable()) ping_thread_.join(); connected_.store(false);
+    running_.store(false);
+    boost::system::error_code ec;
+    if (sock_.is_open()) {
+        try {
+            sock_.shutdown(tcp::socket::shutdown_both, ec);
+        } catch (...) {
+        }
+        try {
+            sock_.close(ec);
+        } catch (...) {
+        }
+    }
+    if (rx_thread_.joinable()) rx_thread_.join();
+    if (ping_thread_.joinable()) ping_thread_.join();
+    connected_.store(false);
 }
 
 void NetClient::recv_loop() {

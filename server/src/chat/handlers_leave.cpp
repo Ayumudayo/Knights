@@ -134,6 +134,9 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
             wb_fields.emplace_back("next_room", next_room);
             emit_write_behind_event("room_leave", session_id_str, uid_opt, room_id_opt, std::move(wb_fields));
         }
+
+        // 로비 상태를 즉시 전달해 클라이언트가 새로고침 없이도 갱신되도록 한다.
+        send_snapshot(*session_sp, next_room);
     });
 }
 

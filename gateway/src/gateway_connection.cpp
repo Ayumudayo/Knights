@@ -84,9 +84,6 @@ void GatewayConnection::on_connect() {
 
 void GatewayConnection::on_disconnect() {
     closing_.store(true, std::memory_order_relaxed);
-    if (lb_session_) {
-        lb_session_->send(gateway::lb::ROUTE_KIND_CLIENT_CLOSE, {});
-    }
     if (!session_id_.empty()) {
         app_.close_lb_session(session_id_);
     }
@@ -145,6 +142,13 @@ void GatewayConnection::on_read(const std::uint8_t* data, std::size_t length) {
 }
 
 void GatewayConnection::on_error(const boost::system::error_code& ec) {
+    using boost::asio::error::eof;
+    using boost::asio::error::operation_aborted;
+    using boost::asio::error::connection_reset;
+    if (ec == eof || ec == operation_aborted || connection_reset) {
+        server::core::log::info(std::string("GatewayConnection closed: ") + ec.message());
+        return;
+    }
     server::core::log::warn(std::string("GatewayConnection error: ") + ec.message());
 }
 

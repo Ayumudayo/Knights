@@ -153,6 +153,9 @@ void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
             wb_fields.emplace_back("prev_room", previous_room);
         }
         emit_write_behind_event("room_join", session_id_str, uid_opt, room_id_opt, std::move(wb_fields));
+
+        // 새로운 방 상태를 즉시 고객에게 전달해 /refresh 없이도 UI를 갱신한다.
+        send_snapshot(*session_sp, room_to_join);
     });
 }
 

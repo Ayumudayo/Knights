@@ -72,6 +72,9 @@ int Application::Impl::Run() {
     auto ui = builder_.Build();
     auto app = CatchEvent(ui.root, [this, input = ui.input](ftxui::Event event) {
         if (event == ftxui::Event::Escape || event == ftxui::Event::CtrlC) {
+            if (state_.connected()) {
+                net_.send_leave(state_.current_room());
+            }
             screen_.ExitLoopClosure()();
             return true;
         }
