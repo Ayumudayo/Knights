@@ -1,93 +1,77 @@
-# Gateway & Load Balancer 가이드
+# Gateway & Load Balancer 아키텍처
 
-목표: server_app 다중 인스턴스를 외부 L4/L7 로드밸런서 뒤에 두고 TLS 종료, 헬스체크, 드레인(무중단 롤링) 절차를 확립한다.
+프로젝트는 이제 별도 프로세스로 **Gateway ↔ LoadBalancer ↔ Server** 파이프라인을 운용한다. Gateway가 클라이언트 TCP 세션을 수용하고, gRPC 양방향 스트리밍으로 Load Balancer에 프레임을 전달하면 Load Balancer가 서버 백엔드(TCP)로 중계한다.
 
-## 현재 상태 요약
-- server_app가 게이트웨이 역할을 겸한다(클라이언트 TCP 프로토콜 수신, 분산 브로드캐스트 브릿지).
-- 멀티 인스턴스 지원: `USE_REDIS_PUBSUB=1`, 고유 `GATEWAY_ID`로 self‑echo 방지. (server/src/app/bootstrap.cpp:172, server/src/app/bootstrap.cpp:175)
-- 헬스/드레인: TCP 연결 수립만으로 체크 가능. 종료 신호 시 Pub/Sub 구독 정리 로직 포함. (server/src/app/bootstrap.cpp:259)
-
-권장: LB/프록시는 외부 표준 솔루션(HAProxy, Nginx Stream, Envoy)을 사용하고, 프로젝트 내에서 직접 구현하지 않는다.
-
-## 토폴로지
-Client ↔ LB(HAProxy/Nginx/Envoy) ↔ server_app × N ↔ Redis/Postgres
-
-## 환경 변수(요약)
-- `USE_REDIS_PUBSUB=1` — 분산 브로드캐스트 활성화 (server/src/app/bootstrap.cpp:172)
-- `GATEWAY_ID=gw-a` — 인스턴스 고유 ID (server/src/app/bootstrap.cpp:175)
-- `REDIS_CHANNEL_PREFIX=knights:` — Redis 키/채널 접두사 (server/src/app/bootstrap.cpp:173)
-- `REDIS_URI=redis://host:6379` — Redis 연결 (TODO)
-
-## HAProxy 샘플(tcp + TLS 종료)
 ```
-global
-  maxconn 4096
-
-defaults
-  mode tcp
-  timeout connect 5s
-  timeout client  60s
-  timeout server  60s
-
-frontend knights_tls
-  bind *:443 ssl crt /etc/haproxy/certs/knights.pem
-  default_backend knights_chat
-
-backend knights_chat
-  balance leastconn
-  option tcp-check
-  # 단순 TCP connect 체크
-  server gw1 10.0.0.11:5000 check
-  server gw2 10.0.0.12:5000 check
+Client
+  │  (TCP)
+  ▼
+gateway_app  ── gRPC(Stream) ──►  load_balancer_app  ── TCP ──►  server_app
+  │                                   │
+  └─ Redis(optional) ◄────── 상태/헬스 ┘
 ```
 
-운영 팁
-- 드레인: `echo "disable server knights_chat/gw1" | socat stdio /run/haproxy/admin.sock`
-- 재편성 시 health-check 통과 상태만 트래픽 유입
+## 주요 동작 흐름
+1. **클라이언트 → Gateway**  
+   Gateway는 Boost.Asio 기반 `Hive` 위에서 TCP 세션을 생성하고, 최초 메시지를 익명 인증(토큰 미검증)으로 처리한다.
+2. **Gateway → LoadBalancer**  
+   세션마다 gRPC 스트림을 개설하고 `RouteMessage`(`CLIENT_HELLO`/`CLIENT_PAYLOAD`) 메시지를 전송한다. Gateway는 스트림에서 `SERVER_PAYLOAD`/`SERVER_CLOSE`/`SERVER_ERROR` 를 역으로 수신해 클라이언트에 write 한다.
+3. **LoadBalancer → Server**  
+   Load Balancer는 라운드로빈으로 백엔드 엔드포인트를 선택하고 TCP 소켓을 연결한다. 클라이언트에서 받은 바이트 시퀀스를 그대로 server_app에 중계하며, 서버에서 오는 응답도 gRPC 스트림을 통해 Gateway로 되돌린다.
+4. **상태 보고**  
+   Load Balancer는 Redis 기반 `gateway/instances/*` 키에 인스턴스 정보를 주기적으로 갱신(기본 5초)한다. Redis가 비활성화된 경우 인메모리 백엔드를 사용한다.
 
-## Nginx Stream 샘플(tcp + TLS 종료)
-```
-stream {
-  upstream knights_chat {
-    least_conn;
-    server 10.0.0.11:5000 max_fails=2 fail_timeout=5s;
-    server 10.0.0.12:5000 max_fails=2 fail_timeout=5s;
-  }
+## 실행 방법 (로컬)
+1. **server_app**  
+   ```powershell
+   # 1) Postgres/Redis가 필요하면 .env 구성 후 실행
+   cmake --build build-msvc --target server_app
+   .\build-msvc\server\Debug\server_app.exe
+   ```
+2. **load_balancer_app**  
+   ```powershell
+   $env:LB_BACKEND_ENDPOINTS="127.0.0.1:5000"
+   $env:LB_GRPC_LISTEN="127.0.0.1:7001"
+   $env:LB_INSTANCE_ID="lb-local"
+   cmake --build build-msvc --target load_balancer_app
+   .\build-msvc\load_balancer\Debug\load_balancer_app.exe
+   ```
+3. **gateway_app**  
+   ```powershell
+   $env:LB_GRPC_ENDPOINT="127.0.0.1:7001"
+   $env:GATEWAY_LISTEN="0.0.0.0:6000"
+   $env:GATEWAY_ID="gw-local"
+   cmake --build build-msvc --target gateway_app
+   .\build-msvc\gateway\Debug\gateway_app.exe
+   ```
+4. **클라이언트**  
+   기존 devclient 또는 임시 TCP 클라이언트를 `6000`번 포트로 연결하면 서버까지 라우팅된다.
 
-  server {
-    listen 443 ssl;
-    ssl_certificate     /etc/nginx/certs/knights.crt;
-    ssl_certificate_key /etc/nginx/certs/knights.key;
-    proxy_connect_timeout 5s;
-    proxy_timeout 60s;
-    proxy_pass knights_chat;
-  }
-}
-```
+## 환경 변수 요약
+### gateway_app
+| 변수 | 설명 | 기본값 |
+| --- | --- | --- |
+| `GATEWAY_LISTEN` | 수신 주소와 포트 (`host:port`) | `0.0.0.0:6000` |
+| `GATEWAY_ID` | Gateway 인스턴스 식별자 | `gateway-default` |
+| `LB_GRPC_ENDPOINT` | Load Balancer gRPC 엔드포인트 | `127.0.0.1:7001` |
 
-운영 팁
-- 드레인: 대상 서버 weight=0으로 조정 후 reload(무중단), 예: `server gw1 10.0.0.11:5000 weight=0;`
+### load_balancer_app
+| 변수 | 설명 | 기본값 |
+| --- | --- | --- |
+| `LB_GRPC_LISTEN` | gRPC 리스닝 주소 (`host:port`) | `127.0.0.1:7001` |
+| `LB_BACKEND_ENDPOINTS` | 서버 백엔드 목록(콤마 구분) | `127.0.0.1:5000` |
+| `LB_INSTANCE_ID` | 상태 레지스트리에 기록할 ID | `lb-<timestamp>` |
+| `LB_REDIS_URI` / `REDIS_URI` | 상태 백엔드(Redis) 연결 문자열 | 비활성 시 메모리 |
 
-## 드레인/롤링 배포 절차(권장)
-1) LB에서 대상 인스턴스 드레인(gw disable 또는 weight=0)
-2) 연결 소진 대기(세션 TTL 정책 고려; 기본 60s)
-3) 프로세스 종료(Windows: Ctrl+C, Linux: SIGTERM)
-4) 재기동 후 health 통과 확인 → LB에 재등록
+### server_app (변경 없음)
+| 변수 | 설명 |
+| --- | --- |
+| `SERVER_BIND_ADDR`, `SERVER_PORT` | 기존 TCP 리스너 설정 |
+| `GATEWAY_ID` | Redis fan-out self-echo 방지 |
+| `USE_REDIS_PUBSUB`, `WRITE_BEHIND_ENABLED` 등 | 기존 옵션 유지 |
 
-참고: 서버는 종료 신호에서 Redis Pub/Sub 구독을 먼저 정리하여 중복/유실을 최소화한다. (server/src/app/bootstrap.cpp:259)
-
-## 헬스체크
-- 최소: TCP connect 성공 여부로 판단(option tcp-check / 단순 connect)
-- 선택: 향후 HTTP 헬스 포트 추가(예: `HEALTH_PORT` 노출, `/healthz` 200 OK) — 필요 시 구현 예정
-
-## 스케일링 체크리스트
-- 각 인스턴스 `GATEWAY_ID` 고유값 설정(중복 self‑echo 방지) (server/src/app/bootstrap.cpp:175)
-- 동일 `REDIS_CHANNEL_PREFIX` 유지(브로드캐스트 채널 정합) (server/src/app/bootstrap.cpp:173)
-- `PRESENCE_CLEAN_ON_START=0`(다중 게이트웨이 환경) (server/src/app/bootstrap.cpp:259)
-
-## 로컬 멀티 인스턴스 테스트(개요)
-1) Redis 기동
-2) 서버 두 개 실행: `GATEWAY_ID=gw-a`, `GATEWAY_ID=gw-b` (server/src/app/bootstrap.cpp:175)
-3) LB(HAProxy/Nginx) 앞단 구성 후 클라이언트 다중 접속
-4) 같은 룸에서 채팅 → 상호 브로드캐스트 수신 확인
-
+## 운영 및 TODO
+- **스케일링**: Load Balancer가 다중 백엔드에 대한 라운드로빈을 수행한다. 향후 Redis 레지스트리를 참고해 실시간 용량/세션 수 기반 스케줄링을 적용한다.
+- **헬스체크**: 현재 gRPC와 TCP 실패 시 스트림이 종료된다. HTTP 헬스 엔드포인트와 메트릭 노출이 필요하다.
+- **인증**: Gateway는 여전히 `auth::NoopAuthenticator`를 사용한다. 인증 토큰 검증 및 세션 레지스트리 연동이 추후 과제로 남아 있다.
+- **멀티 게이트웨이**: Redis presence/PubSub 설정(`USE_REDIS_PUBSUB=1`)으로 서버 간 브로드캐스트를 유지할 수 있다. gateway_app 다중 인스턴스 시 `GATEWAY_ID`는 반드시 고유하게 지정한다.

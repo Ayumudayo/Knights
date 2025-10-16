@@ -6,8 +6,7 @@
 int main() {
     try {
         load_balancer::LoadBalancerApp app;
-        const bool ok = app.run_smoke_test();
-        return ok ? 0 : 1;
+        return app.run();
     } catch (const std::exception& ex) {
         server::core::log::error(std::string("LoadBalancerApp fatal error: ") + ex.what());
     } catch (...) {

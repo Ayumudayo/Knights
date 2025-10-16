@@ -10,15 +10,22 @@
 #include <ftxui/component/screen_interactive.hpp>
 #include <ftxui/dom/elements.hpp>
 
+#include <cstdlib>
+#include <filesystem>
 #include <memory>
 #include <string>
 #include <utility>
+
+#include "server/core/config/dotenv.hpp"
+#include "server/core/util/paths.hpp"
 
 namespace client::app {
 
 namespace {
 constexpr const char* kDefaultHost = "127.0.0.1";
-constexpr unsigned short kDefaultPort = 5000;
+constexpr unsigned short kDefaultPort = 6000;
+constexpr const char* kEnvHost = "DEVCLIENT_HOST";
+constexpr const char* kEnvPort = "DEVCLIENT_PORT";
 } // namespace
 
 class Application::Impl {
@@ -31,6 +38,8 @@ public:
 private:
     void AppendInitialLogs();
     void Connect();
+    void LoadEnvironment();
+    static unsigned short ParsePort(const char* value, unsigned short fallback);
 
     ftxui::ScreenInteractive screen_;
     AppState state_;
@@ -40,6 +49,8 @@ private:
     CommandProcessor commands_;
     UiBuilder builder_;
     NetworkRouter router_;
+    std::string host_{kDefaultHost};
+    unsigned short port_{kDefaultPort};
 };
 
 Application::Impl::Impl()
@@ -54,6 +65,7 @@ Application::Impl::Impl()
       router_(state_, net_, screen_, request_refresh_, log_sink_) {}
 
 int Application::Impl::Run() {
+    LoadEnvironment();
     state_.set_preview_room(state_.current_room());
     router_.Initialize();
 
@@ -122,14 +134,56 @@ void Application::Impl::AppendInitialLogs() {
 }
 
 void Application::Impl::Connect() {
-    if (net_.connect(kDefaultHost, kDefaultPort)) {
+    if (net_.connect(host_, port_)) {
         state_.set_connected(true);
-        log_sink_(std::string("연결됨: ") + kDefaultHost + ":" + std::to_string(kDefaultPort));
+        log_sink_(std::string("연결됨: ") + host_ + ":" + std::to_string(port_));
         net_.send_login(state_.username(), "");
     } else {
         state_.set_connected(false);
         log_sink_("연결에 실패했습니다.");
     }
+}
+
+void Application::Impl::LoadEnvironment() {
+    namespace paths = server::core::util::paths;
+    bool loaded = false;
+    try {
+        auto exe_dir = paths::executable_dir();
+        auto exe_env = exe_dir / ".env";
+        if (std::filesystem::exists(exe_env)) {
+            loaded = server::core::config::load_dotenv(exe_env.string(), true);
+        }
+    } catch (const std::exception& ex) {
+        log_sink_(std::string("[warn] .env 로드 실패: ") + ex.what());
+    }
+
+    if (!loaded) {
+        std::filesystem::path repo_env{".env"};
+        if (std::filesystem::exists(repo_env)) {
+            loaded = server::core::config::load_dotenv(repo_env.string(), true);
+        }
+    }
+
+    if (const char* host_env = std::getenv(kEnvHost); host_env && *host_env) {
+        host_ = host_env;
+    }
+    if (const char* port_env = std::getenv(kEnvPort); port_env && *port_env) {
+        port_ = ParsePort(port_env, kDefaultPort);
+    }
+}
+
+unsigned short Application::Impl::ParsePort(const char* value, unsigned short fallback) {
+    if (!value || !*value) {
+        return fallback;
+    }
+    try {
+        auto parsed = std::stoul(value);
+        if (parsed > 0 && parsed <= 65535) {
+            return static_cast<unsigned short>(parsed);
+        }
+    } catch (...) {
+    }
+    return fallback;
 }
 
 Application::Application()

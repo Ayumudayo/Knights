@@ -1,91 +1,215 @@
 #include "load_balancer/load_balancer_app.hpp"
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <mutex>
+#include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
+#include <stdexcept>
 #include <thread>
+#include <utility>
 
+#include <boost/asio/connect.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/write.hpp>
+
+#include "server/core/config/dotenv.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/util/paths.hpp"
 #include "server/storage/redis/client.hpp"
 
 namespace load_balancer {
 
+namespace {
+
 using namespace std::chrono_literals;
 
-namespace {
-constexpr std::chrono::seconds kRedisTtl{30};
-constexpr std::chrono::milliseconds kHeartbeatDelay{5};
+constexpr const char* kEnvGrpcListen = "LB_GRPC_LISTEN";
+constexpr const char* kEnvBackendEndpoints = "LB_BACKEND_ENDPOINTS";
+constexpr const char* kEnvRedisUri = "LB_REDIS_URI";
+constexpr const char* kEnvInstanceId = "LB_INSTANCE_ID";
 constexpr const char* kDefaultGrpcListen = "127.0.0.1:7001";
+constexpr const char* kDefaultBackendEndpoint = "127.0.0.1:5000";
+
+std::pair<std::string, std::uint16_t> parse_endpoint(std::string_view value, std::uint16_t fallback_port) {
+    if (value.empty()) {
+        return {"127.0.0.1", fallback_port};
+    }
+    auto delim = value.find(':');
+    if (delim == std::string_view::npos) {
+        return {std::string(value), fallback_port};
+    }
+    std::string host(value.substr(0, delim));
+    std::string_view port_view = value.substr(delim + 1);
+    std::uint16_t port = fallback_port;
+    if (!port_view.empty()) {
+        try {
+            port = static_cast<std::uint16_t>(std::stoul(std::string(port_view)));
+        } catch (...) {
+            server::core::log::warn("LoadBalancerApp invalid port detected; fallback applied");
+            port = fallback_port;
+        }
+    }
+    return {std::move(host), port};
 }
 
-LoadBalancerApp::GrpcServiceImpl::GrpcServiceImpl(std::atomic<bool>& forward_flag)
-    : forward_flag_(forward_flag) {}
+std::uint64_t to_ms(std::chrono::steady_clock::time_point tp) {
+    return static_cast<std::uint64_t>(
+        std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count());
+}
+
+} // namespace
+
+LoadBalancerApp::GrpcServiceImpl::GrpcServiceImpl(LoadBalancerApp& owner)
+    : owner_(owner) {}
 
 grpc::Status LoadBalancerApp::GrpcServiceImpl::Forward(
-    grpc::ServerContext*, const gateway::lb::RouteRequest* request,
-    gateway::lb::RouteResponse* response) {
-    server::core::log::info("LoadBalancerApp gRPC Forward session=" + request->session_id());
-    forward_flag_.store(true, std::memory_order_relaxed);
-    response->set_accepted(true);
-    return grpc::Status::OK;
+    grpc::ServerContext*, const gateway::lb::RouteRequest*, gateway::lb::RouteResponse* response) {
+    response->set_accepted(false);
+    response->set_reason("Use Stream RPC");
+    return grpc::Status(grpc::StatusCode::UNIMPLEMENTED, "Stream RPC required");
+}
+
+grpc::Status LoadBalancerApp::GrpcServiceImpl::Stream(
+    grpc::ServerContext* context,
+    grpc::ServerReaderWriter<gateway::lb::RouteMessage, gateway::lb::RouteMessage>* stream) {
+    return owner_.handle_stream(context, stream);
 }
 
 LoadBalancerApp::LoadBalancerApp()
     : hive_(std::make_shared<server::core::net::Hive>(io_))
     , heartbeat_timer_(io_)
-    , state_backend_(create_backend()) {
-    if (const char* listen_env = std::getenv("LB_GRPC_LISTEN")) {
-        if (std::string_view(listen_env).length() > 0) {
-            grpc_listen_address_ = listen_env;
-        }
-    }
-    if (grpc_listen_address_.empty()) {
-        grpc_listen_address_ = kDefaultGrpcListen;
-    }
+    , signals_(io_) {
+    load_environment();
+    state_backend_ = create_backend();
+    configure();
 }
 
-bool LoadBalancerApp::run_smoke_test() {
-    heartbeat_executed_.store(false, std::memory_order_relaxed);
-    grpc_forward_called_.store(false, std::memory_order_relaxed);
+LoadBalancerApp::~LoadBalancerApp() {
+    stop();
+}
+
+int LoadBalancerApp::run() {
     start_grpc_server();
     schedule_heartbeat();
+    handle_signals();
 
-    std::thread worker([this]() { hive_->run(); });
-    worker.join();
+    server::core::log::info("LoadBalancerApp entering run loop");
+    hive_->run();
+    server::core::log::info("LoadBalancerApp stopped");
 
     stop_grpc_server();
+    return 0;
+}
 
-    auto records = state_backend_->list_instances();
-    const bool wrote_state = !records.empty() && records.front().instance_id == "lb-smoke";
-    const bool ok = heartbeat_executed_.load(std::memory_order_relaxed) && wrote_state;
-    if (ok) {
-        server::core::log::info("LoadBalancerApp state backend smoke test completed");
-    } else {
-        server::core::log::warn("LoadBalancerApp smoke test failed to record instance state");
+void LoadBalancerApp::stop() {
+    heartbeat_timer_.cancel();
+    stop_grpc_server();
+    if (hive_) {
+        hive_->stop();
     }
-    return ok;
+    io_.stop();
+}
+
+void LoadBalancerApp::configure() {
+    const char* listen_env = std::getenv(kEnvGrpcListen);
+    if (listen_env && *listen_env) {
+        grpc_listen_address_ = listen_env;
+    } else {
+        grpc_listen_address_ = kDefaultGrpcListen;
+    }
+
+    const char* instance_env = std::getenv(kEnvInstanceId);
+    if (instance_env && *instance_env) {
+        instance_id_ = instance_env;
+    } else {
+        instance_id_ = "lb-" + std::to_string(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+    }
+
+    const char* backend_env = std::getenv(kEnvBackendEndpoints);
+    if (backend_env && *backend_env) {
+        configure_backends(backend_env);
+    } else {
+        configure_backends(kDefaultBackendEndpoint);
+    }
+
+    if (backends_.empty()) {
+        configure_backends(kDefaultBackendEndpoint);
+    }
+
+    server::core::log::info("LoadBalancerApp grpc_listen=" + grpc_listen_address_
+        + " instance_id=" + instance_id_
+        + " backends=" + std::to_string(backends_.size()));
+}
+
+void LoadBalancerApp::configure_backends(std::string_view list) {
+    backends_.clear();
+    std::size_t index = 0;
+    std::size_t start = 0;
+    while (start < list.size()) {
+        auto end = list.find(',', start);
+        if (end == std::string_view::npos) {
+            end = list.size();
+        }
+        auto token = list.substr(start, end - start);
+        if (!token.empty()) {
+            auto [host, port] = parse_endpoint(token, 5000);
+            BackendEndpoint endpoint{};
+            endpoint.id = "backend-" + std::to_string(index++);
+            endpoint.host = std::move(host);
+            endpoint.port = port;
+            backends_.push_back(std::move(endpoint));
+        }
+        start = end + 1;
+    }
 }
 
 void LoadBalancerApp::schedule_heartbeat() {
-    heartbeat_timer_.expires_after(kHeartbeatDelay);
+    heartbeat_timer_.expires_after(heartbeat_interval_);
     heartbeat_timer_.async_wait([this](const boost::system::error_code& ec) {
-        if (ec) {
-            server::core::log::warn(std::string("LoadBalancerApp heartbeat timer error: ") + ec.message());
-            hive_->stop();
+        if (ec == boost::asio::error::operation_aborted) {
             return;
         }
-
-        auto record = build_smoke_record();
-        state_backend_->upsert(record);
-        state_backend_->touch(record.instance_id, record.last_heartbeat_ms);
-        heartbeat_executed_.store(true, std::memory_order_relaxed);
-        hive_->stop();
+        if (ec) {
+            server::core::log::warn(std::string("LoadBalancerApp heartbeat timer error: ") + ec.message());
+        } else {
+            publish_heartbeat();
+        }
+        schedule_heartbeat();
     });
 }
 
+void LoadBalancerApp::publish_heartbeat() {
+    if (!state_backend_) {
+        return;
+    }
+    server::state::InstanceRecord record{};
+    record.instance_id = instance_id_;
+    auto endpoint = parse_endpoint(grpc_listen_address_, 7001);
+    if (grpc_selected_port_ > 0) {
+        endpoint.second = static_cast<std::uint16_t>(grpc_selected_port_);
+    }
+    record.host = std::move(endpoint.first);
+    record.port = endpoint.second;
+    record.role = "load_balancer";
+    record.capacity = static_cast<std::uint32_t>(backends_.size());
+    record.active_sessions = 0;
+    record.last_heartbeat_ms = to_ms(std::chrono::steady_clock::now());
+
+    if (!state_backend_->upsert(record)) {
+        server::core::log::warn("LoadBalancerApp heartbeat upsert failed");
+    }
+}
+
 std::unique_ptr<server::state::IInstanceStateBackend> LoadBalancerApp::create_backend() {
-    const char* uri = std::getenv("LB_REDIS_URI");
+    const char* uri = std::getenv(kEnvRedisUri);
     if (!uri || std::string_view(uri).empty()) {
         uri = std::getenv("REDIS_URI");
     }
@@ -100,7 +224,7 @@ std::unique_ptr<server::state::IInstanceStateBackend> LoadBalancerApp::create_ba
                 return std::make_unique<server::state::RedisInstanceStateBackend>(
                     state_client,
                     "gateway/instances",
-                    kRedisTtl);
+                    backend_state_ttl_);
             }
         } catch (const std::exception& ex) {
             server::core::log::warn(std::string("LoadBalancerApp Redis backend init failed: ") + ex.what());
@@ -111,33 +235,180 @@ std::unique_ptr<server::state::IInstanceStateBackend> LoadBalancerApp::create_ba
     return std::make_unique<server::state::InMemoryStateBackend>();
 }
 
-server::state::InstanceRecord LoadBalancerApp::build_smoke_record() const {
-    server::state::InstanceRecord record{};
-    record.instance_id = "lb-smoke";
-    record.host = "127.0.0.1";
-    record.port = 6100;
-    record.role = "load_balancer";
-    record.capacity = 1;
-    record.active_sessions = 0;
-    record.last_heartbeat_ms = static_cast<std::uint64_t>(
-        std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::steady_clock::now().time_since_epoch()).count());
-    return record;
+std::optional<LoadBalancerApp::BackendEndpoint> LoadBalancerApp::select_backend() {
+    if (backends_.empty()) {
+        return std::nullopt;
+    }
+    auto idx = backend_index_.fetch_add(1, std::memory_order_relaxed);
+    auto selected = backends_[idx % backends_.size()];
+    return selected;
+}
+
+bool LoadBalancerApp::connect_backend(const BackendEndpoint& endpoint,
+                                      boost::asio::ip::tcp::socket& socket,
+                                      std::string& error) const {
+    boost::asio::ip::tcp::resolver resolver(socket.get_executor());
+    boost::system::error_code ec;
+    auto results = resolver.resolve(endpoint.host, std::to_string(endpoint.port), ec);
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+    boost::asio::connect(socket, results, ec);
+    if (ec) {
+        error = ec.message();
+        return false;
+    }
+    return true;
+}
+
+grpc::Status LoadBalancerApp::handle_stream(
+    grpc::ServerContext*,
+    grpc::ServerReaderWriter<gateway::lb::RouteMessage, gateway::lb::RouteMessage>* stream) {
+    gateway::lb::RouteMessage request;
+    if (!stream->Read(&request)) {
+        return grpc::Status::OK;
+    }
+
+    auto session_id = request.session_id();
+    auto gateway_id = request.gateway_id();
+    auto client_id = request.client_id();
+
+    auto backend_opt = select_backend();
+    if (!backend_opt) {
+        gateway::lb::RouteMessage error_msg;
+        error_msg.set_kind(gateway::lb::ROUTE_KIND_SERVER_ERROR);
+        error_msg.set_session_id(session_id);
+        error_msg.set_gateway_id(gateway_id);
+        error_msg.set_error("no backend available");
+        stream->Write(error_msg);
+        return grpc::Status(grpc::StatusCode::UNAVAILABLE, "no backend");
+    }
+    auto backend = *backend_opt;
+
+    boost::asio::io_context backend_io;
+    boost::asio::ip::tcp::socket backend_socket(backend_io);
+    std::string connect_error;
+    if (!connect_backend(backend, backend_socket, connect_error)) {
+        gateway::lb::RouteMessage error_msg;
+        error_msg.set_kind(gateway::lb::ROUTE_KIND_SERVER_ERROR);
+        error_msg.set_session_id(session_id);
+        error_msg.set_gateway_id(gateway_id);
+        error_msg.set_backend_id(backend.id);
+        error_msg.set_error(connect_error);
+        stream->Write(error_msg);
+        return grpc::Status(grpc::StatusCode::UNAVAILABLE, connect_error);
+    }
+
+    server::core::log::info("LoadBalancerApp routed session=" + session_id
+        + " gateway=" + gateway_id + " client=" + client_id
+        + " backend=" + backend.host + ":" + std::to_string(backend.port));
+
+    std::atomic<bool> running{true};
+    std::mutex write_mutex;
+
+    auto send_to_gateway = [&](gateway::lb::RouteMessage message) {
+        message.set_session_id(session_id);
+        message.set_gateway_id(gateway_id);
+        message.set_backend_id(backend.id);
+        std::lock_guard<std::mutex> lock(write_mutex);
+        if (!stream->Write(message)) {
+            running.store(false, std::memory_order_relaxed);
+            return false;
+        }
+        return true;
+    };
+
+    auto forward_to_backend = [&](const std::string& payload) {
+        boost::system::error_code write_ec;
+        boost::asio::write(backend_socket, boost::asio::buffer(payload), write_ec);
+        if (write_ec) {
+            gateway::lb::RouteMessage error_msg;
+            error_msg.set_kind(gateway::lb::ROUTE_KIND_SERVER_ERROR);
+            error_msg.set_error(write_ec.message());
+            send_to_gateway(std::move(error_msg));
+            running.store(false, std::memory_order_relaxed);
+            return false;
+        }
+        return true;
+    };
+
+    std::thread backend_reader([&]() {
+        std::array<std::uint8_t, 8192> buffer{};
+        while (running.load(std::memory_order_relaxed)) {
+            boost::system::error_code read_ec;
+            std::size_t bytes = backend_socket.read_some(boost::asio::buffer(buffer), read_ec);
+            if (read_ec) {
+                if (running.load(std::memory_order_relaxed)) {
+                    gateway::lb::RouteMessage msg;
+                    msg.set_kind(gateway::lb::ROUTE_KIND_SERVER_CLOSE);
+                    msg.set_error(read_ec.message());
+                    send_to_gateway(std::move(msg));
+                }
+                break;
+            }
+            gateway::lb::RouteMessage response;
+            response.set_kind(gateway::lb::ROUTE_KIND_SERVER_PAYLOAD);
+            response.set_payload(reinterpret_cast<const char*>(buffer.data()), static_cast<int>(bytes));
+            if (!send_to_gateway(std::move(response))) {
+                break;
+            }
+        }
+        running.store(false, std::memory_order_relaxed);
+        boost::system::error_code close_ec;
+        backend_socket.close(close_ec);
+    });
+
+    auto process_message = [&](const gateway::lb::RouteMessage& message) {
+        switch (message.kind()) {
+        case gateway::lb::ROUTE_KIND_CLIENT_HELLO:
+        case gateway::lb::ROUTE_KIND_CLIENT_PAYLOAD:
+            if (!message.payload().empty()) {
+                forward_to_backend(message.payload());
+            }
+            break;
+        case gateway::lb::ROUTE_KIND_CLIENT_CLOSE:
+            running.store(false, std::memory_order_relaxed);
+            break;
+        case gateway::lb::ROUTE_KIND_HEARTBEAT:
+            // no-op for now
+            break;
+        default:
+            break;
+        }
+    };
+
+    process_message(request);
+
+    gateway::lb::RouteMessage next;
+    while (running.load(std::memory_order_relaxed) && stream->Read(&next)) {
+        process_message(next);
+    }
+
+    running.store(false, std::memory_order_relaxed);
+    boost::system::error_code shutdown_ec;
+    backend_socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, shutdown_ec);
+    backend_socket.close(shutdown_ec);
+    if (backend_reader.joinable()) {
+        backend_reader.join();
+    }
+    return grpc::Status::OK;
 }
 
 void LoadBalancerApp::start_grpc_server() {
-    grpc_service_ = std::make_unique<GrpcServiceImpl>(grpc_forward_called_);
+    grpc_service_ = std::make_unique<GrpcServiceImpl>(*this);
     grpc::ServerBuilder builder;
     builder.AddListeningPort(grpc_listen_address_, grpc::InsecureServerCredentials(), &grpc_selected_port_);
     builder.RegisterService(grpc_service_.get());
     grpc_server_ = builder.BuildAndStart();
     if (!grpc_server_) {
-        server::core::log::warn("LoadBalancerApp failed to start gRPC server at " + grpc_listen_address_);
-        grpc_service_.reset();
-        return;
+        throw std::runtime_error("LoadBalancerApp failed to start gRPC server on " + grpc_listen_address_);
     }
     server::core::log::info("LoadBalancerApp gRPC listening on " + grpc_listen_address_);
-    grpc_thread_ = std::thread([this]() { grpc_server_->Wait(); });
+    publish_heartbeat();
+    grpc_thread_ = std::thread([this]() {
+        grpc_server_->Wait();
+    });
 }
 
 void LoadBalancerApp::stop_grpc_server() {
@@ -150,6 +421,43 @@ void LoadBalancerApp::stop_grpc_server() {
     }
     grpc_server_.reset();
     grpc_service_.reset();
+}
+
+void LoadBalancerApp::handle_signals() {
+#if defined(SIGINT)
+    signals_.add(SIGINT);
+#endif
+#if defined(SIGTERM)
+    signals_.add(SIGTERM);
+#endif
+    signals_.async_wait([this](const boost::system::error_code& ec, int) {
+        if (ec == boost::asio::error::operation_aborted) {
+            return;
+        }
+        if (!ec) {
+            server::core::log::info("LoadBalancerApp received shutdown signal");
+            stop();
+        }
+    });
+}
+
+void LoadBalancerApp::load_environment() {
+    namespace paths = server::core::util::paths;
+    try {
+        auto exe_dir = paths::executable_dir();
+        auto exe_env = exe_dir / ".env";
+        if (std::filesystem::exists(exe_env)) {
+            server::core::config::load_dotenv(exe_env.string(), true);
+            return;
+        }
+    } catch (const std::exception& ex) {
+        server::core::log::warn(std::string("LoadBalancerApp executable dir detection failed: ") + ex.what());
+    }
+
+    std::filesystem::path repo_env{".env"};
+    if (std::filesystem::exists(repo_env)) {
+        server::core::config::load_dotenv(repo_env.string(), true);
+    }
 }
 
 } // namespace load_balancer

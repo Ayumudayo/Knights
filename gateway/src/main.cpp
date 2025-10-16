@@ -6,8 +6,7 @@
 int main() {
     try {
         gateway::GatewayApp app;
-        const bool ok = app.run_smoke_test();
-        return ok ? 0 : 1;
+        return app.run();
     } catch (const std::exception& ex) {
         server::core::log::error(std::string("GatewayApp fatal error: ") + ex.what());
     } catch (...) {

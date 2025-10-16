@@ -1,171 +1,359 @@
 #include "gateway/gateway_app.hpp"
 
-#include <chrono>
 #include <cstdlib>
+#include <filesystem>
+#include <mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 
-#include <boost/asio/connect.hpp>
+#include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
-#include <boost/asio/write.hpp>
 #include <grpcpp/grpcpp.h>
 
-#include "gateway_lb.grpc.pb.h"
+#include "gateway/gateway_connection.hpp"
+#include "server/core/config/dotenv.hpp"
+#include "server/core/util/paths.hpp"
 #include "server/core/util/log.hpp"
 
 namespace gateway {
 
 namespace {
-constexpr std::uint16_t kSmokeTestPort = 0; // let the OS choose an available port
-const std::chrono::milliseconds kClientDelay{5};
+
+constexpr const char* kEnvGatewayListen = "GATEWAY_LISTEN";
+constexpr const char* kEnvGatewayId = "GATEWAY_ID";
+constexpr const char* kEnvLbEndpoint = "LB_GRPC_ENDPOINT";
+constexpr const char* kDefaultGatewayListen = "0.0.0.0:6000";
+constexpr const char* kDefaultGatewayId = "gateway-default";
+constexpr const char* kDefaultLbEndpoint = "127.0.0.1:7001";
+
+std::pair<std::string, std::uint16_t> parse_listen(std::string_view value, std::uint16_t fallback_port) {
+    if (value.empty()) {
+        return {"0.0.0.0", fallback_port};
+    }
+
+    auto delimiter = value.find(':');
+    if (delimiter == std::string_view::npos) {
+        return {std::string(value), fallback_port};
+    }
+
+    std::string host(value.substr(0, delimiter));
+    std::string_view port_view = value.substr(delimiter + 1);
+    std::uint16_t port = fallback_port;
+    if (!port_view.empty()) {
+        try {
+            port = static_cast<std::uint16_t>(std::stoul(std::string(port_view)));
+        } catch (...) {
+            server::core::log::warn("GatewayApp invalid port in GATEWAY_LISTEN; falling back to default");
+            port = fallback_port;
+        }
+    }
+    return {std::move(host), port};
 }
 
-using tcp = boost::asio::ip::tcp;
+} // namespace
+
+GatewayApp::LbSession::LbSession(GatewayApp& app,
+                                 std::string session_id,
+                                 std::string client_id,
+                                 std::weak_ptr<GatewayConnection> connection)
+    : app_(app)
+    , session_id_(std::move(session_id))
+    , client_id_(std::move(client_id))
+    , connection_(std::move(connection)) {}
+
+GatewayApp::LbSession::~LbSession() {
+    stop();
+}
+
+bool GatewayApp::LbSession::start() {
+    if (!app_.lb_stub_) {
+        return false;
+    }
+    context_ = std::make_unique<grpc::ClientContext>();
+    stream_ = app_.lb_stub_->Stream(context_.get());
+    if (!stream_) {
+        server::core::log::error("GatewayApp failed to open LB gRPC stream");
+        return false;
+    }
+    reader_thread_ = std::thread([weak_self = std::weak_ptr<LbSession>(shared_from_this())]() {
+        if (auto self = weak_self.lock()) {
+            self->read_loop();
+        }
+    });
+    return true;
+}
+
+bool GatewayApp::LbSession::send(gateway::lb::RouteMessageKind kind,
+                                 const std::vector<std::uint8_t>& payload) {
+    if (stopped_.load(std::memory_order_relaxed) || !stream_) {
+        return false;
+    }
+
+    gateway::lb::RouteMessage message;
+    message.set_session_id(session_id_);
+    message.set_gateway_id(app_.gateway_id_);
+    message.set_client_id(client_id_);
+    message.set_kind(kind);
+    if (!payload.empty()) {
+        message.set_payload(reinterpret_cast<const char*>(payload.data()), static_cast<int>(payload.size()));
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        if (!stream_->Write(message)) {
+            stopped_.store(true, std::memory_order_relaxed);
+            return false;
+        }
+        if (kind == gateway::lb::ROUTE_KIND_CLIENT_CLOSE) {
+            stream_->WritesDone();
+        }
+    }
+    return true;
+}
+
+void GatewayApp::LbSession::stop() {
+    bool expected = false;
+    if (!stopped_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(write_mutex_);
+        if (stream_) {
+            stream_->WritesDone();
+        }
+    }
+
+    if (context_) {
+        context_->TryCancel();
+    }
+
+    if (reader_thread_.joinable()) {
+        reader_thread_.join();
+    }
+    stream_.reset();
+    context_.reset();
+}
+
+const std::string& GatewayApp::LbSession::session_id() const {
+    return session_id_;
+}
+
+void GatewayApp::LbSession::read_loop() {
+    gateway::lb::RouteMessage response;
+    while (!stopped_.load(std::memory_order_relaxed) && stream_ && stream_->Read(&response)) {
+        switch (response.kind()) {
+        case gateway::lb::ROUTE_KIND_SERVER_PAYLOAD: {
+            auto payload = response.payload();
+            if (auto connection = connection_.lock()) {
+                std::vector<std::uint8_t> data(payload.begin(), payload.end());
+                connection->handle_backend_payload(std::move(data));
+            }
+            break;
+        }
+        case gateway::lb::ROUTE_KIND_SERVER_CLOSE:
+        case gateway::lb::ROUTE_KIND_SERVER_ERROR: {
+            const std::string reason = response.error();
+            if (auto connection = connection_.lock()) {
+                connection->handle_backend_close(reason);
+            }
+            stopped_.store(true, std::memory_order_relaxed);
+            return;
+        }
+        default:
+            break;
+        }
+    }
+
+    if (auto connection = connection_.lock()) {
+        connection->handle_backend_close("load balancer stream ended");
+    }
+    stopped_.store(true, std::memory_order_relaxed);
+}
 
 GatewayApp::GatewayApp()
     : hive_(std::make_shared<server::core::net::Hive>(io_))
-    , stop_timer_(io_)
+    , signals_(io_)
     , authenticator_(std::make_shared<auth::NoopAuthenticator>()) {
-    if (const char* lb_env = std::getenv("LB_GRPC_ENDPOINT")) {
-        if (std::string_view(lb_env).length() > 0) {
-            lb_endpoint_ = lb_env;
-            server::core::log::info("GatewayApp configured LB gRPC endpoint: " + lb_endpoint_);
-        }
-    }
+    load_environment();
+    configure_gateway();
+    configure_load_balancer();
 }
 
-bool GatewayApp::run_smoke_test() {
-    payload_received_.store(false, std::memory_order_relaxed);
-    watchdog_fired_.store(false, std::memory_order_relaxed);
-    lb_forward_ok_.store(false, std::memory_order_relaxed);
-    last_payload_.clear();
+GatewayApp::~GatewayApp() {
+    stop();
+}
 
-    const auto port = setup_listener(kSmokeTestPort);
-    arm_stop_timer();
+int GatewayApp::run() {
+    start_listener();
+    handle_signals();
 
-    std::thread worker([this]() { hive_->run(); });
+    server::core::log::info("GatewayApp starting main loop");
+    hive_->run();
+    server::core::log::info("GatewayApp stopped");
+    return 0;
+}
 
-    std::this_thread::sleep_for(kClientDelay);
-
-    boost::asio::io_context client_io;
-    tcp::socket client_socket(client_io);
-    boost::system::error_code ec;
-    tcp::endpoint destination(boost::asio::ip::address_v4::loopback(), port);
-    client_socket.connect(destination, ec);
-    if (!ec) {
-        const std::string handshake = "client1:dummy-token";
-        boost::asio::write(client_socket, boost::asio::buffer(handshake), ec);
-        if (!ec) {
-            std::this_thread::sleep_for(kClientDelay);
-            const std::string payload = "chat:ping";
-            boost::asio::write(client_socket, boost::asio::buffer(payload), ec);
-        }
-    }
-    if (ec) {
-        server::core::log::warn(std::string("GatewayApp smoke client error: ") + ec.message());
-    }
-    boost::system::error_code shutdown_ec;
-    client_socket.shutdown(tcp::socket::shutdown_both, shutdown_ec);
-    client_socket.close();
-
-    worker.join();
-
+void GatewayApp::stop() {
     if (listener_) {
         listener_->stop();
-        listener_.reset();
     }
 
-    std::vector<std::uint8_t> payload_copy;
     {
-        std::lock_guard<std::mutex> lock(payload_mutex_);
-        payload_copy = last_payload_;
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        for (auto& [_, state] : sessions_) {
+            if (state.session) {
+                state.session->stop();
+            }
+        }
+        sessions_.clear();
     }
-    const std::string payload_str(payload_copy.begin(), payload_copy.end());
-    const bool payload_ok = payload_received_.load(std::memory_order_relaxed) && payload_str == "chat:ping";
-    const bool require_lb = !lb_endpoint_.empty() && (std::getenv("LB_GRPC_REQUIRED") != nullptr);
-    const bool lb_ok = !require_lb || lb_forward_ok_.load(std::memory_order_relaxed);
-    const bool ok = payload_ok && lb_ok && !watchdog_fired_.load(std::memory_order_relaxed);
-    if (ok) {
-        server::core::log::info("GatewayApp Hive/Connection smoke test completed");
+
+    if (hive_) {
+        hive_->stop();
+    }
+    io_.stop();
+}
+
+GatewayApp::LbSessionPtr GatewayApp::create_lb_session(const std::string& client_id,
+                                                       std::weak_ptr<GatewayConnection> connection) {
+    if (!lb_stub_) {
+        server::core::log::error("GatewayApp load balancer stub unavailable");
+        return nullptr;
+    }
+
+    const auto seq = session_counter_.fetch_add(1, std::memory_order_relaxed) + 1;
+    std::string session_id = gateway_id_ + "-" + std::to_string(seq);
+
+    auto session = std::make_shared<LbSession>(*this, session_id, client_id, std::move(connection));
+    if (!session->start()) {
+        return nullptr;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        sessions_[session_id] = SessionState{session};
+    }
+
+    return session;
+}
+
+void GatewayApp::close_lb_session(const std::string& session_id) {
+    LbSessionPtr session;
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        auto it = sessions_.find(session_id);
+        if (it != sessions_.end()) {
+            session = it->second.session;
+            sessions_.erase(it);
+        }
+    }
+    if (session) {
+        session->stop();
+    }
+}
+
+void GatewayApp::configure_gateway() {
+    const char* listen_env = std::getenv(kEnvGatewayListen);
+    const auto [host, port] = parse_listen(listen_env ? std::string_view(listen_env) : std::string_view(kDefaultGatewayListen),
+                                           listen_port_);
+    listen_host_ = host;
+    listen_port_ = port;
+
+    const char* id_env = std::getenv(kEnvGatewayId);
+    if (id_env && *id_env) {
+        gateway_id_ = id_env;
     } else {
-        server::core::log::warn("GatewayApp smoke test failed (payload_ok="
-            + std::string(payload_ok ? "true" : "false") + ", lb_ok="
-            + std::string(lb_ok ? "true" : "false") + ", watchdog="
-            + std::string(watchdog_fired_.load(std::memory_order_relaxed) ? "true" : "false") + ")");
+        gateway_id_ = kDefaultGatewayId;
     }
-    return ok;
+
+    server::core::log::info("GatewayApp configured: gateway_id=" + gateway_id_
+        + " listen=" + listen_host_ + ":" + std::to_string(listen_port_));
 }
 
-void GatewayApp::arm_stop_timer() {
-    using namespace std::chrono_literals;
-    stop_timer_.expires_after(200ms);
-    stop_timer_.async_wait([this](const boost::system::error_code& ec) {
-        if (ec == boost::asio::error::operation_aborted) {
-            return;
-        }
-        if (ec) {
-            server::core::log::warn(std::string("GatewayApp timer error: ") + ec.message());
-        }
-        watchdog_fired_.store(true, std::memory_order_relaxed);
-        hive_->stop();
-    });
-}
-
-std::uint16_t GatewayApp::setup_listener(std::uint16_t port) {
-    auto payload_callback = [this](std::vector<std::uint8_t> payload) {
-        payload_received_.store(true, std::memory_order_relaxed);
-        std::string payload_str(payload.begin(), payload.end());
-        {
-            std::lock_guard<std::mutex> lock(payload_mutex_);
-            last_payload_ = payload;
-        }
-        bool forwarded = forward_to_load_balancer(payload_str);
-        lb_forward_ok_.store(forwarded, std::memory_order_relaxed);
-        stop_timer_.cancel();
-        hive_->stop();
-    };
-
-    auto authenticator = authenticator_;
-    tcp::endpoint endpoint{tcp::v4(), port};
-    listener_ = std::make_shared<server::core::net::Listener>(
-        hive_,
-        endpoint,
-        [payload_callback, authenticator](std::shared_ptr<server::core::net::Hive> hive) {
-            return std::make_shared<GatewayConnection>(std::move(hive), authenticator, payload_callback);
-        });
-    listener_->start();
-
-    auto bound_endpoint = listener_->local_endpoint();
-    server::core::log::info("GatewayApp listener bound to port " + std::to_string(bound_endpoint.port()));
-    return bound_endpoint.port();
-}
-
-bool GatewayApp::forward_to_load_balancer(const std::string& payload) {
-    if (lb_endpoint_.empty()) {
-        return true;
+void GatewayApp::configure_load_balancer() {
+    const char* lb_env = std::getenv(kEnvLbEndpoint);
+    if (lb_env && *lb_env) {
+        lb_endpoint_ = lb_env;
+    } else {
+        lb_endpoint_ = kDefaultLbEndpoint;
     }
 
     auto channel = grpc::CreateChannel(lb_endpoint_, grpc::InsecureChannelCredentials());
-    auto stub = gateway::lb::LoadBalancerService::NewStub(channel);
+    lb_stub_ = gateway::lb::LoadBalancerService::NewStub(channel);
 
-    gateway::lb::RouteRequest request;
-    request.set_session_id("session-smoke");
-    request.set_gateway_id("gateway-smoke");
-    request.set_payload(payload);
+    server::core::log::info("GatewayApp LB endpoint: " + lb_endpoint_);
+}
 
-    grpc::ClientContext context;
-    gateway::lb::RouteResponse response;
-    auto status = stub->Forward(&context, request, &response);
-    if (!status.ok()) {
-        server::core::log::warn(std::string("GatewayApp gRPC forward failed: ") + status.error_message());
-        return false;
+void GatewayApp::start_listener() {
+    using tcp = boost::asio::ip::tcp;
+
+    boost::system::error_code ec;
+    boost::asio::ip::address address = boost::asio::ip::address_v4::any();
+    if (!listen_host_.empty()) {
+        auto parsed = boost::asio::ip::make_address(listen_host_, ec);
+        if (!ec) {
+            address = parsed;
+        } else {
+            server::core::log::warn("GatewayApp failed to parse listen address; defaulting to 0.0.0.0");
+        }
     }
-    if (!response.accepted()) {
-        server::core::log::warn(std::string("GatewayApp gRPC forward rejected: ") + response.reason());
-        return false;
+
+    tcp::endpoint endpoint{address, listen_port_};
+    listener_ = std::make_shared<server::core::net::Listener>(
+        hive_,
+        endpoint,
+        [authenticator = authenticator_, this](std::shared_ptr<server::core::net::Hive> hive) {
+            return std::make_shared<GatewayConnection>(std::move(hive), authenticator, *this);
+        });
+
+    if (listener_->is_stopped()) {
+        throw std::runtime_error("GatewayApp listener failed to start");
     }
-    return true;
+
+    listener_->start();
+    auto bound = listener_->local_endpoint();
+    server::core::log::info("GatewayApp listening on " + bound.address().to_string() + ":" + std::to_string(bound.port()));
+}
+
+void GatewayApp::handle_signals() {
+#if defined(SIGINT)
+    signals_.add(SIGINT);
+#endif
+#if defined(SIGTERM)
+    signals_.add(SIGTERM);
+#endif
+    signals_.async_wait([this](const boost::system::error_code& ec, int) {
+        if (ec == boost::asio::error::operation_aborted) {
+            return;
+        }
+        if (!ec) {
+            server::core::log::info("GatewayApp received shutdown signal");
+            stop();
+        }
+    });
+}
+
+void GatewayApp::load_environment() {
+    namespace paths = server::core::util::paths;
+    try {
+        auto exe_dir = paths::executable_dir();
+        auto exe_env = exe_dir / ".env";
+        if (std::filesystem::exists(exe_env)) {
+            server::core::config::load_dotenv(exe_env.string(), true);
+            return;
+        }
+    } catch (const std::exception& ex) {
+        server::core::log::warn(std::string("GatewayApp executable dir detection failed: ") + ex.what());
+    }
+
+    std::filesystem::path repo_env{".env"};
+    if (std::filesystem::exists(repo_env)) {
+        server::core::config::load_dotenv(repo_env.string(), true);
+    }
 }
 
 } // namespace gateway
