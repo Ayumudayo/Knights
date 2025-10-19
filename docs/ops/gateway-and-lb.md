@@ -80,6 +80,7 @@ gateway_app  ── gRPC(Stream) ──►  load_balancer_app  ── TCP ──
 ### 다중 인스턴스 점검
 - `.env`에서 `LB_BACKEND_ENDPOINTS`에 두 개 이상의 server_app 포트를 명시하고, 각 server_app은 고유 `SERVER_PORT`/`METRICS_PORT`를 사용한다.
 - `LB_SESSION_TTL`과 `GATEWAY_ID`가 모두 노드별로 일관되게 설정되어 있는지 확인한다.
+- Redis Pub/Sub 브로드캐스트를 활용하려면 `USE_REDIS_PUBSUB=1`, `REDIS_CHANNEL_PREFIX`, `GATEWAY_ID`를 모든 인스턴스에서 동일하게 설정한다.
 - Gateway를 통해 동일한 클라이언트 ID로 여러 번 접속해 `load_balancer.log`의 `backend=` 라우팅이 동일한지 확인한다.
 - 서버 인스턴스 중 하나를 중지하면 TTL 만료 후 동일 클라이언트가 다른 인스턴스로 재배치되는지 검증한다.
 
