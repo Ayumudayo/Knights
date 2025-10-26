@@ -20,8 +20,9 @@ public:
                      std::chrono::seconds ttl);
 
     std::optional<std::string> find_backend(const std::string& client_id);
-    bool bind_backend(const std::string& client_id, const std::string& backend_id);
-    void release_backend(const std::string& client_id);
+    std::optional<std::string> ensure_backend(const std::string& client_id, const std::string& desired_backend);
+    void refresh_backend(const std::string& client_id, const std::string& backend_id);
+    void release_backend(const std::string& client_id, const std::string& backend_id);
 
 private:
     std::string make_key(const std::string& client_id) const;

@@ -242,6 +242,47 @@ public:
         }
     }
 
+    bool set_if_not_exists(const std::string& key, const std::string& value, unsigned int ttl_sec) override {
+        try {
+            std::string ttl = std::to_string(ttl_sec);
+            long long result = redis_->eval<long long>("if redis.call('EXISTS', KEYS[1]) == 0 then redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2]); return 1 else return 0 end", {key}, {value, ttl});
+            return result == 1;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis SET NX failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis SET NX failed: unknown");
+            return false;
+        }
+    }
+
+    bool set_if_equals(const std::string& key, const std::string& expected, const std::string& value, unsigned int ttl_sec) override {
+        try {
+            std::string ttl = std::to_string(ttl_sec);
+            long long result = redis_->eval<long long>("if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3]); return 1 else return 0 end", {key}, {expected, value, ttl});
+            return result == 1;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis conditional SET failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis conditional SET failed: unknown");
+            return false;
+        }
+    }
+
+    bool del_if_equals(const std::string& key, const std::string& expected) override {
+        try {
+            long long result = redis_->eval<long long>("if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end", {key}, {expected});
+            return result > 0;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis conditional DEL failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis conditional DEL failed: unknown");
+            return false;
+        }
+    }
+
     bool scan_del(const std::string& pattern) override {
         try {
             long long cursor = 0;
@@ -306,6 +347,9 @@ public:
     bool xack(const std::string& /*key*/, const std::string& /*group*/, const std::string& /*id*/) override { return true; }
     bool del(const std::string& key) override { (void)key; return true; }
     std::optional<std::string> get(const std::string& key) override { (void)key; return std::optional<std::string>{}; }
+    bool set_if_not_exists(const std::string& key, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)value; (void)ttl_sec; return true; }
+    bool set_if_equals(const std::string& key, const std::string& expected, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)expected; (void)value; (void)ttl_sec; return true; }
+    bool del_if_equals(const std::string& key, const std::string& expected) override { (void)key; (void)expected; return true; }
     bool scan_del(const std::string& pattern) override { (void)pattern; return true; }
     bool xpending(const std::string& key, const std::string& group, long long& total) override { (void)key; (void)group; total = 0; return true; }
 private:

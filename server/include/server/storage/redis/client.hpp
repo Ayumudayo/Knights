@@ -24,6 +24,9 @@ public:
     // 키 삭제
     virtual bool del(const std::string& key) = 0;
     virtual std::optional<std::string> get(const std::string& key) = 0;
+    virtual bool set_if_not_exists(const std::string& key, const std::string& value, unsigned int ttl_sec) = 0;
+    virtual bool set_if_equals(const std::string& key, const std::string& expected, const std::string& value, unsigned int ttl_sec) = 0;
+    virtual bool del_if_equals(const std::string& key, const std::string& expected) = 0;
     // 패턴 스캔 후 일괄 삭제(naive): SCAN pattern -> DEL
     virtual bool scan_del(const std::string& pattern) = 0;
     // TTL을 가진 키 설정(초 단위)

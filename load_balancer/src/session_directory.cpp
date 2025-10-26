@@ -46,33 +46,68 @@ std::optional<std::string> SessionDirectory::find_backend(const std::string& cli
     return std::nullopt;
 }
 
-bool SessionDirectory::bind_backend(const std::string& client_id, const std::string& backend_id) {
-    if (client_id.empty() || backend_id.empty()) {
-        return false;
+std::optional<std::string> SessionDirectory::ensure_backend(const std::string& client_id, const std::string& desired_backend) {
+    if (client_id.empty() || desired_backend.empty()) {
+        return std::nullopt;
     }
-    {
+
+    if (!redis_) {
         std::lock_guard<std::mutex> lock(mutex_);
-        cache_[client_id] = backend_id;
+        cache_[client_id] = desired_backend;
+        return desired_backend;
     }
-    bool ok = true;
-    if (redis_) {
-        ok = redis_->setex(make_key(client_id), backend_id, static_cast<unsigned int>(ttl_.count()));
+
+    if (auto existing = find_backend(client_id)) {
+        if (*existing == desired_backend) {
+            redis_->set_if_equals(make_key(client_id), desired_backend, desired_backend, static_cast<unsigned int>(ttl_.count()));
+        }
+        return existing;
     }
-    return ok;
+
+    const auto key = make_key(client_id);
+    if (redis_->set_if_not_exists(key, desired_backend, static_cast<unsigned int>(ttl_.count()))) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cache_[client_id] = desired_backend;
+        return desired_backend;
+    }
+
+    auto current = redis_->get(key);
+    if (current && !current->empty()) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cache_[client_id] = *current;
+        return current;
+    }
+
+    std::lock_guard<std::mutex> lock(mutex_);
+    cache_[client_id] = desired_backend;
+    return desired_backend;
 }
 
-void SessionDirectory::release_backend(const std::string& client_id) {
-    if (client_id.empty()) {
+void SessionDirectory::refresh_backend(const std::string& client_id, const std::string& backend_id) {
+    if (client_id.empty() || backend_id.empty()) {
+        return;
+    }
+    if (redis_) {
+        redis_->set_if_equals(make_key(client_id), backend_id, backend_id, static_cast<unsigned int>(ttl_.count()));
+    }
+    std::lock_guard<std::mutex> lock(mutex_);
+    cache_[client_id] = backend_id;
+}
+
+void SessionDirectory::release_backend(const std::string& client_id, const std::string& backend_id) {
+    if (client_id.empty() || backend_id.empty()) {
         return;
     }
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        cache_.erase(client_id);
+        auto it = cache_.find(client_id);
+        if (it != cache_.end() && it->second == backend_id) {
+            cache_.erase(it);
+        }
     }
-    if (!redis_) {
-        return;
+    if (redis_) {
+        redis_->del_if_equals(make_key(client_id), backend_id);
     }
-    redis_->del(make_key(client_id));
 }
 
 std::string SessionDirectory::make_key(const std::string& client_id) const {
