@@ -1,5 +1,7 @@
 #include "server/state/instance_registry.hpp"
 
+#include <string_view>
+#include <cctype>
 #include <sstream>
 #include <utility>
 
@@ -58,6 +60,68 @@ std::string serialize_json(const InstanceRecord& record) {
     oss << '}';
     return oss.str();
 }
+std::optional<InstanceRecord> deserialize_json(std::string_view payload) {
+    InstanceRecord record{};
+    std::string json(payload);
+    for (char& ch : json) {
+        if (ch == '{' || ch == '}') {
+            ch = ' ';
+        }
+    }
+    auto trim_copy = [](std::string_view view) -> std::string {
+        std::size_t start = 0;
+        std::size_t end = view.size();
+        while (start < end && std::isspace(static_cast<unsigned char>(view[start]))) {
+            ++start;
+        }
+        while (end > start && std::isspace(static_cast<unsigned char>(view[end - 1]))) {
+            --end;
+        }
+        return std::string(view.substr(start, end - start));
+    };
+    std::stringstream ss(json);
+    std::string item;
+    while (std::getline(ss, item, ',')) {
+        auto colon = item.find(':');
+        if (colon == std::string::npos) {
+            continue;
+        }
+        std::string key = trim_copy(std::string_view(item).substr(0, colon));
+        std::string value = trim_copy(std::string_view(item).substr(colon + 1));
+        if (!key.empty() && key.front() == '"') {
+            key.erase(0, 1);
+        }
+        if (!key.empty() && key.back() == '"') {
+            key.pop_back();
+        }
+        if (!value.empty() && value.front() == '"') {
+            value.erase(0, 1);
+        }
+        if (!value.empty() && value.back() == '"') {
+            value.pop_back();
+        }
+        try {
+            if (key == "instance_id") {
+                record.instance_id = value;
+            } else if (key == "host") {
+                record.host = value;
+            } else if (key == "role") {
+                record.role = value;
+            } else if (key == "port") {
+                record.port = static_cast<std::uint16_t>(std::stoul(value));
+            } else if (key == "capacity") {
+                record.capacity = static_cast<std::uint32_t>(std::stoul(value));
+            } else if (key == "active_sessions") {
+                record.active_sessions = static_cast<std::uint32_t>(std::stoul(value));
+            } else if (key == "last_heartbeat_ms") {
+                record.last_heartbeat_ms = static_cast<std::uint64_t>(std::stoull(value));
+            }
+        } catch (...) {
+            // ignore parse errors for individual fields
+        }
+    }
+    return record;
+}
 
 } // namespace detail
 
@@ -67,6 +131,20 @@ class RedisClientAdapter final : public RedisInstanceStateBackend::IRedisClient 
 public:
     explicit RedisClientAdapter(std::shared_ptr<server::storage::redis::IRedisClient> client)
         : client_(std::move(client)) {}
+
+    bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) override {
+        if (!client_) {
+            return false;
+        }
+        return client_->scan_keys(pattern, keys);
+    }
+
+    std::optional<std::string> get(const std::string& key) override {
+        if (!client_) {
+            return std::nullopt;
+        }
+        return client_->get(key);
+    }
 
     bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override {
         if (!client_) {
@@ -130,7 +208,41 @@ bool RedisInstanceStateBackend::touch(const std::string& instance_id, std::uint6
     return write_record(it->second);
 }
 
+bool RedisInstanceStateBackend::reload_cache_from_backend() const {
+    if (!client_) {
+        return false;
+    }
+    std::vector<std::string> keys;
+    if (!client_->scan_keys(key_prefix_ + "*", keys)) {
+        return false;
+    }
+    std::unordered_map<std::string, InstanceRecord> next;
+    next.reserve(keys.size());
+    for (const auto& key : keys) {
+        auto payload = client_->get(key);
+        if (!payload || payload->empty()) {
+            continue;
+        }
+        auto record = detail::deserialize_json(*payload);
+        if (!record) {
+            continue;
+        }
+        if (record->instance_id.empty() && key.size() > key_prefix_.size()) {
+            record->instance_id = key.substr(key_prefix_.size());
+        }
+        next[record->instance_id] = *record;
+    }
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cache_ = std::move(next);
+    }
+    return true;
+}
+
 std::vector<InstanceRecord> RedisInstanceStateBackend::list_instances() const {
+    if (client_) {
+        reload_cache_from_backend();
+    }
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<InstanceRecord> result;
     result.reserve(cache_.size());

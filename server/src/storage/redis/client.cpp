@@ -283,6 +283,24 @@ public:
         }
     }
 
+    bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) override {
+        try {
+            keys.clear();
+            long long cursor = 0;
+            do {
+                std::vector<std::string> batch;
+                cursor = redis_->scan(cursor, pattern, 100, std::back_inserter(batch));
+                keys.insert(keys.end(), batch.begin(), batch.end());
+            } while (cursor != 0);
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis SCAN failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis SCAN failed: unknown");
+            return false;
+        }
+    }
     bool scan_del(const std::string& pattern) override {
         try {
             long long cursor = 0;
@@ -350,6 +368,7 @@ public:
     bool set_if_not_exists(const std::string& key, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)value; (void)ttl_sec; return true; }
     bool set_if_equals(const std::string& key, const std::string& expected, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)expected; (void)value; (void)ttl_sec; return true; }
     bool del_if_equals(const std::string& key, const std::string& expected) override { (void)key; (void)expected; return true; }
+    bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) override { (void)pattern; keys.clear(); return true; }
     bool scan_del(const std::string& pattern) override { (void)pattern; return true; }
     bool xpending(const std::string& key, const std::string& group, long long& total) override { (void)key; (void)group; total = 0; return true; }
 private:

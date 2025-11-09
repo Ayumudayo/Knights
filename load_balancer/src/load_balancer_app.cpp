@@ -5,6 +5,7 @@
 #include <chrono>
 #include <functional>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
 #include <optional>
@@ -35,6 +36,9 @@ constexpr const char* kEnvGrpcListen = "LB_GRPC_LISTEN";
 constexpr const char* kEnvBackendEndpoints = "LB_BACKEND_ENDPOINTS";
 constexpr const char* kEnvRedisUri = "LB_REDIS_URI";
 constexpr const char* kEnvInstanceId = "LB_INSTANCE_ID";
+constexpr const char* kEnvDynamicBackends = "LB_DYNAMIC_BACKENDS";
+constexpr const char* kEnvBackendRefreshInterval = "LB_BACKEND_REFRESH_INTERVAL";
+constexpr const char* kEnvBackendRegistryPrefix = "LB_BACKEND_REGISTRY_PREFIX";
 constexpr const char* kDefaultGrpcListen = "127.0.0.1:7001";
 constexpr const char* kDefaultBackendEndpoint = "127.0.0.1:5000";
 
@@ -86,7 +90,8 @@ grpc::Status LoadBalancerApp::GrpcServiceImpl::Stream(
 LoadBalancerApp::LoadBalancerApp()
     : hive_(std::make_shared<server::core::net::Hive>(io_))
     , heartbeat_timer_(io_)
-    , signals_(io_) {
+    , signals_(io_)
+    , backend_refresh_timer_(io_) {
     load_environment();
     state_backend_ = create_backend();
     configure();
@@ -111,6 +116,8 @@ int LoadBalancerApp::run() {
 
 void LoadBalancerApp::stop() {
     heartbeat_timer_.cancel();
+    backend_refresh_timer_.cancel();
+    dynamic_backends_active_ = false;
     stop_grpc_server();
     if (hive_) {
         hive_->stop();
@@ -135,6 +142,13 @@ void LoadBalancerApp::configure() {
                 std::chrono::steady_clock::now().time_since_epoch()).count());
     }
 
+    if (const char* prefix_env = std::getenv(kEnvBackendRegistryPrefix); prefix_env && *prefix_env) {
+        backend_registry_prefix_ = prefix_env;
+    }
+    if (!backend_registry_prefix_.empty() && backend_registry_prefix_.back() != '/') {
+        backend_registry_prefix_.push_back('/');
+    }
+
     const char* backend_env = std::getenv(kEnvBackendEndpoints);
     if (backend_env && *backend_env) {
         configure_backends(backend_env);
@@ -142,7 +156,7 @@ void LoadBalancerApp::configure() {
         configure_backends(kDefaultBackendEndpoint);
     }
 
-    if (backends_.empty()) {
+    if (static_backends_.empty()) {
         configure_backends(kDefaultBackendEndpoint);
     }
 
@@ -179,22 +193,52 @@ void LoadBalancerApp::configure() {
         }
     }
 
+    if (const char* refresh_env = std::getenv(kEnvBackendRefreshInterval); refresh_env && *refresh_env) {
+        try {
+            auto parsed = std::stoul(refresh_env);
+            if (parsed > 0) {
+                backend_refresh_interval_ = std::chrono::seconds{static_cast<long long>(parsed)};
+            }
+        } catch (const std::exception& ex) {
+            server::core::log::warn(std::string("LoadBalancerApp invalid LB_BACKEND_REFRESH_INTERVAL: ") + ex.what());
+        }
+    }
+
+    const bool dynamic_requested = [&]() {
+        if (const char* dynamic_env = std::getenv(kEnvDynamicBackends); dynamic_env && *dynamic_env) {
+            return std::strcmp(dynamic_env, "0") != 0;
+        }
+        return false;
+    }();
+
     if (redis_client_) {
         session_directory_ = std::make_unique<SessionDirectory>(redis_client_, "gateway/session", session_binding_ttl_);
     } else {
         session_directory_.reset();
     }
 
-    rebuild_hash_ring();
+    auto initial_count = set_backends(static_backends_);
 
+    if (dynamic_requested && state_backend_ && redis_client_) {
+        dynamic_backends_active_ = true;
+        refresh_backends();
+    } else {
+        if (dynamic_requested && (!state_backend_ || !redis_client_)) {
+            server::core::log::warn("LoadBalancerApp dynamic backends requested but registry backend unavailable; using static configuration");
+        }
+        dynamic_backends_active_ = false;
+        backend_refresh_timer_.cancel();
+    }
+
+    std::size_t active_backends = backends_.size();
     server::core::log::info("LoadBalancerApp grpc_listen=" + grpc_listen_address_
         + " instance_id=" + instance_id_
-        + " backends=" + std::to_string(backends_.size()));
+        + " backends=" + std::to_string(active_backends > 0 ? active_backends : initial_count)
+        + " dynamic_backends=" + std::string(dynamic_backends_active_ ? "1" : "0"));
 }
 
 void LoadBalancerApp::configure_backends(std::string_view list) {
-    backends_.clear();
-    backend_index_map_.clear();
+    std::vector<BackendEndpoint> parsed;
     std::size_t index = 0;
     std::size_t start = 0;
     while (start < list.size()) {
@@ -209,16 +253,34 @@ void LoadBalancerApp::configure_backends(std::string_view list) {
             endpoint.id = "backend-" + std::to_string(index++);
             endpoint.host = std::move(host);
             endpoint.port = port;
-            std::size_t position = backends_.size();
-            backend_index_map_[endpoint.id] = position;
-            backends_.push_back(std::move(endpoint));
+            parsed.push_back(std::move(endpoint));
         }
         start = end + 1;
     }
+    static_backends_ = std::move(parsed);
+}
+
+std::size_t LoadBalancerApp::set_backends(std::vector<BackendEndpoint> backends) {
+    std::unordered_map<std::string, std::size_t> new_index;
+    for (std::size_t i = 0; i < backends.size(); ++i) {
+        if (backends[i].id.empty()) {
+            backends[i].id = "backend-" + std::to_string(i);
+        }
+        new_index[backends[i].id] = i;
+    }
+
+    std::size_t count = backends.size();
+    {
+        std::lock_guard<std::mutex> lock(hash_mutex_);
+        backends_ = std::move(backends);
+        backend_index_map_ = std::move(new_index);
+    }
+
     rebuild_hash_ring();
+
     {
         std::lock_guard<std::mutex> lock(health_mutex_);
-        for (auto it = backend_health_.begin(); it != backend_health_.end(); ) {
+        for (auto it = backend_health_.begin(); it != backend_health_.end();) {
             if (backend_index_map_.find(it->first) == backend_index_map_.end()) {
                 it = backend_health_.erase(it);
             } else {
@@ -226,6 +288,121 @@ void LoadBalancerApp::configure_backends(std::string_view list) {
             }
         }
     }
+
+    backend_index_.store(0, std::memory_order_relaxed);
+    return count;
+}
+
+void LoadBalancerApp::schedule_backend_refresh() {
+    if (!dynamic_backends_active_) {
+        return;
+    }
+    backend_refresh_timer_.expires_after(backend_refresh_interval_);
+    backend_refresh_timer_.async_wait([this](const boost::system::error_code& ec) {
+        if (ec == boost::asio::error::operation_aborted) {
+            return;
+        }
+        if (ec) {
+            server::core::log::warn(std::string("LoadBalancerApp backend refresh timer error: ") + ec.message());
+            schedule_backend_refresh();
+            return;
+        }
+        refresh_backends();
+    });
+}
+
+void LoadBalancerApp::refresh_backends() {
+    if (!dynamic_backends_active_) {
+        return;
+    }
+
+    std::vector<BackendEndpoint> dynamic_backends;
+    if (state_backend_) {
+        try {
+            auto records = state_backend_->list_instances();
+            dynamic_backends = make_backends_from_records(records);
+        } catch (const std::exception& ex) {
+            server::core::log::warn(std::string("LoadBalancerApp failed to fetch backend registry: ") + ex.what());
+        }
+    }
+
+    bool applied = false;
+    if (!dynamic_backends.empty()) {
+        applied = apply_backend_snapshot(std::move(dynamic_backends), "registry");
+    } else if (!static_backends_.empty()) {
+        applied = apply_backend_snapshot(static_backends_, "static");
+        if (!applied && backends_.empty()) {
+            set_backends(static_backends_);
+            applied = true;
+        }
+    }
+
+    if (!applied && backends_.empty()) {
+        server::core::log::warn("LoadBalancerApp has no backend endpoints available");
+    }
+
+    if (dynamic_backends_active_) {
+        schedule_backend_refresh();
+    }
+}
+
+bool LoadBalancerApp::apply_backend_snapshot(std::vector<BackendEndpoint> candidates, std::string_view source) {
+    if (candidates.empty()) {
+        return false;
+    }
+    if (backends_equal(backends_, candidates)) {
+        return false;
+    }
+    auto count = set_backends(std::move(candidates));
+    server::core::log::info("LoadBalancerApp applied backend snapshot via " + std::string(source)
+        + " count=" + std::to_string(count));
+    return true;
+}
+
+std::vector<LoadBalancerApp::BackendEndpoint>
+LoadBalancerApp::make_backends_from_records(const std::vector<server::state::InstanceRecord>& records) const {
+    std::vector<BackendEndpoint> result;
+    result.reserve(records.size());
+    for (const auto& record : records) {
+        if (record.instance_id == instance_id_) {
+            continue;
+        }
+        if (!record.role.empty()) {
+            if (record.role != "server" && record.role != "backend" && record.role != "game_server") {
+                continue;
+            }
+        }
+        BackendEndpoint endpoint{};
+        endpoint.id = record.instance_id.empty()
+            ? (record.host.empty() ? std::string("backend-") + std::to_string(result.size()) : record.host + ":" + std::to_string(record.port))
+            : record.instance_id;
+        endpoint.host = record.host.empty() ? "127.0.0.1" : record.host;
+        endpoint.port = record.port == 0 ? 5000 : record.port;
+        result.push_back(std::move(endpoint));
+    }
+    return result;
+}
+
+bool LoadBalancerApp::backends_equal(const std::vector<BackendEndpoint>& lhs,
+                                     const std::vector<BackendEndpoint>& rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    std::unordered_map<std::string, std::pair<std::string, std::uint16_t>> map;
+    map.reserve(lhs.size());
+    for (const auto& ep : lhs) {
+        map.emplace(ep.id, std::make_pair(ep.host, ep.port));
+    }
+    for (const auto& ep : rhs) {
+        auto it = map.find(ep.id);
+        if (it == map.end()) {
+            return false;
+        }
+        if (it->second.first != ep.host || it->second.second != ep.port) {
+            return false;
+        }
+    }
+    return true;
 }
 
 void LoadBalancerApp::schedule_heartbeat() {
@@ -271,6 +448,14 @@ std::unique_ptr<server::state::IInstanceStateBackend> LoadBalancerApp::create_ba
         uri = std::getenv("REDIS_URI");
     }
 
+    std::string registry_prefix = backend_registry_prefix_;
+    if (const char* prefix_env = std::getenv(kEnvBackendRegistryPrefix); prefix_env && *prefix_env) {
+        registry_prefix = prefix_env;
+    }
+    if (!registry_prefix.empty() && registry_prefix.back() != '/') {
+        registry_prefix.push_back('/');
+    }
+
     if (uri && std::string_view(uri).length() > 0) {
         try {
             server::storage::redis::Options opts;
@@ -279,9 +464,10 @@ std::unique_ptr<server::state::IInstanceStateBackend> LoadBalancerApp::create_ba
                 redis_client_ = client;
                 auto state_client = server::state::make_redis_state_client(client);
                 server::core::log::info("LoadBalancerApp using Redis state backend");
+                 backend_registry_prefix_ = registry_prefix;
                 return std::make_unique<server::state::RedisInstanceStateBackend>(
                     state_client,
-                    "gateway/instances",
+                    registry_prefix,
                     backend_state_ttl_);
             }
         } catch (const std::exception& ex) {
@@ -292,6 +478,7 @@ std::unique_ptr<server::state::IInstanceStateBackend> LoadBalancerApp::create_ba
 
     server::core::log::warn("LoadBalancerApp falling back to in-memory state backend");
     redis_client_.reset();
+    backend_registry_prefix_ = registry_prefix;
     return std::make_unique<server::state::InMemoryStateBackend>();
 }
 

@@ -1,44 +1,45 @@
 # dev_chat_cli (Developer Client)
 
-`devclient/` 모듈은 FTXUI 기반 터미널 클라이언트(`dev_chat_cli`)를 제공하여 Gateway ↔ Load Balancer ↔ Server 경로를 수동 검증할 때 사용합니다. 기본 사용자 흐름은 익명 로그인 후 `/join`, `/leave`, `/whisper` 등 서버 명령을 테스트하도록 맞춰져 있습니다.
+`devclient/` 디렉터리는 FTXUI 기반 터미널 클라이언트 `dev_chat_cli`를 제공한다. Gateway를 통해 서버 플로우를 테스트하기 위한 개발 도구로, 로그인/룸 이동/귓속말/메트릭 확인 등 기본 상호작용을 지원한다. 채팅 서버가 범용 엔진으로 확장되더라도 최소한의 TCP·프로토콜 검증 도구로 활용할 수 있도록 유지한다.
 
-## 디렉터리 구조
-- `include/client/app/` — UI 상태, 명령 처리기, 네트워크 라우터 인터페이스
-- `src/app/` — FTXUI 화면 구성, 이벤트 루프, 명령 처리 구현
-- `src/ui/` — 상태 바 등 UI 컴포넌트 모듈
-- `src/net_client.cpp` — wire 프로토콜 TCP 클라이언트 구현
-- `src/main.cpp` — 엔트리 포인트
+## 디렉터리 구성
 ```text
 devclient/
-├─ include/
-│  └─ client/
-│     └─ app/
-├─ src/
-│  ├─ app/
-│  ├─ ui/
-│  ├─ net_client.cpp
-│  └─ main.cpp
+├─ include/client/app/
+│  ├─ command_processor.hpp   # 명령 파싱과 실행 분기
+│  ├─ session_state.hpp       # 로컬 세션 캐시
+│  └─ ui_components.hpp       # FTXUI 컴포넌트 헬퍼
+├─ src/app/
+│  ├─ command_processor.cpp
+│  ├─ session_state.cpp
+│  └─ ui/
+├─ src/net_client.cpp         # TCP 연결 및 wire 인코딩
+└─ src/main.cpp               # 엔트리 포인트
 ```
 
+## 주요 기능
+- `/login <name>`으로 손쉽게 게스트 로그인 후 `/join lobby` 등 룸 이동을 확인할 수 있다.
+- 룸 이동 시 서버에서 즉시 내려오는 스냅샷을 반영하여 새로고침 없이 UI를 갱신한다.
+- `Esc` 또는 `Ctrl+C`로 종료할 때 `/leave`와 소켓 shutdown을 전송하여 게이트웨이 로그가 WARN으로 남지 않도록 처리했다.
+- 향후 인증 토큰/플러그인 명령이 추가되더라도 `CommandProcessor`만 확장하면 되도록 분리되어 있다.
 
 ## 환경 변수
-| 변수 | 설명 | 기본값 |
+| 이름 | 설명 | 기본값 |
 | --- | --- | --- |
-| `DEVCLIENT_HOST` | 연결할 Gateway 호스트 | `127.0.0.1` |
-| `DEVCLIENT_PORT` | 연결할 Gateway 포트 | `6000` |
+| `DEVCLIENT_HOST` | 접속할 Gateway 호스트 | `127.0.0.1` |
+| `DEVCLIENT_PORT` | 접속할 Gateway 포트 | `6000` |
 
-`.env`는 실행 파일과 같은 디렉터리 또는 리포지터리 루트에서 자동으로 찾아 로드합니다.
+`.env`가 루트에 존재하면 자동으로 읽어들인다. 별도 인스턴스를 시험하려면 프로세스 환경 변수를 직접 지정해도 된다.
 
-## 빌드 & 실행
+## 빌드 및 실행
 ```powershell
 cmake --build build-msvc --target dev_chat_cli
 .\build-msvc\devclient\Debug\dev_chat_cli.exe
 ```
-FTXUI 종속성은 `vcpkg` 매니페스트에 정의되어 있으므로 루트에서 `cmake --preset` 혹은 `scripts/build.ps1`을 실행하면 자동으로 설치됩니다.
 
-## 사용 팁
-- `/login <name>` 입력 후 `/join lobby`로 채팅 룸에 입장합니다.
-- 익명 상태에서는 임의 닉네임으로 로그인되며, `/refresh`, `/rooms`, `/who` 등의 명령으로 상태를 즉시 확인할 수 있습니다.
-- 종료는 `Esc` 또는 `Ctrl+C`로 수행하며, 클라이언트가 Gateway에 graceful `/leave` 메시지와 `socket shutdown`을 전송하도록 구성되어 있습니다.
+FTXUI는 `vcpkg` 매니페스트에 포함되어 있으며, `cmake --preset` 또는 `scripts/build.ps1`를 사용해 의존성을 자동 설치할 수 있다.
 
-향후 UI 개선이나 자동 시나리오 테스트가 필요하다면, `CommandProcessor`와 `NetworkRouter`를 확장하여 스크립팅 기능을 추가하세요.
+## 테스트 시 참고
+- 룸 이동 후 로비 목록에 즉시 반영되지 않으면 서버에서 내려온 스냅샷 패킷이 도착했는지 로그(`devclient.log`)로 확인한다.
+- 다중 게이트웨이 실험 시 `GATEWAY_ID`가 다른 서버에 연결되는지 확인하고, Pub/Sub 브로드캐스트가 도착하면 UI가 실시간으로 갱신되는지 검증한다.
+- `/rooms`, `/who`, `/refresh` 명령은 서버 authoritative 데이터를 기준으로 갱신하므로 클라이언트 측 상태와 불일치가 발생하면 서버 쪽 버그일 가능성이 높다.

@@ -1,52 +1,40 @@
 # server_core 라이브러리
 
-Knights의 `core/` 모듈은 공용 C++20 런타임 라이브러리(`server_core`)를 제공하여 모든 서버 구성요소가 공유하는 네트워크, 동시성, 설정, 스토리지 유틸리티를 담당합니다. Hive/Connection 기반 비동기 I/O 루프와 TaskScheduler, DbWorkerPool 같은 인프라가 이 계층에서 구현되어 있으며, 상위 애플리케이션(`server_app`, `gateway_app`, `load_balancer_app`, `dev_chat_cli`)이 이를 링크하여 동작합니다.
+`core/` 디렉터리는 Knights 전반에서 공통으로 사용하는 C++20 static library `server_core`를 제공한다. 네트워킹(Hive/Connection), 동시성(TaskScheduler/LockedQueue), 스토리지(DbWorkerPool/Redis), 설정(load_dotenv) 등 서버 애플리케이션에 필요한 기반 기능을 모듈화했다. `server_app`, `gateway_app`, `load_balancer_app`, `dev_chat_cli` 모두 이 라이브러리를 통해 공통 코드를 공유한다.
 
-## 디렉터리 구조
-- `include/server/core/net/` — Hive, Listener, Session, Connection 등 네트워크 런타임
-- `include/server/core/concurrent/` — `JobQueue`, `ThreadManager`, `TaskScheduler` 등 동시성 유틸리티
-- `include/server/core/storage/` — 추상 `IConnectionPool`, `DbWorkerPool` 등 백엔드 비동기 작업 지원
-- `include/server/core/util/` — `log`, `paths`, `service_registry`, `crash_handler` 등 공용 도구
-- `include/server/core/config/` — `.env` 로더와 옵션 파서
-- `include/server/core/memory/` — `MemoryPool` 기반 고정 블록 할당기
+## 디렉터리 구성
 ```text
 core/
-├─ include/
-│  └─ server/
-│     └─ core/
-│        ├─ concurrent/
-│        ├─ config/
-│        ├─ memory/
-│        ├─ metrics/
-│        ├─ net/
-│        ├─ protocol/
-│        ├─ state/
-│        ├─ storage/
-│        └─ util/
-├─ src/
-└─ tests/ (planned)
+├─ include/server/core/
+│  ├─ concurrent/   # JobQueue, ThreadManager, TaskScheduler
+│  ├─ config/       # dotenv 로더, 옵션 파서
+│  ├─ memory/       # BufferManager, MemoryPool
+│  ├─ metrics/      # Counter/Gauge/Histogram SPI
+│  ├─ net/          # Hive, Listener, Session, Connection
+│  ├─ protocol/     # opcode, wire codec, error 정의
+│  ├─ state/        # InstanceRegistry, presence 공유 컴포넌트
+│  ├─ storage/      # DB/Redis 어댑터, write-behind 도우미
+│  └─ util/         # log, crash_handler, service_registry, paths
+├─ src/             # 각 헤더 구현
+└─ tests/ (계획)    # 유닛/통합 테스트 예정
 ```
 
-- `src/` — 위 헤더의 구현부
-- `tests/` (루트) — 향후 `server_core` 유닛 테스트가 배치될 예정
+## 제공 기능
+- **네트워크 스택**: `Hive`, `Listener`, `Session` 추상화를 통해 Boost.Asio 기반 I/O를 단일 스레드 루프 또는 다중 스레드 풀과 연동할 수 있다.
+- **동시성 유틸리티**: `LockedQueue`, `LockedWaitQueue`, `TaskScheduler`가 백그라운드 작업과 지연 실행을 담당한다.
+- **스토리지 계층**: `DbWorkerPool`은 PostgreSQL, Redis 작업을 비동기로 실행하며, `IConnectionPool` 인터페이스를 통해 다른 DB로 확장 가능한 구조를 제공한다.
+- **Redis 지원**: SessionDirectory, write-behind Streams, Lua 스크립트 래퍼 등 Redis 기능을 공통 컴포넌트로 묶었다.
+- **환경/서비스 관리**: `.env` 로드, ServiceRegistry 기반 의존성 주입, CrashHandler/로그 버퍼 등 운영 편의 기능을 포함한다.
 
-## 주요 기능
-- **네트워크 런타임**: Boost.Asio 기반 `Hive + Listener + Connection` 패턴으로 단일 스레드 이벤트 루프를 노출하며, Gateway·LoadBalancer·Server 모두 동일한 추상화를 사용합니다.
-- **동시성 도구**: `LockedQueue`, `LockedWaitQueue`, `TaskScheduler`로 지연/반복 작업과 백그라운드 Job을 안전하게 처리합니다.
-- **스토리지 워커 풀**: `DbWorkerPool`이 PostgreSQL/Redis 작업을 비동기 처리하고 메트릭, 종료 시 플러시를 제공합니다.
-- **Redis Streams 유틸리티**: `server/core/storage/redis`가 write-behind용 Streams/XADD API를 제공하여 `wb_worker`와 연동됩니다.
-- **환경 구성**: `.env` 및 실행 파일 인접 디렉터리의 설정을 로드하여 프로세스별 구성 값을 주입합니다.
-- **유틸리티 집합**: 구조화된 `log` 버퍼, CrashHandler, ServiceRegistry, 경로 유틸로 공통 부팅 로직을 단순화합니다.
-
-## 빌드 및 사용
+## 빌드
 ```powershell
-# 루트에서 CMake configure 후
 cmake --build build-msvc --target server_core
 ```
-다른 타깃은 `target_link_libraries(<target> PRIVATE server_core)` 형태로 의존성을 추가합니다. 헤더는 `target_include_directories`에서 `core/include` 경로를 노출합니다.
 
-## 추가 참고 자료
-- 전체 아키텍처 개요: `docs/server-architecture.md`
-- 엔진화 로드맵 및 Sapphire 기반 활용 아이디어: `docs/sapphire_core_insights.md`
+다른 타깃에서 사용하려면 `target_link_libraries(<target> PRIVATE server_core)`와 `target_include_directories(<target> PRIVATE core/include)`를 지정한다.
 
-기능 확장 시에는 `.env` 기반 구성, Hive 패턴, TaskScheduler/DbWorkerPool 계약을 준수하여 모듈 간 일관성을 유지하세요.
+## 확장 로드맵
+- Hive/Connection을 공용 네트워크 엔진으로 격상하여 Gateway·Load Balancer·게임 서버 등 다양한 프로세스에서 재사용.
+- ECS, 플러그인, Lua/WASM 스크립팅 등 엔진형 기능을 실험하고 `docs/roadmap.md`에 우선순위를 관리.
+- TaskScheduler/DbWorkerPool에 대한 단위 테스트를 추가하고, 종료 레이스·예외 경로를 커버하는 통합 테스트를 마련.
+- 관측성 강화를 위해 Prometheus 메트릭/로그 구조를 표준화하고 `docs/ops/observability.md`를 통해 운영 가이드를 확장.

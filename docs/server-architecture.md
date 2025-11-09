@@ -1,74 +1,90 @@
 # Server Architecture Overview
 
-Knights 서버 스택은 `server_app`(채팅 백엔드), `gateway_app`(외부 진입점), `load_balancer_app`(세션 라우터) 세 프로세스로 구성된다. 모든 실행 파일은 `core/` 모듈이 제공하는 공통 인프라(네트워크, 스레드, 스케줄러, 스토리지 어댑터)를 공유한다.
+Knights 서버 스택은 `server_app`(채팅 서버), `gateway_app`(클라이언트 접점), `load_balancer_app`(세션 라우팅) 세 프로세스를 중심으로 구성된다. 공통 인프라는 `core/` 라이브러리에 존재하며, Redis·PostgreSQL·gRPC를 통해 확장 가능한 구조를 지향한다. 현재는 채팅 서버에 초점을 맞추지만, 향후 다른 장르의 서버 엔진으로 확장할 수 있도록 모듈화를 진행 중이다.
 
-## 실행 구성요소
-### server_app (`server/src/app/bootstrap.cpp`)
-- **네트워크**: Boost.Asio `io_context` + `core::Acceptor`가 TCP 세션을 수락한다. 각 세션은 `core::Session`으로 구성되며 커스텀 헤더/바디 프레이밍을 수행한다.
-- **디스패처**: `core::Dispatcher`가 opcode→handler 맵을 유지한다. 예: `MSG_CHAT_SEND` → `server::app::chat::on_chat_send`.
-- **작업 인프라**: `core::JobQueue`, `core::ThreadManager`, `core::concurrent::TaskScheduler`, `core::storage::DbWorkerPool`이 백그라운드 I/O를 담당한다.
-- **스토리지**: PostgreSQL(`DB_URI`), Redis(`REDIS_URI`) 클라이언트를 DI 컨테이너(`services::set`)에 등록해 도메인 서비스가 가져다쓴다.
-- **도메인 서비스**: `server::app::chat::ChatService`가 채팅, 룸, presence 로직을 캡슐화한다.
+```text
+┌───────────┐   Stream(gRPC)   ┌────────────────┐   TCP   ┌───────────┐
+│ gateway   │ ───────────────▶ │ load_balancer  │ ───────▶ │ server    │
+│ (Hive)    │                  │ (ConsistentHash│         │ (Chat)    │
+└───────────┘                  └────────────────┘         └───────────┘
+        │                               │                         │
+        └────── Redis Presence / Sticky Session / PubSub ─────────┘
+```
 
-### gateway_app (`gateway/`)
-- TCP 게이트웨이. Boost.Asio `Hive` 기반으로 클라이언트 연결을 수락하고, 최초 메시지에서 간단한 토큰 파싱(익명 허용)을 수행한다.
-- 세션마다 gRPC 스트림을 열어 Load Balancer로 프레임(`RouteMessage`)을 전달한다. 백엔드에서 역방향으로 수신한 메시지는 `Connection::async_send()`로 클라이언트에 전송된다.
+## 1. 컴포넌트
+### server_app
+- Boost.Asio 기반 TCP 리스너(`core::net::Acceptor`)와 세션(`core::net::Session`)을 사용해 프로토콜을 처리한다.
+- `core::Dispatcher`에 opcode와 핸들러(`server::chat::handlers_*`)를 등록하여 메시지를 라우팅한다.
+- `TaskScheduler`, `DbWorkerPool`, Redis 클라이언트 등을 서비스 레지스트리에 통해 주입받는다.
+- Redis Streams write-behind, Redis Pub/Sub 브로드캐스트, Presence TTL 관리 등을 담당한다.
 
-### load_balancer_app (`load_balancer/`)
-- gRPC 서버(`LoadBalancerService::Stream`)가 Gateway 스트림을 수신한다.
-- Consistent Hash ring과 Redis 기반 세션 디렉터리(`LB_SESSION_TTL`)로 `client_id`→backend 매핑을 유지하고, 매핑이 없을 때만 라운드로빈으로 폴백한다.
-- Redis(`LB_REDIS_URI`/`REDIS_URI`)가 설정되면 `gateway/instances/*` heartbeat와 `gateway/session/<client>` 매핑을 함께 관리한다.
-- 분산 채팅 브로드캐스트는 `USE_REDIS_PUBSUB=1` 설정 시 Redis Pub/Sub(`fanout:room:*`)을 통해 인스턴스 간 동기화된다.
+### gateway_app
+- TCP 클라이언트 연결을 관리하고 초기 HELLO, heartbeat, 평문 payload를 Load Balancer로 전달한다.
+- Load Balancer와의 gRPC 스트림이 끊기면 재연결하며, graceful 종료 시 WARN 로그 없이 닫히도록 조정했다.
 
-자세한 게이트웨이·로드밸런서 런타임은 [docs/ops/gateway-and-lb.md](ops/gateway-and-lb.md)를 참고한다.
+- Gateway에서 전달된 세션을 동일 backend(server_app)로 보내기 위해 연결 매핑을 유지한다.
+- Consistent Hashing과 Redis Session Directory를 결합해 sticky routing 키를 공유한다.
+- LB_DYNAMIC_BACKENDS=1을 켜면 Redis Instance Registry(LB_BACKEND_REGISTRY_PREFIX)를 주기적으로 조회해 hash ring을 재구성하고, 장애 시 LB_BACKEND_ENDPOINTS 목록으로 폴백한다.
+- Backend 헬스체크가 실패하면 LB_BACKEND_FAILURE_THRESHOLD/LB_BACKEND_COOLDOWN 설정에 따라 격리·재시도한다.
+- Backend 연결 실패 시 실패 횟수를 기록해 일정 기간 격리한다.
+- 인스턴스 heartbeat를 Redis `gateway/instances/*`에 기록해 상태를 외부에서 조회할 수 있다.
 
-## 부팅 순서 (server_app)
+## 2. 부트스트랩 순서(server_app 기준)
 1. `.env` 로딩 (`server/core/config/dotenv.hpp`).
-2. `asio::io_context`, `core::JobQueue`, `core::ThreadManager`, `core::BufferManager` 초기화.
-3. `core::Dispatcher`에 opcode 핸들러 등록.
-4. `core::SessionOptions` (`read_timeout_ms`, `heartbeat_interval_ms` 등) 설정.
-5. PostgreSQL/Redis 커넥션 풀 생성 후 DI 컨테이너에 주입.
-6. `ChatService` 생성, 라우팅 테이블 등록.
-7. `core::Acceptor` listen 후 워커 스레드/타이머(`TaskScheduler`, health check) 기동.
-8. OS 시그널(SIGINT/SIGTERM) 수신 시 graceful shutdown 수행.
+2. `asio::io_context`, `TaskScheduler`, `DbWorkerPool`, `BufferManager` 초기화.
+3. 환경 변수(`DB_URI`, `REDIS_URI`, `WRITE_BEHIND_ENABLED`, `USE_REDIS_PUBSUB` 등) 파싱.
+4. 서비스 등록: DB/Redis 커넥션 풀, write-behind emitter, Redis Pub/Sub 구독자.
+5. Redis Instance Registry에 backend heartbeat를 등록한다(SERVER_REGISTRY_PREFIX, SERVER_ADVERTISE_HOST/PORT).
+6. 채팅 서비스 초기화(ChatService::init)를 실행해 핸들러/스토리지 의존성을 묶는다.
+7. core::Acceptor를 기동하고 health-check, presence clean-up, metrics exporter를 시작한다.
+8. OS 시그널(SIGINT/SIGTERM)을 수신하면 graceful shutdown 절차를 수행한다.
 
-## 메시지 처리 파이프라인
-1. `core::Session::start()` → `MSG_HELLO` 전송 → read loop 진입.
-2. 프레임 수신 시 `core::Dispatcher`가 opcode별 핸들러 호출. 미등록 opcode는 `MSG_ERR(UNKNOWN_MSG_ID)` 반환.
-3. 주요 핸들러
-   - `MSG_LOGIN_REQ` → guest 생성 및 presence 초기화
-   - `MSG_JOIN_ROOM` → membership upsert, Redis presence 업데이트
-   - `MSG_CHAT_SEND` → 메시지 영속화, Redis Stream(write-behind) 발행 옵션
-   - `MSG_LEAVE_ROOM` → membership/presence 정리
-4. CPU·I/O 집중 처리는 `core::JobQueue` 또는 `DbWorkerPool`에 위임해 세션 스레드를 가볍게 유지한다.
-5. 응답은 `core::Session::async_send()` 큐를 통해 비동기 전송하며, 큐 초과 시 `runtime_metrics::record_send_queue_drop()`로 드롭을 기록한다.
+## 3. 메시지 플로우
+1. 클라이언트가 Gateway에 TCP 연결 → Gateway가 HELLO 패킷을 수신 후 Load Balancer `Stream` RPC 생성.
+2. Load Balancer가 sticky routing으로 backend 서버를 선택하고 TCP 소켓을 연다.
+3. Gateway ↔ Load Balancer 간 gRPC 스트림은 클라이언트 payload를 backend로, backend payload를 클라이언트로 전달한다.
+4. 서버는 opcode 기반으로 핸들러를 호출하고, 결과를 다시 Gateway를 통해 클라이언트로 돌려보낸다.
+5. `USE_REDIS_PUBSUB=1`이면 서버는 룸 브로드캐스트를 Redis 채널에 발행하고, 다른 서버 인스턴스가 이를 수신해 로컬 세션에 전달한다.
+6. `WRITE_BEHIND_ENABLED=1`이면 채팅 이벤트가 Redis Streams에 기록되고, `wb_worker`가 PostgreSQL에 영속화한다.
 
-## 백그라운드 작업
-- **DbWorkerPool**: Postgres 트랜잭션 작업을 비동기로 처리, 성공/실패/큐 길이를 메트릭으로 노출.
-- **TaskScheduler**: health check, presence TTL 갱신, 통계 집계를 주기적으로 실행한다.
-- **Health Check**: DB `SELECT 1`, Redis `PING/HELLO`, 외부 서비스 커넥션 점검.
-- **CrashHandler**: 비정상 종료 시 minidump 및 로그 버퍼를 `/logs/`에 남긴다.
+## 4. 다중 인스턴스 고려 사항
+- **Gateway**: 인스턴스마다 `GATEWAY_ID`를 고유하게 설정한다. Redis Presence/Pub/Sub을 공유하며 self-echo 필터가 동작하도록 `REDIS_CHANNEL_PREFIX`는 통일한다.
+- **Load Balancer**: 여러 인스턴스를 프런트에 두려면 L4 또는 DNS 로드밸런서를 추가한다. Redis가 없으면 sticky routing이 보장되지 않는다.
+- **Server**: Redis Pub/Sub과 write-behind를 통해 메시지 및 이벤트를 동기화한다. Consistent hash ring이 서버 추가/제거에 자동 반응하도록 하는 기능은 로드맵으로 남아 있다.
+- **Persistence**: PostgreSQL은 공유 데이터베이스로 사용되며, 향후 샤딩/파티셔닝 검토는 `docs/roadmap.md` 6) 항목에서 관리한다.
 
-## 핵심 환경 변수
-| 컴포넌트 | 변수 | 기본값/설명 |
+## 5. 운영 변수 요약
+| 컴포넌트 | 주요 변수 | 설명 |
 | --- | --- | --- |
-| server_app | `SERVER_BIND_ADDR`, `SERVER_PORT` | 기본 `0.0.0.0:5000` |
-|  | `GATEWAY_ID` | 다중 게이트웨이 self-echo 방지 |
-|  | `DB_URI`, `REDIS_URI` | 스토리지 연결 문자열 |
-|  | `WRITE_BEHIND_ENABLED`, `USE_REDIS_PUBSUB` | Redis Streams/PubSub 제어 |
-| gateway_app | `GATEWAY_LISTEN` | `0.0.0.0:6000` |
-|  | `LB_GRPC_ENDPOINT` | Load Balancer gRPC 위치 |
-|  | `GATEWAY_ID` | Redis presence/로그 태깅 |
-| load_balancer_app | `LB_GRPC_LISTEN` | `127.0.0.1:7001` |
-|  | `LB_BACKEND_ENDPOINTS` | 콤마 구분 백엔드 목록 |
-|  | `LB_REDIS_URI` | Redis 상태 백엔드 (옵션) |
-|  | `LB_INSTANCE_ID` | 상태 레지스트리 키 |
-|  | `LB_SESSION_TTL` | 세션→백엔드 매핑 TTL(초) |
-|  | `LB_BACKEND_FAILURE_THRESHOLD` | 연속 실패 허용 횟수 |
-|  | `LB_BACKEND_COOLDOWN` | 백엔드 재시도 대기(초) |
+| server_app | `SERVER_BIND_ADDR`, `SERVER_PORT` | TCP 리스너 설정 |
+|  | `DB_URI`, `DB_POOL_MIN`, `DB_POOL_MAX` | PostgreSQL 연결 |
+|  | `REDIS_URI`, `REDIS_POOL_MAX` | Redis 연결 |
+|  | `WRITE_BEHIND_ENABLED`, `WB_*` | write-behind 제어 |
+|  | `USE_REDIS_PUBSUB`, `GATEWAY_ID`, `REDIS_CHANNEL_PREFIX` | 분산 브로드캐스트 설정 |
+|  | `PRESENCE_TTL_SEC` | Presence TTL / heartbeat 주기 |
+|  | `METRICS_PORT` | HTTP 메트릭 포트 |
+|  | `SERVER_ADVERTISE_HOST/PORT`, `SERVER_INSTANCE_ID` | Instance Registry에 등록할 공개 주소/ID |
+|  | `SERVER_REGISTRY_PREFIX`, `SERVER_REGISTRY_TTL`, `SERVER_HEARTBEAT_INTERVAL` | Instance Registry heartbeat 설정 |
+| gateway_app | `GATEWAY_LISTEN` | TCP 리스너 |
+|  | `LB_GRPC_ENDPOINT` | Load Balancer 주소 |
+|  | `LB_GRPC_REQUIRED`, `LB_RETRY_DELAY_MS` | 재연결 정책 |
+| load_balancer_app | `LB_GRPC_LISTEN` | gRPC 리스너 |
+|  | `LB_BACKEND_ENDPOINTS` | backend TCP 목록 |
+|  | `LB_REDIS_URI`, `LB_SESSION_TTL` | Redis 세션 디렉터리 |
+|  | `LB_BACKEND_REFRESH_INTERVAL` | Registry 기반 재조회 주기 |
+|  | `LB_DYNAMIC_BACKENDS`, `LB_BACKEND_REGISTRY_PREFIX` | Registry 기반 동적 backend 구성 |
+|  | `LB_BACKEND_FAILURE_THRESHOLD`, `LB_BACKEND_COOLDOWN` | 헬스 가드 |
+|  | `LB_HEARTBEAT_INTERVAL` | heartbeat 주기 |
 
-## 향후 과제
-- **인증**: `auth::NoopAuthenticator` 대신 토큰 검증, 사용자 레지스트리 연동.
-- **멀티 인스턴스**: Redis state/metrics 기반 부하 분산 및 세션 재할당.
-- **관측성**: gateway/load_balancer에 Prometheus 메트릭과 헬스 엔드포인트 추가.
-- **자동 회복**: 백엔드 접속 실패 시 지연 재시도, 백엔드 health probe.
+## 6. 향후 계획(발췌)
+- `docs/roadmap.md`의 6) 항목에 다중 인스턴스 안정화 TODO가 정리되어 있다.  
+  - Consistent hash 재구성 자동화  
+  - Redis Pub/Sub 정합성 강화  
+  - Sticky routing 통합 테스트  
+  - Gateway 인증 확장
+- 엔진화 로드맵(`docs/core-design.md`)에서는 Hive/Connection 추상화, ECS 조사, 플러그인 시스템 등의 장기 과제를 추적한다.
+
+## 7. 참조
+- 프로토콜 정의: `proto/gateway_lb.proto`, `proto/messages.proto`
+- 운영 가이드: `docs/ops/gateway-and-lb.md`, `docs/ops/runbook.md`, `docs/ops/observability.md`
+- 데이터 레이어: `docs/db/redis-strategy.md`, `docs/db/write-behind.md`

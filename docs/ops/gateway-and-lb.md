@@ -1,89 +1,138 @@
-# Gateway & Load Balancer 아키텍처
+# Gateway & Load Balancer 운영 가이드
 
-프로젝트는 이제 별도 프로세스로 **Gateway ↔ LoadBalancer ↔ Server** 파이프라인을 운용한다. Gateway가 클라이언트 TCP 세션을 수용하고, gRPC 양방향 스트리밍으로 Load Balancer에 프레임을 전달하면 Load Balancer가 서버 백엔드(TCP)로 중계한다.
+이 문서는 Knights 분산 채팅 서버의 **Gateway → Load Balancer → Server** 흐름을 구성하고 운영하는 데 필요한 정보를 정리한다. 현재 구현은 gRPC 스트림과 Redis 기반 sticky 세션 매핑을 사용하며, 향후 다중 인스턴스/관측성 강화를 위한 TODO도 함께 기록한다.
 
+```text
+Client (TCP)
+   │
+   ▼
+gateway_app ──(gRPC Stream)──▶ load_balancer_app ──(TCP)──▶ server_app
+   │                                   │
+   └────────── Redis (옵션) ◀──────────┘
 ```
-Client
-  │  (TCP)
-  ▼
-gateway_app  ── gRPC(Stream) ──►  load_balancer_app  ── TCP ──►  server_app
-  │                                   │
-  └─ Redis(optional) ◄────── 상태/헬스 ┘
-```
 
-## 주요 동작 흐름
-1. **클라이언트 → Gateway**  
-   Gateway는 Boost.Asio 기반 `Hive` 위에서 TCP 세션을 생성하고, 최초 메시지를 익명 인증(토큰 미검증)으로 처리한다.
-2. **Gateway → LoadBalancer**  
-   세션마다 gRPC 스트림을 개설하고 `RouteMessage`(`CLIENT_HELLO`/`CLIENT_PAYLOAD`) 메시지를 전송한다. Gateway는 스트림에서 `SERVER_PAYLOAD`/`SERVER_CLOSE`/`SERVER_ERROR` 를 역으로 수신해 클라이언트에 write 한다.
-3. **LoadBalancer → Server**  
-   Load Balancer는 Redis 세션 디렉터리(`LB_SESSION_TTL`)와 Consistent Hash ring으로 고정 백엔드를 우선 배정하고, 매핑이 없을 때만 라운드로빈으로 백엔드를 선택한다. 장애가 반복되면 `LB_BACKEND_FAILURE_THRESHOLD`·`LB_BACKEND_COOLDOWN` 설정으로 해당 백엔드를 일정 시간 제외한다. 클라이언트에서 받은 바이트 시퀀스를 그대로 server_app에 중계하며, 서버에서 오는 응답도 gRPC 스트림을 통해 Gateway로 되돌린다.
-4. **상태 보고**  
-   Load Balancer는 Redis 기반 `gateway/instances/*` 키에 인스턴스 정보를 주기적으로 갱신(기본 5초)한다. Redis가 비활성화된 경우 인메모리 백엔드를 사용한다.
+## 1. 구성 요소 개요
+### Gateway (`gateway_app`)
+- Boost.Asio `Hive`를 이용해 클라이언트 TCP 세션을 관리한다.
+- 각 세션은 Load Balancer의 `Stream` RPC와 1:1로 매핑된다.
+- `/leave` 혹은 정상 종료 시 graceful close를 수행해 WARN 로그를 줄였다.
 
-## 실행 방법 (로컬)
-1. **server_app**  
+### Load Balancer (`load_balancer_app`)
+- gRPC 서버로 Gateway와 통신하며 backend TCP 서버(`server_app`)를 선택한다.
+- Consistent Hash + 실패 카운트를 사용해 sticky routing과 백엔드 격리를 동시 지원한다.
+- LB_DYNAMIC_BACKENDS=1을 사용하면 Redis Instance Registry(LB_BACKEND_REGISTRY_PREFIX)에서 backend 목록을 읽어 Consistent Hash ring을 자동으로 재구성하고, 장애 시 LB_BACKEND_ENDPOINTS 값을 즉시 폴백으로 사용한다.
+- Redis가 설정되면 `gateway/session/<client_id>`에 매핑을 저장하고 TTL이 지나면 자동 재할당한다.
+- `gateway/instances/*` 키로 heartbeat를 기록해 다른 프로세스가 상태를 조회할 수 있다.
+
+### Server (`server_app`)
+- 실제 채팅 로직을 수행한다. Redis Pub/Sub(`USE_REDIS_PUBSUB=1`)를 활성화하면 여러 서버 인스턴스 간 메시지를 브로드캐스트한다.
+- Room membership을 authoritative하게 관리하며 잘못된 라우팅은 `ROOM_MISMATCH` 오류로 감지된다.
+- Redis Instance Registry에 backend heartbeat를 주기적으로 등록해 Load Balancer가 backend를 자동으로 발견하도록 한다.
+
+## 2. 실행 절차
+1. **데이터베이스/Redis 준비**  
+   `DB_URI`, `REDIS_URI`를 `.env` 또는 환경 변수에 설정한다. Redis를 사용하지 않으면 sticky routing이 프로세스 로컬(비권장)로 떨어진다.
+2. **server_app 실행**  
    ```powershell
-   # 1) Postgres/Redis가 필요하면 .env 구성 후 실행
    cmake --build build-msvc --target server_app
    .\build-msvc\server\Debug\server_app.exe
    ```
-2. **load_balancer_app**  
+3. **load_balancer_app 실행**  
    ```powershell
    $env:LB_BACKEND_ENDPOINTS="127.0.0.1:5000"
    $env:LB_GRPC_LISTEN="127.0.0.1:7001"
-   $env:LB_INSTANCE_ID="lb-local"
    cmake --build build-msvc --target load_balancer_app
    .\build-msvc\load_balancer\Debug\load_balancer_app.exe
    ```
-3. **gateway_app**  
+4. **gateway_app 실행**  
    ```powershell
    $env:LB_GRPC_ENDPOINT="127.0.0.1:7001"
    $env:GATEWAY_LISTEN="0.0.0.0:6000"
-   $env:GATEWAY_ID="gw-local"
    cmake --build build-msvc --target gateway_app
    .\build-msvc\gateway\Debug\gateway_app.exe
    ```
-4. **클라이언트**  
-   기존 devclient 또는 임시 TCP 클라이언트를 `6000`번 포트로 연결하면 서버까지 라우팅된다.
+5. **(옵션) devclient 실행**  
+   ```powershell
+   cmake --build build-msvc --target dev_chat_cli
+   .\build-msvc\devclient\Debug\dev_chat_cli.exe
+   ```
 
-## 환경 변수 요약
-### gateway_app
-| 변수 | 설명 | 기본값 |
+## 3. 환경 변수 요약
+### Gateway
+| 이름 | 설명 | 기본값 |
 | --- | --- | --- |
-| `GATEWAY_LISTEN` | 수신 주소와 포트 (`host:port`) | `0.0.0.0:6000` |
-| `GATEWAY_ID` | Gateway 인스턴스 식별자 | `gateway-default` |
-| `LB_GRPC_ENDPOINT` | Load Balancer gRPC 엔드포인트 | `127.0.0.1:7001` |
+| `GATEWAY_LISTEN` | TCP 바인딩 주소 | `0.0.0.0:6000` |
+| `GATEWAY_ID` | 게이트웨이 인스턴스 ID | `gateway-default` |
+| `LB_GRPC_ENDPOINT` | Load Balancer gRPC 주소 | `127.0.0.1:7001` |
+| `LB_GRPC_REQUIRED` | 1이면 LB 연결 실패 시 종료 | `0` |
+| `LB_RETRY_DELAY_MS` | 재연결 대기 시간(ms) | `3000` |
 
-### load_balancer_app
-| 변수 | 설명 | 기본값 |
+### Load Balancer
+| 이름 | 설명 | 기본값 |
 | --- | --- | --- |
-| `LB_GRPC_LISTEN` | gRPC 리스닝 주소 (`host:port`) | `127.0.0.1:7001` |
-| `LB_BACKEND_ENDPOINTS` | 서버 백엔드 목록(콤마 구분) | `127.0.0.1:5000` |
-| `LB_INSTANCE_ID` | 상태 레지스트리에 기록할 ID | `lb-<timestamp>` |
-| `LB_REDIS_URI` / `REDIS_URI` | 상태 백엔드(Redis) 연결 문자열 | 비활성 시 메모리 |
-| `LB_SESSION_TTL` | 세션→백엔드 매핑 TTL(초) | `45` |
-| `LB_BACKEND_FAILURE_THRESHOLD` | 백엔드 연속 실패 허용 횟수 | `3` |
-| `LB_BACKEND_COOLDOWN` | 실패 후 재시도 대기(초) | `5` |
-| `LB_SESSION_TTL` | 세션→백엔드 매핑 TTL(초) | `45` |
+| `LB_GRPC_LISTEN` | gRPC 리스너 주소 | `127.0.0.1:7001` |
+| `LB_BACKEND_ENDPOINTS` | backend TCP 주소 목록 | `127.0.0.1:5000` |
+| `LB_INSTANCE_ID` | 인스턴스 ID | 자동(`lb-<timestamp>`) |
+| `LB_REDIS_URI` / `REDIS_URI` | Redis URI (선택) | 없음 |
+| `LB_SESSION_TTL` | 세션 매핑 TTL(초) | `45` |
+| `LB_BACKEND_FAILURE_THRESHOLD` | 격리 전 실패 허용 횟수 | `3` |
+| `LB_BACKEND_COOLDOWN` | 재시도 대기(초) | `5` |
+| `LB_HEARTBEAT_INTERVAL` | heartbeat 주기(초) | `5` |
+| `LB_BACKEND_REFRESH_INTERVAL` | Registry 기반 backend 재조회 주기(초) | `5` |
+| `LB_DYNAMIC_BACKENDS` | Redis Registry 기반 동적 backend 갱신 (1=활성) | `0` |
+| `LB_BACKEND_REGISTRY_PREFIX` | backend registry prefix (server_app과 동일) | `gateway/instances` |
 
-### server_app (변경 없음)
-| 변수 | 설명 |
-| --- | --- |
-| `SERVER_BIND_ADDR`, `SERVER_PORT` | 기존 TCP 리스너 설정 |
-| `GATEWAY_ID` | Redis fan-out self-echo 방지 |
-| `USE_REDIS_PUBSUB`, `WRITE_BEHIND_ENABLED` 등 | 기존 옵션 유지 |
+### Server
+| 이름 | 설명 | 기본값 |
+| --- | --- | --- |
+| `SERVER_BIND_ADDR`, `SERVER_PORT` | TCP 리스너 | `0.0.0.0`, `5000` |
+| SERVER_ADVERTISE_HOST, SERVER_ADVERTISE_PORT | Load Balancer가 접속할 외부 호스트/포트 | 127.0.0.1, listen 포트 |
+| SERVER_INSTANCE_ID | Instance Registry에 등록할 고유 서버 ID | server-<timestamp> |
+| `SERVER_REGISTRY_PREFIX` | Instance Registry prefix | `gateway/instances` |
+| `SERVER_REGISTRY_TTL` | Instance Registry TTL(초) | `30` |
+| `SERVER_HEARTBEAT_INTERVAL` | Registry heartbeat 주기(초) | `5` |
+| `DB_URI` | PostgreSQL URI | 필수 |
+| `REDIS_URI` | Redis URI | 선택 |
+| `USE_REDIS_PUBSUB` | Redis Pub/Sub 활성 | `0` |
+| `WRITE_BEHIND_ENABLED` | Redis Streams write-behind | `1` |
+| `GATEWAY_ID`, `REDIS_CHANNEL_PREFIX` | Pub/Sub envelope 설정 | `gateway-default`, `knights:` |
 
-## 운영 및 TODO
-- **스케일링**: Load Balancer가 Consistent Hash ring + 라운드로빈 폴백으로 다중 백엔드를 분배한다. 향후 Redis 레지스트리를 참고해 실시간 용량/세션 수 기반 스케줄링을 적용한다.
-- **헬스체크**: 현재 gRPC와 TCP 실패 시 스트림이 종료된다. HTTP 헬스 엔드포인트와 메트릭 노출이 필요하다.
-- **인증**: Gateway는 여전히 `auth::NoopAuthenticator`를 사용한다. 인증 토큰 검증 및 세션 레지스트리 연동이 추후 과제로 남아 있다.
-- **멀티 게이트웨이**: Redis presence/PubSub 설정(`USE_REDIS_PUBSUB=1`)으로 서버 간 브로드캐스트를 유지할 수 있다. gateway_app 다중 인스턴스 시 `GATEWAY_ID`는 반드시 고유하게 지정한다.
+환경 변수는 실행 파일과 동일 폴더의 `.env` 혹은 리포지토리 루트 `.env`에서도 자동으로 로드된다.
 
-### 다중 인스턴스 점검
-- `.env`에서 `LB_BACKEND_ENDPOINTS`에 두 개 이상의 server_app 포트를 명시하고, 각 server_app은 고유 `SERVER_PORT`/`METRICS_PORT`를 사용한다.
-- `LB_SESSION_TTL`, `LB_BACKEND_FAILURE_THRESHOLD`, `LB_BACKEND_COOLDOWN`, `GATEWAY_ID`가 노드별로 일관되게 설정되어 있는지 확인한다.
-- Redis Pub/Sub 브로드캐스트를 활용하려면 `USE_REDIS_PUBSUB=1`, `REDIS_CHANNEL_PREFIX`, `GATEWAY_ID`를 모든 인스턴스에서 동일하게 설정한다.
-- Gateway를 통해 동일한 클라이언트 ID로 여러 번 접속해 `load_balancer.log`의 `backend=` 라우팅이 동일한지 확인한다.
-- 서버 인스턴스 중 하나를 중지하면 TTL 만료 후 동일 클라이언트가 다른 인스턴스로 재배치되는지 검증한다.
+## 4. 모니터링 및 알람
+- **Gateway / Load Balancer**
+  - chat_subscribe_total, chat_self_echo_drop_total, chat_subscribe_last_lag_ms를 /metrics에서 수집한다. chat_subscribe_last_lag_ms 5분 p95가 200ms 이상이면 Redis Pub/Sub 경로를 우선 점검한다.
+  - Load Balancer 로그의 pplied backend snapshot 라인을 기반으로 backend 리스트가 주기적으로 갱신되는지 확인한다. dynamic_backends=0으로 내려가면 즉시 원인을 확인한다.
+  - Redis Session Directory TTL 만료율을 확인하기 위해 gateway/session/* 키 수를 SCAN해 급격한 감소/증가를 감시한다.
+- **Server / Write-behind**
+  - /metrics의 wb_batch_size, wb_commit_ms, wb_fail_total, wb_pending, wb_dlq_total을 대시보드에 노출하고, wb_pending이 200건 이상으로 5분간 유지되면 DLQ 상태를 점검한다.
+  - RedisInstanceStateBackend 로그에서 heartbeat 실패가 연속으로 발생하면 SERVER_REGISTRY_PREFIX 설정과 Redis 상태를 동시에 확인한다.
+- **권장 알람 임계치**
+  - chat_subscribe_last_lag_ms p95 > 200ms (5분)
+  - wb_fail_total 증가 또는 wb_pending > 500 (5분)
+  - Redis ping latency p95 > 20ms, Postgres latency p95 > 50ms (5분)
 
+## 5. 운영 체크리스트
+## 5. 멀티 인스턴스 시나리오
+1. **다중 gateway_app**  
+   - 인스턴스마다 고유한 `GATEWAY_ID`를 지정한다.  
+   - Redis Presence/Pub/Sub을 공유해도 self-echo 필터가 동작하도록 `REDIS_CHANNEL_PREFIX`를 동일하게 유지한다.
+2. **다중 load_balancer_app**  
+   - 현재는 정적 backend 목록을 사용한다. 여러 Load Balancer가 동시에 동작하려면 앞단에 L4(예: HAProxy)를 두거나 DNS 라운드로빈을 활용한다.  
+- LB_DYNAMIC_BACKENDS=1을 사용하면 Redis Instance Registry(LB_BACKEND_REGISTRY_PREFIX)에서 backend 목록을 읽어 Consistent Hash ring을 자동으로 재구성하고, 장애 시 LB_BACKEND_ENDPOINTS 값을 즉시 폴백으로 사용한다.
+3. **다중 server_app**  
+    - LB_BACKEND_ENDPOINTS는 장애 시 사용할 정적 fallback 목록이며, SERVER_ADVERTISE_HOST/PORT는 Instance Registry에 올리는 주소와 일치해야 한다.
+    - LB_BACKEND_ENDPOINTS는 장애 시 사용할 정적 fallback 목록이며, SERVER_ADVERTISE_HOST/PORT는 Instance Registry에 올리는 주소와 일치해야 한다.
+    - Redis Pub/Sub(USE_REDIS_PUBSUB=1)을 사용할 경우 채널 prefix와 self-echo 정책을 맞추고, Pub/Sub 지연에 대한 경보를 설정한다.
+    - Presence/Write-behind 경로는 Redis/DB 이중화 전략에 따라 장애 전환 절차와 모니터링 지표를 정의한다.
+## 6. 향후 TODO
+| 우선순위 | 항목 | 메모 |
+| --- | --- | --- |
+- LB_DYNAMIC_BACKENDS=1을 사용하면 Redis Instance Registry(LB_BACKEND_REGISTRY_PREFIX)에서 backend 목록을 읽어 Consistent Hash ring을 자동으로 재구성하고, 장애 시 LB_BACKEND_ENDPOINTS 값을 즉시 폴백으로 사용한다.
+| [done][P1] | Redis 세션 폴백 강화 | Registry 폴백/로그 정리를 마쳐 sticky fallback 경로가 안정화 (docs/ops/distributed_routing_draft.md) |
+| P2 | Redis Pub/Sub 정합성 강화 | 룸 생성/잠금에 대한 분산 락, 초기 캐시 동기화 전략 추가 |
+| P2 | Sticky routing 통합 테스트 | 다중 서버·TTL 만료·Redis 장애 시나리오를 자동화 (`docs/ops/distributed_routing_draft.md`) |
+| P3 | 관측성 확장 | Load Balancer 측 메트릭(세션 수, 재할당, backend 상태) 노출 |
+| P3 | Gateway 인증 스켈레톤 | 토큰 검증, 세션 등록, 추후 로그인 서비스 연계 설계 (`docs/ops/distributed_routing_draft.md`) |
+
+이 문서는 기능 구현이 진행될 때마다 업데이트해야 하며, 변경 내역은 `docs/roadmap.md`와 연동해 추적한다.

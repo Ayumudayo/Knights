@@ -1,4 +1,5 @@
 #include <chrono>
+#include <unordered_map>
 
 #include <gtest/gtest.h>
 
@@ -27,13 +28,38 @@ public:
         last_value = value;
         last_ttl = ttl_sec;
         ++setex_calls;
+        store_[key] = value;
         return true;
     }
 
     bool del(const std::string& key) override {
         last_key = key;
         ++del_calls;
+        store_.erase(key);
         return true;
+    }
+
+    bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) override {
+        keys.clear();
+        std::string prefix = pattern;
+        auto wildcard = prefix.find('*');
+        if (wildcard != std::string::npos) {
+            prefix.resize(wildcard);
+        }
+        for (const auto& [k, _] : store_) {
+            if (k.rfind(prefix, 0) == 0) {
+                keys.push_back(k);
+            }
+        }
+        return true;
+    }
+
+    std::optional<std::string> get(const std::string& key) override {
+        auto it = store_.find(key);
+        if (it == store_.end()) {
+            return std::nullopt;
+        }
+        return it->second;
     }
 
     std::string last_key;
@@ -41,6 +67,9 @@ public:
     unsigned int last_ttl{0};
     std::size_t setex_calls{0};
     std::size_t del_calls{0};
+
+private:
+    std::unordered_map<std::string, std::string> store_;
 };
 
 } // namespace

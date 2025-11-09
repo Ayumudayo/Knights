@@ -1,56 +1,41 @@
 # Recent Room History on Join (Redis-backed)
 
-목표: 사용자가 방에 접속할 때 최근 채팅 20건을 빠르게 로드하여 표시하고, 순서/중복 문제를 방지하기 위해 스냅샷 완료 전까지 입력을 비활성화한다.
+목표: 사용자가 방에 접속할 때 최근 채팅 20건을 빠르게 로드해 표시하고, 순서/중복 문제를 예방하기 위해 스냅샷 완료 전까지 입력을 비활성화한다.
 
 ## 데이터 원천 및 키
-- SoR: Postgres(`messages` 테이블, `id`=bigserial, 시간/순서 기준) (tools/migrations/0001_init.sql:40)
+- SoR: Postgres(`messages` 테이블, `id`=bigserial, created_at/updated_at 기준)
 - Redis 캐시:
   - `room:{room_id}:recent` — LIST/ZSET of `message_id` (최신 → 오래된 순) (server/src/chat/handlers_chat.cpp:209)
-  - `msg:{message_id}` — JSON 직렬화된 메시지 본문(`id, room_id, user_id, content, created_at`) (TODO)
-  - TTL: `CACHE_TTL_RECENT_MSGS`(예: 1–6h) (TODO)
+  - `msg:{message_id}` — JSON `{ id, room_id, user_id, content, created_at_ms, sender_sid }`
+  - TTL: `CACHE_TTL_RECENT_MSGS` (기본 6h, 환경에 따라 1~24h 조정)
 
 ## 서버 알고리즘(Join 시)
-1) 워터마크 결정 (server/src/chat/chat_service_core.cpp:262)
-- `WM =` 현재 시점의 최고 메시지 id(가능하면 `MAX(id)`를 캐시하여 O(1)로 읽음) (server/src/chat/chat_service_core.cpp:262)
+1. **워터마크 계산**: `WM = MAX(messages.id)`를 캐시하거나 `room_last_id` 테이블에서 읽어온다. (server/src/chat/chat_service_core.cpp:262)
+2. **최근 ID 조회**: `LRANGE room:{room_id}:recent -RECENT_HISTORY_LIMIT -1` 또는 `ZREVRANGE`. 결과를 오름차순 정렬해 안정된 순서를 만든다.
+3. **본문 조회**: `MGET msg:{id}...` 혹은 pipeline `HGETALL`. 누락된 id는 Postgres에서 `SELECT ... WHERE room_id=? AND id IN (...)`로 로드한 뒤 Redis에 `SETEX msg:{id}`, `LPUSH/LTRIM`으로 보강한다.
+4. **스냅샷 생성**: `MSG_STATE_SNAPSHOT` payload에 `[messages...]`, `room_id`, `wm`을 채워 전송한다. (server/src/chat/chat_service_core.cpp:213)
+5. **브로드캐스트와의 연결**: 스냅샷 이후 도착하는 메시지 중 `id <= wm`은 중복이므로 서버·클라이언트에서 모두 드롭한다. `id > wm`만 신규로 표시한다.
+6. **캐시 쓰기 정책**: 새 메시지는 Postgres에 기록 후 Redis에 `LPUSH room:{room_id}:recent id`와 `LTRIM ... 0 ROOM_RECENT_MAXLEN-1`. 본문은 `SETEX msg:{id}`로 write-through 한다.
 
-2) Redis에서 최근 20개 id 조회 (TODO)
-- `LRANGE room:{room_id}:recent -20 -1` (또는 `ZREVRANGE` 기준) (TODO)
-- 결과 id 집합을 오름차순 정렬하여 안정된 순서 보장 (TODO)
+## 클라이언트(UI) 지침
+- 방 입장 요청 이후 스냅샷이 도착할 때까지 입력창/전송 버튼을 비활성화한다.
+- `snapshot_complete` 신호를 받으면 UI를 활성화하고, 내부적으로 `max_id`를 저장해 `id <= max_id` 메시지를 무시한다.
+- 스크롤을 최상단으로 고정하고, 사용자가 스크롤 업을 시도하면 서버에 추가 로드를 요청한다.
 
-3) 메시지 본문 조회 (TODO)
-- `MGET msg:{id}...` 또는 `pipeline HGETALL` (TODO)
-- 누락(gap) 발생 시 해당 id 범위를 Postgres에서 `SELECT ... WHERE room_id=? AND id IN (...)`로 로드 → Redis에 `SETEX msg:{id}` 및 `LPUSH/LTRIM`으로 캐시 보강 (TODO)
+## 장애 및 폴백
+- **Redis miss**: Postgres에서 `ORDER BY id DESC LIMIT RECENT_HISTORY_LIMIT`로 조회한 뒤 역정렬 해 전송하고, Redis 캐시를 재구축한다.
+- **Redis 과부하**: 최근 N(예: 10)건으로 축소하고 `CACHE_TTL_RECENT_MSGS`를 줄여 메모리 사용량을 제한한다.
+- **데이터 누락**: 브로드캐스트에서 gap이 감지되면 클라이언트가 `MSG_STATE_SNAPSHOT_REQ`를 재전송해 부분 스냅샷을 받도록 한다.
 
-4) 스냅샷 패킷 전송 (server/src/chat/chat_service_core.cpp:213)
-- 프로토콜: `MSG_STATE_SNAPSHOT`를 사용하거나, `MSG_ROOM_SNAPSHOT_BEGIN`/`MSG_ROOM_SNAPSHOT_END` 커맨드를 도입(문서 단계) (server/src/chat/chat_service_core.cpp:305)
-- 페이로드: `[messages...]`(id 오름차순), `room_id`, `wm`(워터마크) (TODO)
-
-5) 이후 도착 메시지 처리
-- 스냅샷 이후 브로드캐스트로 오는 메시지 중 `id <= wm`은 중복으로 간주하여 드랍(클라이언트/서버 한쪽에서 멱등 처리) (TODO)
-- `id > wm`만 신규로 표시 (TODO)
-
-6) 캐시 갱신(write-through)
-- 신규 메시지 수신 시 Redis에 `LPUSH room:{room_id}:recent id` 후 `LTRIM ... 0 199` 등으로 길이 제한 (server/src/chat/handlers_chat.cpp:209)
-- `SETEX msg:{id}`로 본문 캐시 (TODO)
-
-## 클라이언트(UI) 게이팅 (TODO)
-- 방 입장 요청 전송 후 즉시 입력창/보내기 버튼 비활성화 (TODO)
-- `snapshot_complete` 신호(스냅샷 패킷 수신 완료)까지 비활성화 유지 (TODO)
-- 중복 방지를 위해 클라이언트는 마지막 표시 `max_id`를 추적, `id <= max_id`는 무시 (TODO)
-
-## 장애/폴백 (TODO)
-- Redis 미스/장애: Postgres에서 최근 20건 쿼리(`ORDER BY id DESC LIMIT 20`) 후 역정렬하여 전송 → 선택적으로 Redis 캐시 재구축 (TODO)
-- 과부하 시: 최근 10건으로 축소, TTL 단축 (TODO)
-
-## 구성 값 (server/src/chat/chat_service_core.cpp:245)
-- `RECENT_HISTORY_LIMIT`(기본 20)
+## 운영 값
+- `RECENT_HISTORY_LIMIT` (기본 20)
 - `CACHE_TTL_RECENT_MSGS`
-- `ROOM_RECENT_MAXLEN`(예: 200) (server/src/chat/handlers_chat.cpp:210)
+- `ROOM_RECENT_MAXLEN` (기본 200)
 
-## 보안/프라이버시 (TODO)
-- 메시지 본문 JSON에 민감 정보 저장 금지. 필요 시 마스킹/검열 필터를 서버 측에서 먼저 적용 후 캐시 (TODO)
+## 보안/프라이버시
+- 메시지 JSON에는 민감 정보(비밀번호, 토큰)를 포함하지 않는다.
+- 필요 시 서버 측에서 마스킹/필터를 적용한 뒤 캐시에 적재한다.
 
-## 근거/트레이드오프
-- 장점: 빠른 체감 로딩, RDB 부하 감소 (TODO)
-- 단점: 캐시 일관성 관리 비용, 복구 시 Postgres 쿼리 필요 (TODO)
-
+## 장단점
+- **장점**: 빠른 체감 로딩, RDB 부하 감소.
+- **단점**: 캐시 일관성 관리 비용 증가, 복구 시 Postgres 쿼리 필요.

@@ -1,47 +1,47 @@
 # gateway_app
 
-`gateway/` 모듈은 클라이언트 TCP 연결을 수용하고 gRPC 스트림을 통해 Load Balancer와 바인딩하는 `gateway_app` 실행 파일을 제공합니다. Gateway는 Hive 기반 Listener/Connection을 사용하여 세션을 관리하고, 각 클라이언트별로 Load Balancer gRPC 스트림을 유지하면서 서버 인스턴스로 패킷을 전달합니다.
+`gateway/` 디렉터리는 Knights 개발 환경에서 TCP 클라이언트 연결을 수용하고 gRPC 스트림으로 Load Balancer와 통신하는 `gateway_app` 실행 파일을 관리한다. Boost.Asio 기반 `Hive`와 `GatewayConnection` 추상화를 사용해 다수의 클라이언트 세션을 유지하며, 세션마다 Load Balancer `Stream` RPC를 열어 backend 서버로 패킷을 전달한다.
 
-## 디렉터리 구조
-- `include/gateway/gateway_app.hpp` — Gateway 런타임과 gRPC 세션 관리자 정의
-- `include/gateway/gateway_connection.hpp` — 개별 TCP 연결 처리 및 wire 프로토콜 디코더
-- `include/gateway/auth/` — 인증 훅(현재는 스텁)
-- `src/gateway_app.cpp` — 환경 로드, Hive 초기화, gRPC 세션 관리 구현
-- `src/gateway_connection.cpp` — 클라이언트 I/O 처리, Load Balancer 스트림 연계
-- `src/main.cpp` — 엔트리 포인트
+## 디렉터리 구성
 ```text
 gateway/
 ├─ include/
 │  └─ gateway/
-│     ├─ auth/
-│     ├─ gateway_app.hpp
-│     └─ gateway_connection.hpp
-├─ src/
-│  ├─ gateway_app.cpp
-│  ├─ gateway_connection.cpp
-│  └─ main.cpp
+│     ├─ auth/                  # 인증 훅(현재는 NoopAuthenticator)
+│     ├─ gateway_app.hpp        # 앱 초기화 및 런타임 제어
+│     └─ gateway_connection.hpp # TCP 세션 처리
+└─ src/
+   ├─ gateway_app.cpp           # 환경 로딩, Hive/gRPC 클라이언트 초기화
+   ├─ gateway_connection.cpp    # 클라이언트 I/O 및 gRPC 라우팅
+   └─ main.cpp                  # 엔트리 포인트
 ```
 
+## 핵심 기능
+- **세션 관리**: `GatewayConnection`이 TCP read/write 루프를 유지하고 `/leave`와 같은 정상 종료 시 INFO 로그만 남도록 조정했다.
+- **gRPC 라우팅**: `gateway_lb.proto` 기반 `RouteMessage` 스트림을 사용해 Load Balancer와 양방향 통신한다.
+- **Heartbeat & Presence**: 게이트웨이 자체 Heartbeat는 아직 없지만, 서버가 Redis Presence를 활용할 때 `GATEWAY_ID`가 self-echo 필터에 사용된다.
+- **확장성**: `include/gateway/auth/` 하위에 토큰 검증 모듈을 삽입할 수 있는 인터페이스를 제공한다.
 
-## 주요 환경 변수
-| 변수 | 설명 | 기본값 |
+## 환경 변수
+| 이름 | 설명 | 기본값 |
 | --- | --- | --- |
-| `GATEWAY_LISTEN` | Gateway가 수신할 주소:포트 | `0.0.0.0:6000` |
-| `GATEWAY_ID` | Gateway 인스턴스 ID (Presence, 로깅 용도) | `gateway-default` |
-| `LB_GRPC_ENDPOINT` | 연결할 Load Balancer gRPC 주소 | `127.0.0.1:7001` |
+| `GATEWAY_LISTEN` | 클라이언트를 수용할 TCP 주소:포트 | `0.0.0.0:6000` |
+| `GATEWAY_ID` | 게이트웨이 인스턴스 식별자 (Presence·Pub/Sub self-echo 필터용) | `gateway-default` |
+| `LB_GRPC_ENDPOINT` | Load Balancer gRPC 엔드포인트 | `127.0.0.1:7001` |
+| `LB_GRPC_REQUIRED` | 1이면 LB 연결 실패 시 즉시 종료 | `0` |
+| `LB_RETRY_DELAY_MS` | LB 재연결 대기 시간(ms) | `3000` |
 
-필요 시 `.env` 파일을 실행 파일 옆 또는 리포지터리 루트에 배치하면 자동으로 로드됩니다.
+`.env` 파일 또는 프로세스 환경 변수에 값을 지정하면 부팅 시 자동으로 로드된다.
 
-## 빌드 & 실행
+## 빌드 및 실행
 ```powershell
 cmake --build build-msvc --target gateway_app
 .\build-msvc\gateway\Debug\gateway_app.exe
 ```
-Gateway를 실행하기 전에 Load Balancer(`load_balancer_app`)가 gRPC 포트를 열고 있어야 하며, `LB_GRPC_ENDPOINT`가 일치해야 합니다.
 
-## 런타임 동작
-- 새 TCP 세션이 생성되면 `GatewayConnection`이 wire 프로토콜을 파싱하고, 최초 HELLO 후 Load Balancer `Stream` RPC를 열어 경로를 협상합니다.
-- 클라이언트 종료 시 `/leave` 및 graceful shutdown을 수행하여 INFO 레벨 로그만 남기도록 설계되어 있습니다.
-- 향후 인증 로직은 `include/gateway/auth/` 하위 구현을 확장하여 삽입할 수 있습니다.
+Load Balancer(`load_balancer_app`)가 먼저 실행되어 있어야 하며, `LB_GRPC_ENDPOINT`가 해당 인스턴스를 가리키도록 설정해야 한다.
 
-세션 라우팅/에러 플로우는 `docs/server-architecture.md`의 Gateway 섹션과 `proto/gateway_lb.proto` 정의를 참고하세요.
+## 추가 참고 자료
+- gRPC 스키마: `proto/gateway_lb.proto`
+- 전체 플로우 문서: `docs/server-architecture.md`, `docs/ops/gateway-and-lb.md`
+- 다중 게이트웨이 구성 시 `GATEWAY_ID`를 인스턴스마다 고유하게 지정하고 Redis Pub/Sub 설정(`USE_REDIS_PUBSUB=1`)을 일치시켜야 한다.

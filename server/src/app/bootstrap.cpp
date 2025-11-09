@@ -49,6 +49,7 @@
 #include "server/core/storage/db_worker_pool.hpp"
 // 캐시/팬아웃: Redis 클라이언트(스켈레톤)
 #include "server/storage/redis/client.hpp"
+#include "server/state/instance_registry.hpp"
 // .env 로더
 #include "server/core/config/dotenv.hpp"
 
@@ -72,6 +73,10 @@ int run_server(int argc, char** argv) {
     core::concurrent::TaskScheduler scheduler;
     std::shared_ptr<asio::steady_timer> scheduler_timer;
     std::shared_ptr<core::storage::DbWorkerPool> db_workers;
+    std::shared_ptr<server::state::RedisInstanceStateBackend> registry_backend;
+    server::state::InstanceRecord registry_record{};
+    std::chrono::seconds registry_heartbeat_interval{std::chrono::seconds{5}};
+    bool registry_registered = false;
     try {
 #if defined(_WIN32)
         SetConsoleOutputCP(CP_UTF8);
@@ -140,6 +145,61 @@ int run_server(int argc, char** argv) {
         unsigned short port = 5000;
         if (argc >= 2) {
             port = static_cast<unsigned short>(std::stoi(argv[1]));
+        }
+
+        std::string advertise_host = "127.0.0.1";
+        if (const char* host_env = std::getenv("SERVER_ADVERTISE_HOST"); host_env && *host_env) {
+            advertise_host = host_env;
+        }
+        unsigned short advertise_port = port;
+        if (const char* port_env = std::getenv("SERVER_ADVERTISE_PORT"); port_env && *port_env) {
+            try {
+                advertise_port = static_cast<unsigned short>(std::stoul(port_env));
+            } catch (const std::exception& ex) {
+                corelog::warn(std::string("Invalid SERVER_ADVERTISE_PORT: ") + ex.what());
+            } catch (...) {
+                corelog::warn("Invalid SERVER_ADVERTISE_PORT value; using listen port");
+            }
+        }
+
+        if (const char* hb_env = std::getenv("SERVER_HEARTBEAT_INTERVAL"); hb_env && *hb_env) {
+            try {
+                auto parsed = std::stoul(hb_env);
+                if (parsed > 0) {
+                    registry_heartbeat_interval = std::chrono::seconds{static_cast<long long>(parsed)};
+                }
+            } catch (const std::exception& ex) {
+                corelog::warn(std::string("Invalid SERVER_HEARTBEAT_INTERVAL: ") + ex.what());
+            }
+        }
+
+        std::string registry_prefix = "gateway/instances";
+        if (const char* prefix_env = std::getenv("SERVER_REGISTRY_PREFIX"); prefix_env && *prefix_env) {
+            registry_prefix = prefix_env;
+        }
+        if (!registry_prefix.empty() && registry_prefix.back() != '/') {
+            registry_prefix.push_back('/');
+        }
+
+        std::chrono::seconds registry_ttl{std::chrono::seconds{30}};
+        if (const char* ttl_env = std::getenv("SERVER_REGISTRY_TTL"); ttl_env && *ttl_env) {
+            try {
+                auto parsed = std::stoul(ttl_env);
+                if (parsed > 0) {
+                    registry_ttl = std::chrono::seconds{static_cast<long long>(parsed)};
+                }
+            } catch (const std::exception& ex) {
+                corelog::warn(std::string("Invalid SERVER_REGISTRY_TTL: ") + ex.what());
+            }
+        }
+
+        std::string server_instance_id;
+        if (const char* id_env = std::getenv("SERVER_INSTANCE_ID"); id_env && *id_env) {
+            server_instance_id = id_env;
+        } else {
+            server_instance_id = "server-" + std::to_string(
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
         }
 
         asio::io_context io;
@@ -285,6 +345,35 @@ int run_server(int argc, char** argv) {
                     }
                 });
             }, std::chrono::seconds(60));
+            try {
+                auto registry_client = server::state::make_redis_state_client(redis);
+                registry_backend = std::make_shared<server::state::RedisInstanceStateBackend>(registry_client, registry_prefix, registry_ttl);
+                registry_record.instance_id = server_instance_id;
+                registry_record.host = advertise_host;
+                registry_record.port = advertise_port;
+                registry_record.role = "server";
+                registry_record.capacity = 0;
+                registry_record.active_sessions = 0;
+                registry_record.last_heartbeat_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()).count());
+                if (registry_backend->upsert(registry_record)) {
+                    registry_registered = true;
+                    corelog::info("Registered server instance id=" + registry_record.instance_id + " host=" + registry_record.host + ":" + std::to_string(registry_record.port));
+                } else {
+                    corelog::warn("Failed to register server instance in registry");
+                }
+            } catch (const std::exception& ex) {
+                corelog::warn(std::string("Failed to initialise server registry backend: ") + ex.what());
+            }
+            if (registry_registered) {
+                scheduler.schedule_every([registry_backend, registry_record, registry_heartbeat_interval]() mutable {
+                    registry_record.last_heartbeat_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::steady_clock::now().time_since_epoch()).count());
+                    if (!registry_backend->upsert(registry_record)) {
+                        corelog::warn("Server registry heartbeat upsert failed");
+                    }
+                }, registry_heartbeat_interval);
+            }
         }
 
         server::app::chat::ChatService chat(io, job_queue, db_pool, redis);
@@ -518,6 +607,16 @@ int run_server(int argc, char** argv) {
         asio::signal_set signals(io, SIGINT, SIGTERM);
         signals.async_wait([&](const boost::system::error_code&, int) {
             corelog::info("Shutdown signal received...");
+            if (registry_registered && registry_backend) {
+                try {
+                    registry_backend->remove(registry_record.instance_id);
+                } catch (const std::exception& ex) {
+                    corelog::warn(std::string("Failed to remove server registry entry during shutdown: ") + ex.what());
+                } catch (...) {
+                    corelog::warn("Failed to remove server registry entry during shutdown");
+                }
+                registry_registered = false;
+            }
             // Redis Pub/Sub 구독 중지(있다면)
             try { if (redis) { redis->stop_psubscribe(); } } catch (...) {}
             if (metrics_io) { try { metrics_io->stop(); } catch (...) {} }
@@ -533,6 +632,14 @@ int run_server(int argc, char** argv) {
             t.join();
         }
 
+        if (registry_registered && registry_backend) {
+            try {
+                registry_backend->remove(registry_record.instance_id);
+            } catch (...) {
+                corelog::warn("Failed to remove server registry entry on shutdown");
+            }
+            registry_registered = false;
+        }
         if (metrics_thread && metrics_thread->joinable()) metrics_thread->join();
         try { scheduler_timer->cancel(); } catch (...) {}
         scheduler.shutdown();

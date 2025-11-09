@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <string_view>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -58,6 +59,12 @@ private:
     void configure();
     void configure_backends(std::string_view list);
     void rebuild_hash_ring();
+    std::size_t set_backends(std::vector<BackendEndpoint> backends);
+    void schedule_backend_refresh();
+    void refresh_backends();
+    bool apply_backend_snapshot(std::vector<BackendEndpoint> candidates, std::string_view source);
+    std::vector<BackendEndpoint> make_backends_from_records(const std::vector<server::state::InstanceRecord>& records) const;
+    static bool backends_equal(const std::vector<BackendEndpoint>& lhs, const std::vector<BackendEndpoint>& rhs);
     bool is_backend_available(const BackendEndpoint& endpoint, std::chrono::steady_clock::time_point now);
     void mark_backend_success(const std::string& backend_id);
     void mark_backend_failure(const std::string& backend_id);
@@ -91,6 +98,11 @@ private:
     int grpc_selected_port_{0};
 
     std::string instance_id_;
+    std::vector<BackendEndpoint> static_backends_;
+    boost::asio::steady_timer backend_refresh_timer_;
+    std::chrono::seconds backend_refresh_interval_{std::chrono::seconds{5}};
+    std::string backend_registry_prefix_{"gateway/instances"};
+    bool dynamic_backends_active_{false};
     std::vector<BackendEndpoint> backends_;
     std::unordered_map<std::string, std::size_t> backend_index_map_;
     std::map<std::uint32_t, std::size_t> hash_ring_;

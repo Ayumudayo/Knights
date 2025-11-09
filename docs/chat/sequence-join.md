@@ -1,25 +1,24 @@
 # Sequence: Join → Snapshot → Fanout
 
-목표: 방 입장 시퀀스에서 스냅샷 로딩과 팬아웃 수신의 순서를 명확히 한다.
+목표: 룸 입장 과정에서 스냅샷을 먼저 적용하고, 이어지는 브로드캐스트 스트림과 자연스럽게 이어 붙여 중복/누락 없이 최신 상태를 제공한다.
 
-## 텍스트 시퀀스
-1) Client → Server: `JOIN_ROOM(room_id)` (server/src/chat/handlers_join.cpp:21)
-2) Server:
-   - Redis `LRANGE room:{room_id}:recent -20 -1` (TODO)
-   - 누락 시 Postgres 보강 쿼리 (server/src/chat/chat_service_core.cpp:282)
-   - `wm = current_max_message_id(room)` (server/src/chat/chat_service_core.cpp:262)
-3) Server → Client: `MSG_STATE_SNAPSHOT{room_id, wm, messages[asc]}` 또는 BEGIN/END 프로토콜 (server/src/chat/chat_service_core.cpp:213)
-4) Client: (TODO)
-   - 메시지 렌더링, `max_id = max(messages.id)` (TODO)
-   - `snapshot_complete` 처리 후 입력창 활성화 (TODO)
-5) Server ↔ Client: 이후 브로드캐스트 `MSG_CHAT_BROADCAST{id, ...}` (server/src/chat/handlers_chat.cpp:214)
-   - Client는 `id <= max(wm, max_id)` 무시 (TODO)
+## 단계별 흐름
+1. **Client → Server**: `JOIN_ROOM(room_id)` 요청 전송. (server/src/chat/handlers_join.cpp:21)
+2. **Server (Snapshot 준비)**:
+   - Redis `LRANGE room:{room_id}:recent -RECENT_HISTORY_LIMIT -1`로 최신 message_id 리스트 조회.
+   - 캐시 miss 시 Postgres에서 `SELECT ... ORDER BY id DESC LIMIT N`으로 보충하고 Redis에 write-back.
+   - `wm = current_max_message_id(room)`을 계산해 워터마크로 사용. (server/src/chat/chat_service_core.cpp:262)
+3. **Server → Client**: `MSG_STATE_SNAPSHOT{ room_id, wm, messages[asc] }` 전송 또는 BEGIN/END 프레이밍. (server/src/chat/chat_service_core.cpp:213)
+4. **Client 처리**:
+   - 메시지를 렌더링하고 `max_id = max(messages.id)`로 업데이트.
+   - `snapshot_complete` 이벤트를 받은 뒤 입력창/전송 버튼을 활성화한다.
+5. **Server → Client (Fanout)**: 이후 브로드캐스트 `MSG_CHAT_BROADCAST{id,...}`를 그대로 전달. 클라이언트는 `id <= max(wm, max_id)`인 메시지를 버린다. (server/src/chat/handlers_chat.cpp:214)
 
-## 장애 분기
-- Redis 장애: 2)에서 바로 Postgres로 쿼리 후 3) 진행. 캐시는 이후 배경에서 재구축 (TODO)
-- Postgres 장애: 에러로 종료(복구/재시도 안내). 캐시만으로는 정합 보장 불가 (TODO)
+## Redis / Postgres 폴백
+- Redis 장애 시 바로 Postgres에서 스냅샷을 구성한 뒤 Redis LIST/JSON을 재구축한다.
+- Postgres 장애 시 캐시에 남아 있는 메시지만 전송하고 브로드캐스트로 덮어쓰며, UI에는 “최근 기록 제한” 배지를 표시한다.
 
-## 메르메이드(참고용)
+## 시퀀스 다이어그램
 ```mermaid
 sequenceDiagram
   participant C as Client
@@ -28,13 +27,13 @@ sequenceDiagram
   participant P as Postgres
 
   C->>S: JOIN_ROOM(room)
-  S->>R: LRANGE room:recent -20 -1
+  S->>R: LRANGE room:recent -N -1
   alt cache miss
-    S->>P: SELECT last 20 by id desc
+    S->>P: SELECT last N by id desc
     P-->>S: rows
+    S->>R: LPUSH/LTRIM room:recent ids
   end
   S->>C: MSG_STATE_SNAPSHOT(room, wm, messages[])
   C->>C: render, set max_id, enable input
   S-->>C: MSG_CHAT_BROADCAST(id>wm)
 ```
-

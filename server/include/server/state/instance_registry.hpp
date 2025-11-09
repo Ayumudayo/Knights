@@ -7,6 +7,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 
@@ -51,6 +52,7 @@ private:
 
 namespace detail {
 std::string serialize_json(const InstanceRecord& record);
+std::optional<InstanceRecord> deserialize_json(std::string_view payload);
 } // namespace detail
 
 class RedisInstanceStateBackend final : public IInstanceStateBackend {
@@ -59,6 +61,8 @@ public:
     public:
         virtual ~IRedisClient() = default;
         virtual bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) = 0;
+        virtual bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) = 0;
+        virtual std::optional<std::string> get(const std::string& key) = 0;
         virtual bool del(const std::string& key) = 0;
     };
 
@@ -72,13 +76,14 @@ public:
     std::vector<InstanceRecord> list_instances() const override;
 
 private:
+    bool reload_cache_from_backend() const;
     bool write_record(const InstanceRecord& record);
 
     std::shared_ptr<IRedisClient> client_;
     std::string key_prefix_;
     std::chrono::seconds ttl_;
     mutable std::mutex mutex_;
-    std::unordered_map<std::string, InstanceRecord> cache_;
+    mutable std::unordered_map<std::string, InstanceRecord> cache_;
 };
 
 class ConsulInstanceStateBackend final : public IInstanceStateBackend {
