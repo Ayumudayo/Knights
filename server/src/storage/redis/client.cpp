@@ -301,6 +301,19 @@ public:
             return false;
         }
     }
+    bool lrange(const std::string& key, long long start, long long stop, std::vector<std::string>& out) override {
+        try {
+            out.clear();
+            redis_->lrange(key, start, stop, std::back_inserter(out));
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis LRANGE failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis LRANGE failed: unknown");
+            return false;
+        }
+    }
     bool scan_del(const std::string& pattern) override {
         try {
             long long cursor = 0;
@@ -369,6 +382,7 @@ public:
     bool set_if_equals(const std::string& key, const std::string& expected, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)expected; (void)value; (void)ttl_sec; return true; }
     bool del_if_equals(const std::string& key, const std::string& expected) override { (void)key; (void)expected; return true; }
     bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) override { (void)pattern; keys.clear(); return true; }
+    bool lrange(const std::string& key, long long start, long long stop, std::vector<std::string>& out) override { (void)key; (void)start; (void)stop; out.clear(); return true; }
     bool scan_del(const std::string& pattern) override { (void)pattern; return true; }
     bool xpending(const std::string& key, const std::string& group, long long& total) override { (void)key; (void)group; total = 0; return true; }
 private:

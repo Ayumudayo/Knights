@@ -28,6 +28,7 @@ public:
     virtual bool set_if_equals(const std::string& key, const std::string& expected, const std::string& value, unsigned int ttl_sec) = 0;
     virtual bool del_if_equals(const std::string& key, const std::string& expected) = 0;
     virtual bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) = 0;
+    virtual bool lrange(const std::string& key, long long start, long long stop, std::vector<std::string>& out) = 0;
     // 패턴 스캔 후 일괄 삭제(naive): SCAN pattern -> DEL
     virtual bool scan_del(const std::string& pattern) = 0;
     // TTL을 가진 키 설정(초 단위)

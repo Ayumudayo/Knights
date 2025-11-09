@@ -11,6 +11,7 @@
 #include "server/core/storage/repositories.hpp"
 #include "server/storage/redis/client.hpp"
 
+#include <algorithm>
 #include <array>
 #include <cstdlib>
 #include <sstream>
@@ -63,6 +64,50 @@ ChatService::ChatService(boost::asio::io_context& io,
     }
     if (const char* prefix = std::getenv("REDIS_CHANNEL_PREFIX"); prefix && *prefix) {
         presence_.prefix = prefix;
+    }
+    const auto read_env = [](const char* primary, const char* secondary = nullptr) -> const char* {
+        if (primary) {
+            if (const char* value = std::getenv(primary); value && *value) {
+                return value;
+            }
+        }
+        if (secondary) {
+            if (const char* value = std::getenv(secondary); value && *value) {
+                return value;
+            }
+        }
+        return nullptr;
+    };
+    if (const char* limit_env = read_env("RECENT_HISTORY_LIMIT", "SNAPSHOT_RECENT_LIMIT")) {
+        char* end = nullptr;
+        unsigned long value = std::strtoul(limit_env, &end, 10);
+        if (limit_env != end && value >= 5 && value <= 2000) {
+            history_.recent_limit = static_cast<std::size_t>(value);
+        }
+    }
+    if (const char* maxlen_env = std::getenv("ROOM_RECENT_MAXLEN"); maxlen_env && *maxlen_env) {
+        char* end = nullptr;
+        unsigned long value = std::strtoul(maxlen_env, &end, 10);
+        if (maxlen_env != end && value >= history_.recent_limit && value <= 5000) {
+            history_.max_list_len = static_cast<std::size_t>(value);
+        }
+    }
+    if (const char* ttl_env = std::getenv("CACHE_TTL_RECENT_MSGS"); ttl_env && *ttl_env) {
+        char* end = nullptr;
+        unsigned long value = std::strtoul(ttl_env, &end, 10);
+        if (ttl_env != end && value >= 60 && value <= 604800) {
+            history_.cache_ttl_sec = static_cast<unsigned int>(value);
+        }
+    }
+    if (const char* fetch_env = read_env("RECENT_HISTORY_FETCH_FACTOR", "SNAPSHOT_FETCH_FACTOR")) {
+        char* end = nullptr;
+        unsigned long value = std::strtoul(fetch_env, &end, 10);
+        if (fetch_env != end && value >= 1 && value <= 10) {
+            history_.fetch_factor = static_cast<std::size_t>(value);
+        }
+    }
+    if (history_.max_list_len < history_.recent_limit) {
+        history_.max_list_len = history_.recent_limit;
     }
     if (write_behind_.enabled) {
         corelog::info(std::string("Write-behind enabled: stream=") + write_behind_.stream_key +
@@ -314,28 +359,52 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
             }
         }
     }
-    // DB에서 최근 메시지를 불러온다.
-    if (db_pool_) {
+    // 최근 메시지를 Redis에서 우선 조회하고 필요 시 DB로 폴백한다.
+    std::string rid;
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        auto it = state_.room_ids.find(current);
+        if (it != state_.room_ids.end()) {
+            rid = it->second;
+        }
+    }
+    if (rid.empty() && db_pool_) {
+        rid = ensure_room_id_ci(current);
+    }
+
+    bool loaded_from_cache = false;
+    if (redis_ && !rid.empty()) {
+        std::vector<server::wire::v1::StateSnapshot::SnapshotMessage> cached;
+        if (load_recent_messages_from_cache(rid, cached)) {
+            for (auto& message : cached) {
+                auto* sm = pb.add_messages();
+                *sm = message;
+            }
+            loaded_from_cache = true;
+        }
+    }
+
+    if (db_pool_ && !rid.empty()) {
         try {
-            std::string rid = ensure_room_id_ci(current);
-            if (!rid.empty()) {
-                // 환경 변수로 최대 개수를 제한한다.
-                std::size_t limit = 20; if (const char* v = std::getenv("SNAPSHOT_RECENT_LIMIT")) { unsigned long n = std::strtoul(v, nullptr, 10); if (n >= 5 && n <= 200) limit = static_cast<std::size_t>(n); }
-                std::size_t fetch_factor = 3; if (const char* v = std::getenv("SNAPSHOT_FETCH_FACTOR")) { unsigned long n = std::strtoul(v, nullptr, 10); if (n >= 1 && n <= 10) fetch_factor = static_cast<std::size_t>(n); }
+            std::string uid;
+            {
+                std::lock_guard<std::mutex> lk(state_.mu);
+                auto itu = state_.user_uuid.find(&s);
+                if (itu != state_.user_uuid.end()) uid = itu->second;
+            }
 
-                std::string uid;
-                {
-                    std::lock_guard<std::mutex> lk(state_.mu);
-                    auto itu = state_.user_uuid.find(&s);
-                    if (itu != state_.user_uuid.end()) uid = itu->second;
-                }
+            auto uow = db_pool_->make_unit_of_work();
+            std::uint64_t last_seen = 0;
+            if (!uid.empty()) {
+                auto opt = uow->memberships().get_last_seen(uid, rid);
+                last_seen = opt.value_or(0);
+            }
+            pb.set_last_seen_id(last_seen);
 
-                auto uow = db_pool_->make_unit_of_work();
-                std::uint64_t last_seen = 0;
-                if (!uid.empty()) {
-                    auto opt = uow->memberships().get_last_seen(uid, rid);
-                    last_seen = opt.value_or(0);
-                }
+            if (!loaded_from_cache) {
+                const std::size_t limit = history_.recent_limit;
+                const std::size_t fetch_factor = history_.fetch_factor;
+                const std::size_t fetch_count = std::min(history_.max_list_len, limit * fetch_factor);
 
                 auto last_id = uow->messages().get_last_id(rid);
                 std::uint64_t since_id = 0;
@@ -343,10 +412,8 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                     if (last_seen == 0) {
                         since_id = (last_id > limit) ? (last_id - limit) : 0;
                     } else if (last_seen >= last_id) {
-                        // 모든 메시지를 이미 읽었다면 최신 limit개만 반환한다.
                         since_id = (last_id > limit) ? (last_id - limit) : 0;
                     } else {
-                        // 일부 미읽음이 남아 있다면 컨텍스트를 포함해 제한 배수만큼 조회한다.
                         std::uint64_t context = static_cast<std::uint64_t>(limit) * static_cast<std::uint64_t>(fetch_factor);
                         if (last_id > context) {
                             std::uint64_t cut = last_id - context;
@@ -357,8 +424,7 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                     }
                 }
 
-                auto msgs = uow->messages().fetch_recent_by_room(rid, since_id, static_cast<std::size_t>(limit * fetch_factor));
-                // 응답에는 필요한 만큼만(마지막 limit개) 포함한다.
+                auto msgs = uow->messages().fetch_recent_by_room(rid, since_id, fetch_count ? fetch_count : limit);
                 if (msgs.size() > limit) {
                     msgs.erase(msgs.begin(), msgs.end() - static_cast<std::ptrdiff_t>(limit));
                 }
@@ -367,15 +433,18 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                     sm->set_id(m.id);
                     std::string sender;
                     if (m.user_name && !m.user_name->empty()) sender = *m.user_name;
-                    else sender = std::string("(system)");
+                    else sender = std::string('(system)');
                     sm->set_sender(sender);
                     sm->set_text(m.content);
                     sm->set_ts_ms(static_cast<std::uint64_t>(m.created_at_ms));
+                    if (redis_) {
+                        cache_recent_message(rid, *sm);
+                    }
                 }
-                pb.set_last_seen_id(last_seen);
             }
         } catch (...) {}
     }
+
     {
         std::string bytes; pb.SerializeToString(&bytes);
         body.assign(bytes.begin(), bytes.end());
@@ -576,6 +645,74 @@ std::string ChatService::ensure_room_id_ci(const std::string& room_name) {
         corelog::error(std::string("ensure_room_id_ci failed: ") + e.what());
         return std::string();
     }
+}
+
+
+std::string ChatService::make_recent_list_key(const std::string& room_id) const {
+    return std::string("room:") + room_id + ":recent";
+}
+
+std::string ChatService::make_recent_message_key(std::uint64_t message_id) const {
+    return std::string("msg:") + std::to_string(message_id);
+}
+
+bool ChatService::cache_recent_message(
+    const std::string& room_id,
+    const server::wire::v1::StateSnapshot::SnapshotMessage& message) {
+    if (!redis_ || room_id.empty() || message.id() == 0) {
+        return false;
+    }
+    std::string payload;
+    if (!message.SerializeToString(&payload)) {
+        return false;
+    }
+    if (!redis_->setex(make_recent_message_key(message.id()), payload, history_.cache_ttl_sec)) {
+        return false;
+    }
+    return redis_->lpush_trim(make_recent_list_key(room_id),
+                              std::to_string(message.id()),
+                              history_.max_list_len);
+}
+
+bool ChatService::load_recent_messages_from_cache(
+    const std::string& room_id,
+    std::vector<server::wire::v1::StateSnapshot::SnapshotMessage>& out) {
+    if (!redis_ || room_id.empty() || history_.recent_limit == 0) {
+        return false;
+    }
+    std::vector<std::string> ids;
+    const long long start = -static_cast<long long>(history_.recent_limit);
+    if (!redis_->lrange(make_recent_list_key(room_id), start, -1, ids)) {
+        return false;
+    }
+    if (ids.empty()) {
+        return false;
+    }
+    std::vector<server::wire::v1::StateSnapshot::SnapshotMessage> parsed;
+    parsed.reserve(ids.size());
+    for (const auto& id_str : ids) {
+        char* endptr = nullptr;
+        auto value = std::strtoull(id_str.c_str(), &endptr, 10);
+        if (endptr == id_str.c_str() || value == 0) {
+            corelog::warn("recent history cache miss: invalid id entry=" + id_str);
+            return false;
+        }
+        auto payload = redis_->get(make_recent_message_key(value));
+        if (!payload) {
+            return false;
+        }
+        server::wire::v1::StateSnapshot::SnapshotMessage message;
+        if (!message.ParseFromString(*payload)) {
+            corelog::warn("recent history cache miss: corrupted payload");
+            return false;
+        }
+        parsed.emplace_back(std::move(message));
+    }
+    if (parsed.empty()) {
+        return false;
+    }
+    out = std::move(parsed);
+    return true;
 }
 
 } // namespace server::app::chat

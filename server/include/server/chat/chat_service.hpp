@@ -15,6 +15,7 @@
 
 #include "server/core/net/session.hpp"
 #include "server/core/protocol/opcodes.hpp"
+#include "wire.pb.h"
 
 namespace server::core { class JobQueue; }
 namespace server::core::storage { class IConnectionPool; }
@@ -85,6 +86,12 @@ private:
 
     WriteBehindConfig write_behind_;
     PresenceConfig presence_{};
+    struct HistoryConfig {
+        std::size_t recent_limit{20};
+        std::size_t max_list_len{200};
+        std::size_t fetch_factor{3};
+        unsigned int cache_ttl_sec{6 * 60 * 60};
+    } history_;
 
     bool write_behind_enabled() const;
     std::string generate_uuid_v4();
@@ -106,6 +113,12 @@ private:
     std::string hash_room_password(const std::string& password);
     void send_whisper_result(Session& s, bool ok, const std::string& reason);
     std::string ensure_room_id_ci(const std::string& room_name);
+    std::string make_recent_list_key(const std::string& room_id) const;
+    std::string make_recent_message_key(std::uint64_t message_id) const;
+    bool cache_recent_message(const std::string& room_id,
+                              const server::wire::v1::StateSnapshot::SnapshotMessage& message);
+    bool load_recent_messages_from_cache(const std::string& room_id,
+                                         std::vector<server::wire::v1::StateSnapshot::SnapshotMessage>& out);
 
     static void collect_room_sessions(RoomSet& set, std::vector<std::shared_ptr<Session>>& out);
     unsigned int presence_ttl() const;

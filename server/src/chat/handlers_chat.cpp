@@ -185,15 +185,13 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             }
         }
         if (redis_ && !persisted_room_id.empty() && persisted_msg_id != 0) {
-            // Redis에는 최근 메시지를 단순 JSON 문자열 형태로 적재한다.
-            std::string json = std::string("{") +
-                "\"id\":" + std::to_string(persisted_msg_id) + "," +
-                "\"sender\":\"" + sender + "\"," +
-                "\"text\":\"" + text + "\"," +
-                "\"ts_ms\":" + std::to_string(now64) + "}";
-            std::string key = std::string("room:") + persisted_room_id + ":recent";
-            if (!redis_->lpush_trim(key, json, 200)) {
-                corelog::warn(std::string("Redis update failed for key=") + key);
+            server::wire::v1::StateSnapshot::SnapshotMessage snapshot_msg;
+            snapshot_msg.set_id(persisted_msg_id);
+            snapshot_msg.set_sender(sender);
+            snapshot_msg.set_text(text);
+            snapshot_msg.set_ts_ms(static_cast<std::uint64_t>(now64));
+            if (!cache_recent_message(persisted_room_id, snapshot_msg)) {
+                corelog::warn(std::string("Redis recent history update failed for room_id=") + persisted_room_id);
             }
         }
         if (targets.empty()) { 
