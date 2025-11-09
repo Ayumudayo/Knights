@@ -21,6 +21,7 @@
   - [ ] `wb_dlq_total` 증가 추이(원인: DB 스키마/제약/네트워크 문제) (tools/wb_worker/main.cpp:139)
 - 시스템/기반
   - [ ] Redis ping p95 > 20ms, Postgres 쿼리 지연 p95 > 50ms (5m) (TODO)
+  - [ ] Load Balancer: `sum(increase(lb_backend_idle_close_total[5m]))` > 5 (gateway-backend ���� ���� ���·� ����)
 
 ## 장애 대응(요약)
 - Redis 장애/과부하
@@ -36,3 +37,5 @@
 - [ ] 로그: `metric=*` 키=값 라인 수집 정상 (server/src/app/bootstrap.cpp:203)
 - [ ] Redis 키/채널 접두사 충돌 없음, Streams MAXLEN 정책 확인
 - [ ] DB 마이그레이션 상태 최신
+
+

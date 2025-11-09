@@ -1391,6 +1391,63 @@
           "refId": "A"
         }
       ]
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "LB Idle Close Rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 72
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum(increase(lb_backend_idle_close_total[5m]))",
+          "legendFormat": "close rate (5m)",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "lb_backend_idle_close_total",
+          "legendFormat": "cumulative",
+          "range": true,
+          "refId": "B"
+        }
+      ]
     }
   ],
   "refresh": "10s",

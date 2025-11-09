@@ -30,6 +30,7 @@
 - 룸 단위: `msgs_per_sec`, 멤버 수, fanout 지연 분포
 - 분산 브로드캐스트: `publish_total`, `subscribe_total`, `subscribe_lag_ms`, `duplicates_dropped_total`, `self_echo_drop_total` (server/src/app/bootstrap.cpp:203, server/src/app/bootstrap.cpp:197, server/src/app/bootstrap.cpp:181)
   - 현재 구현된 최소 로그: `metric=publish_total value=<n> room=<name>`, `metric=subscribe_total value=<n> room=<name>`, `metric=self_echo_drop_total value=<n>`, `metric=subscribe_lag_ms value=<ms> room=<name>` (server/src/app/bootstrap.cpp:203, server/src/app/bootstrap.cpp:197, server/src/app/bootstrap.cpp:181)
+- Load Balancer : `lb_backend_idle_close_total` (Counter)�� `metric=lb_backend_idle_close_total value=<n>` �α׸� load_balancer/src/load_balancer_app.cpp:819���� ������, Prometheus���� `sum(increase(lb_backend_idle_close_total[5m]))` ��쿡 gateway-backend ������� �����ϴ��� Ȯ���Ѵ�.
 
 ## 수집/표시
 - Prometheus pull 수집, Grafana 대시보드 구성
@@ -99,3 +100,5 @@
   - 리소스: `Job Queue Depth`, `Memory Pool Usage`
   - 분포/기타: `Frame Payload Size (bytes)`, `Frame Payload Volume (/s)`, `Dispatch Opcode Totals`(테이블)
 - JSON을 수정했을 경우 Grafana 인스턴스를 재시작하거나 대시보드를 재import해야 반영됩니다.
+
+
