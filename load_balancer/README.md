@@ -50,6 +50,6 @@ load_balancer/
 ## 빌드 & 실행
 ```powershell
 cmake --build build-msvc --target load_balancer_app
-.uild-msvc\load_balancer\Debug\load_balancer_app.exe
+.\build-msvc\load_balancer\Debug\load_balancer_app.exe
 ```
 Gateway 와 server_app 이 정상 동작 중이어야 하며, Redis/Registry 설정은 `docs/ops/gateway-and-lb.md` 를 참고하세요.

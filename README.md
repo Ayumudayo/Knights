@@ -60,6 +60,3 @@ ctest --test-dir build-msvc/tests
 scripts/run_all.ps1 -Config Debug -WithClient -Smoke
 `
 CI에서는 위 스크립트를 그대로 호출하거나 GitHub Actions에서 preset을 사용합니다.
-
-## 기여
-PR/Issue 를 환영합니다! 코딩 규칙과 리뷰 절차는 docs/CONTRIBUTING.md(또는 리포지터리 위키)에 정리되어 있습니다. 버그를 제보할 때는 최소 재현 단계, 로그(metric=* 라인), 환경 정보를 함께 남겨 주세요.
