@@ -18,7 +18,7 @@
 - 서버만 실행: `scripts/build.ps1 -UseVcpkg -Run server -Port 5000` (scripts/build.ps1:152)
 - 클라만 실행: `scripts/build.ps1 -UseVcpkg -Run client -Port 5000` (scripts/build.ps1:160)
 - 메모
-  - 스크립트는 `vcpkg.json`을 감지하면 toolchain을 자동 지정하고, 필요 시 `builtin-baseline`을 주입한 뒤 `vcpkg install`을 실행합니다.
+- manifest 모드만 자동 설정되며 toolchain만 지정된다. 의존성 설치(`vcpkg install --triplet <...>`)는 `scripts/bootstrap_vcpkg.ps1`로 수동 실행하거나 직접 명령을 수행한다.
   - MSVC+vcpkg 환경에서 런타임 불일치를 피하기 위해 `RelWithDebInfo` 요청 시 자동으로 `Debug` 구성으로 빌드합니다.
 
 ### Linux/WSL
@@ -65,6 +65,25 @@ cmake --build build --config RelWithDebInfo -j
 - 스모크: `scripts/smoke_wb.ps1`
 - 메트릭: `METRICS_PORT` 설정 시 `curl http://127.0.0.1:9090/metrics`
 
+## 릴리즈 번들 생성
+- PowerShell(Windows)
+  ```powershell
+  scripts/build.ps1 -Config Release -Target server_app `
+    -ReleasePackage -ReleaseZip `
+    -ReleaseOutput artifacts `
+    -ReleaseTargets server_app,gateway_app,load_balancer_app,dev_chat_cli
+  ```
+  - `artifacts/release-Release/`에 실행 파일과 README가 복사되고 `-ReleaseZip`을 켜면 동일 경로에 `.zip` 파일이 생성된다.
+  - `-ReleaseTargets`는 쉼표 목록 또는 PowerShell 배열(@('server_app','wb_worker'))로 지정할 수 있다.
+- Linux/WSL
+  ```bash
+  scripts/build.sh -c Release -r all \
+    -R artifacts \
+    -L "server_app,gateway_app,load_balancer_app" \
+    -z artifacts/release-linux.tar.gz
+  ```
+  - `-R`은 복사 대상 디렉터리를 지정하고, `-z`는 동일 내용을 tar.gz로 압축한다.
+  - `-L`을 생략하면 기본(`server_app,gateway_app,load_balancer_app,dev_chat_cli,wb_worker`)이 사용된다.
 ## 설치(옵션)
 ```
 cmake --install build-msvc --config Debug --prefix "C:/server-core-sdk"  # Windows 예시

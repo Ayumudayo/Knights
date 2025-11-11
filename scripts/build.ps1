@@ -13,12 +13,15 @@ param(
   [string]$Target = "",
   [switch]$Clean,
   [string]$InstallPrefix = "",
-[ValidateSet('none','server','client','both')]
-[string]$Run = 'none',
+  [ValidateSet('none','server','client','both')]
+  [string]$Run = 'none',
   [int]$Port = 5000,
   [switch]$UseVcpkg,
   [string]$VcpkgTriplet = "",
-  [switch]$NoVcpkgAutoInstall
+  [switch]$ReleasePackage,
+  [string]$ReleaseOutput = "artifacts",
+  [string[]]$ReleaseTargets = @('server_app','gateway_app','load_balancer_app','dev_chat_cli','wb_worker'),
+  [switch]$ReleaseZip
 )
 
 $ErrorActionPreference = 'Stop'
@@ -35,6 +38,36 @@ try {
 function Info($msg){ Write-Host "[info] $msg" -ForegroundColor Cyan }
 function Warn($msg){ Write-Host "[warn] $msg" -ForegroundColor Yellow }
 function Fail($msg){ Write-Host "[fail] $msg" -ForegroundColor Red; exit 1 }
+
+function Ensure-Directory([string]$Path) {
+  if (-not $Path -or $Path -eq '') { return (Resolve-Path '.').Path }
+  if (-not (Test-Path $Path)) { New-Item -ItemType Directory -Path $Path -Force | Out-Null }
+  return (Resolve-Path $Path).Path
+}
+
+function Resolve-BinaryPath([string]$Name, [bool]$IsWindows) {
+  if (-not $Name -or $Name -eq '') { return $null }
+  $ext = $IsWindows ? '.exe' : ''
+  $candidates = @(
+    (Join-Path $BuildDir "$Name$ext"),
+    (Join-Path $BuildDir (Join-Path $Config "$Name$ext"))
+  )
+  foreach ($sub in @('server','gateway','load_balancer','devclient','tools','wb')) {
+    $candidates += (Join-Path $BuildDir (Join-Path $sub "$Name$ext"))
+    $candidates += (Join-Path $BuildDir (Join-Path $sub (Join-Path $Config "$Name$ext")))
+  }
+  foreach ($candidate in $candidates) {
+    if ($candidate -and (Test-Path $candidate)) { return (Resolve-Path $candidate).Path }
+  }
+  try {
+    $filter = "*$Name$ext"
+    $found = Get-ChildItem -Path $BuildDir -Recurse -File -Filter $filter -ErrorAction SilentlyContinue |
+             Sort-Object LastWriteTime -Descending |
+             Select-Object -First 1
+    if ($found) { return $found.FullName }
+  } catch {}
+  return $null
+}
 
 $onWindows = $false
 try { if ($IsWindows) { $onWindows = $true } } catch { }
@@ -91,37 +124,6 @@ if ($UseVcpkg -or $vcpkgJsonExists -or ($vcpkgRoot -and (Test-Path $vcpkgRoot)))
     $prefix = Join-Path (Resolve-Path .) "vcpkg_installed/$VcpkgTriplet"
     if (Test-Path $prefix) { $cmakeArgs += @("-DCMAKE_PREFIX_PATH=$prefix") }
   } catch {}
-  # 매니페스트가 있으면 사전 설치(선택)
-  if ($vcpkgJsonExists -and -not $NoVcpkgAutoInstall) {
-    $exe = Join-Path $vcpkgRoot $(if ($onWindows) { 'vcpkg.exe' } else { 'vcpkg' })
-    if (Test-Path $exe) {
-      # builtin-baseline이 없으면 자동 갱신 시도
-      $manifest = Get-Content -Raw -ErrorAction SilentlyContinue 'vcpkg.json'
-      if ($manifest -and ($manifest -notmatch 'builtin-baseline')) {
-        Info "vcpkg builtin-baseline 자동 설정 시도(git 원격 HEAD)"
-        $baseline = ''
-        try {
-          $ls = git ls-remote https://github.com/microsoft/vcpkg HEAD 2>$null
-          if ($ls) { $baseline = ($ls -split "\s+")[0] }
-        } catch {}
-        if ($baseline -and $baseline.Length -ge 8) {
-          try {
-            $json = Get-Content -Raw 'vcpkg.json' | ConvertFrom-Json
-            $json | Add-Member -NotePropertyName 'builtin-baseline' -NotePropertyValue $baseline -Force
-            ($json | ConvertTo-Json -Depth 5) | Set-Content -Encoding UTF8 'vcpkg.json'
-            Info "builtin-baseline=$baseline 적용"
-          } catch {
-            Warn "vcpkg.json 수정 실패: $_"
-          }
-        } else {
-          Warn "원격 baseline 해시를 가져오지 못했습니다. 수동으로 vcpkg.json에 'builtin-baseline'을 추가하세요."
-        }
-      }
-      Info "vcpkg 의존성 설치: $VcpkgTriplet"
-      & $exe install --triplet $VcpkgTriplet
-      if ($LASTEXITCODE -ne 0) { Fail "vcpkg 설치 실패" }
-    } else { Warn "vcpkg 실행 파일을 찾지 못했습니다: $exe" }
-  }
 }
 
 # Windows/MSVC + vcpkg + FTXUI: 일부 패키지가 RelWithDebInfo 매핑을 제공하지 않아 Debug 런타임과의 링크 충돌이 있을 수 있음
@@ -145,6 +147,35 @@ if ($InstallPrefix -and $InstallPrefix -ne '') {
   Info "설치 중... ($InstallPrefix)"
   & cmake --install $BuildDir --config $Config --prefix $InstallPrefix
   if ($LASTEXITCODE -ne 0) { Fail "설치 실패" }
+}
+
+if ($ReleasePackage) {
+  $releaseRoot = Ensure-Directory $ReleaseOutput
+  $releaseDirName = "release-$Config"
+  $releaseDir = Join-Path $releaseRoot $releaseDirName
+  if (Test-Path $releaseDir) { Remove-Item -Recurse -Force $releaseDir }
+  New-Item -ItemType Directory -Path $releaseDir | Out-Null
+  $uniqueTargets = $ReleaseTargets | Where-Object { $_ -and $_.Trim() -ne '' } | Select-Object -Unique
+  foreach ($name in $uniqueTargets) {
+    $binary = Resolve-BinaryPath $name $onWindows
+    if (-not $binary) {
+      Warn "release bundle 대상 바이너리를 찾을 수 없습니다: $name"
+      continue
+    }
+    $dest = Join-Path $releaseDir (Split-Path $binary -Leaf)
+    Copy-Item -Path $binary -Destination $dest -Force
+  }
+  if (Test-Path 'README.md') {
+    Copy-Item -Path 'README.md' -Destination (Join-Path $releaseDir 'README.md') -Force
+  }
+  if ($ReleaseZip) {
+    $zipPath = "$releaseDir.zip"
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zipPath
+    Info "release archive 생성: $zipPath"
+  } else {
+    Info "release bundle 생성: $releaseDir"
+  }
 }
 
 if ($Run -ne 'none') {
