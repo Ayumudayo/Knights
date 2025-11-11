@@ -6,9 +6,7 @@ add_executable(load_balancer_app
 )
 
 target_include_directories(load_balancer_app PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/include
     ${CMAKE_SOURCE_DIR}/load_balancer/include
-    ${CMAKE_SOURCE_DIR}/server/include
     ${CMAKE_BINARY_DIR}/proto
 )
 

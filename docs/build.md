@@ -27,6 +27,27 @@ sudo apt-get update && sudo apt-get install -y build-essential cmake
 # vcpkg 설치 후 VCPKG_ROOT 지정
 export VCPKG_ROOT=$HOME/vcpkg
 pwsh scripts/build.ps1 -UseVcpkg -Config Debug
+
+## 모듈 선택 빌드
+루트 `CMakeLists.txt`는 각 모듈을 개별 옵션으로 제어한다. 기본값은 모두 ON이며 필요한 컴포넌트만 선택해 빌드할 수 있다.
+
+| 옵션 | 기본 | 설명 |
+| --- | --- | --- |
+| `-DBUILD_SERVER_STACK=` | `ON` | `server/` 하위 라이브러리와 `server_app` 실행 파일. Load Balancer 및 write-behind 도구는 이 옵션이 켜져 있어야 한다 |
+| `-DBUILD_GATEWAY_APP=` | `ON` | `gateway_app` 빌드 여부 |
+| `-DBUILD_LOAD_BALANCER_APP=` | `ON` | `load_balancer_app` 빌드 여부 (`BUILD_SERVER_STACK` 필요) |
+| `-DBUILD_DEVCLIENT_APP=` | `ON` | FTXUI 기반 CLI(`dev_chat_cli`) 빌드 여부 |
+| `-DBUILD_WRITE_BEHIND_TOOLS=` | `ON` | `wb_worker`, `wb_emit`, `wb_dlq_replayer`, `wb_check` 빌드 여부 (`BUILD_SERVER_STACK` 필요) |
+| `-DBUILD_SERVER_TESTS=` | `ON` | `tests/` 하위 타깃 빌드 여부 |
+
+예시:
+```powershell
+cmake -S . -B build-core -DBUILD_GATEWAY_APP=OFF -DBUILD_LOAD_BALANCER_APP=OFF `
+  -DBUILD_DEVCLIENT_APP=OFF -DBUILD_WRITE_BEHIND_TOOLS=OFF -DBUILD_SERVER_TESTS=OFF
+cmake --build build-core --target server_core
+```
+Load Balancer만 확인하고 싶다면 `-DBUILD_GATEWAY_APP=OFF -DBUILD_DEVCLIENT_APP=OFF -DBUILD_WRITE_BEHIND_TOOLS=OFF` 등으로 조합하면 된다.
+
 ```
 
 ## 대안: 수동 Boost 경로 지정(비권장)

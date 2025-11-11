@@ -6,7 +6,6 @@ add_executable(gateway_app
 )
 
 target_include_directories(gateway_app PRIVATE
-    ${CMAKE_SOURCE_DIR}/core/include
     ${CMAKE_SOURCE_DIR}/gateway/include
     ${CMAKE_BINARY_DIR}/proto
 )
