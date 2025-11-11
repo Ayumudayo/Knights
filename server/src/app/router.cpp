@@ -14,6 +14,9 @@ void register_routes(server::core::Dispatcher& dispatcher, server::app::chat::Ch
     using server::core::protocol::MSG_CHAT_SEND;
     using server::core::protocol::MSG_LEAVE_ROOM;
     using server::core::protocol::MSG_WHISPER_REQ;
+    using server::core::protocol::MSG_ROOMS_REQ;
+    using server::core::protocol::MSG_ROOM_USERS_REQ;
+    using server::core::protocol::MSG_REFRESH_REQ;
 
     dispatcher.register_handler(MSG_PING,
         [&chat](server::core::Session& s, std::span<const std::uint8_t> payload) { chat.on_ping(s, payload); });
@@ -32,6 +35,15 @@ void register_routes(server::core::Dispatcher& dispatcher, server::app::chat::Ch
 
     dispatcher.register_handler(MSG_LEAVE_ROOM,
         [&chat](server::core::Session& s, std::span<const std::uint8_t> payload) { chat.on_leave(s, payload); });
+
+    dispatcher.register_handler(MSG_ROOMS_REQ,
+        [&chat](server::core::Session& s, std::span<const std::uint8_t> payload) { chat.on_rooms_request(s, payload); });
+
+    dispatcher.register_handler(MSG_ROOM_USERS_REQ,
+        [&chat](server::core::Session& s, std::span<const std::uint8_t> payload) { chat.on_room_users_request(s, payload); });
+
+    dispatcher.register_handler(MSG_REFRESH_REQ,
+        [&chat](server::core::Session& s, std::span<const std::uint8_t> payload) { chat.on_refresh_request(s, payload); });
 }
 
 } // namespace server::app

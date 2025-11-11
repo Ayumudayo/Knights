@@ -47,35 +47,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         corelog::info(std::string("CHAT_SEND: room=") + (room.empty()?"(empty)":room) + ", text=" + text);
         // 채팅 입력에서 /refresh 명령을 직접 처리해 현재 방 스냅샷을 갱신한다.
         if (text == "/refresh") {
-            std::string current;
-            {
-                std::lock_guard<std::mutex> lk(state_.mu); 
-                auto itcr = state_.cur_room.find(session_sp.get()); 
-                current = (itcr != state_.cur_room.end()) ? itcr->second : std::string("lobby");
-            }
-            send_snapshot(*session_sp, current); 
-            // 스냅샷 응답 후 membership.last_seen을 최신 메시지 id로 갱신한다.
-            if (db_pool_) {
-                try {
-                    std::string uid;
-                    {
-                        std::lock_guard<std::mutex> lk(state_.mu);
-                        auto it = state_.user_uuid.find(session_sp.get());
-                        if (it != state_.user_uuid.end()) uid = it->second;
-                    }
-                    if (!uid.empty()) {
-                        auto rid = ensure_room_id_ci(current);
-                        if (!rid.empty()) {
-                            auto uow = db_pool_->make_unit_of_work();
-                            auto last_id = uow->messages().get_last_id(rid);
-                            if (last_id > 0) {
-                                uow->memberships().update_last_seen(uid, rid, last_id);
-                                uow->commit();
-                            }
-                        }
-                    }
-                } catch (...) {}
-            }
+            handle_refresh(session_sp);
             return;
         }
         // 인증 상태와 현재 방 정보를 확인한다.
@@ -248,6 +220,68 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 }
             } catch (...) {}
         }
+    });
+}
+
+void ChatService::handle_refresh(std::shared_ptr<Session> session_sp) {
+    std::string current;
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        auto itcr = state_.cur_room.find(session_sp.get());
+        current = (itcr != state_.cur_room.end()) ? itcr->second : std::string("lobby");
+    }
+    send_snapshot(*session_sp, current);
+
+    if (!db_pool_) {
+        return;
+    }
+    try {
+        std::string uid;
+        {
+            std::lock_guard<std::mutex> lk(state_.mu);
+            auto it = state_.user_uuid.find(session_sp.get());
+            if (it != state_.user_uuid.end()) uid = it->second;
+        }
+        if (uid.empty()) return;
+        auto rid = ensure_room_id_ci(current);
+        if (rid.empty()) return;
+        auto uow = db_pool_->make_unit_of_work();
+        auto last_id = uow->messages().get_last_id(rid);
+        if (last_id > 0) {
+            uow->memberships().update_last_seen(uid, rid, last_id);
+            uow->commit();
+        }
+    } catch (...) {
+    }
+}
+
+void ChatService::on_rooms_request(Session& s, std::span<const std::uint8_t>) {
+    auto session_sp = s.shared_from_this();
+    job_queue_.Push([this, session_sp]() {
+        send_rooms_list(*session_sp);
+    });
+}
+
+void ChatService::on_room_users_request(Session& s, std::span<const std::uint8_t> payload) {
+    std::string requested;
+    auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
+    proto::read_lp_utf8(sp, requested);
+    auto session_sp = s.shared_from_this();
+    job_queue_.Push([this, session_sp, requested = std::move(requested)]() mutable {
+        std::string target = requested;
+        if (target.empty()) {
+            std::lock_guard<std::mutex> lk(state_.mu);
+            auto it = state_.cur_room.find(session_sp.get());
+            target = (it != state_.cur_room.end()) ? it->second : std::string("lobby");
+        }
+        send_room_users(*session_sp, target);
+    });
+}
+
+void ChatService::on_refresh_request(Session& s, std::span<const std::uint8_t>) {
+    auto session_sp = s.shared_from_this();
+    job_queue_.Push([this, session_sp]() {
+        handle_refresh(session_sp);
     });
 }
 

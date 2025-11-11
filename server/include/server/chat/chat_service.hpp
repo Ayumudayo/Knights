@@ -36,6 +36,9 @@ public:
     void on_chat_send(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_whisper(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_ping(server::core::Session& s, std::span<const std::uint8_t> payload);
+    void on_rooms_request(server::core::Session& s, std::span<const std::uint8_t> payload);
+    void on_room_users_request(server::core::Session& s, std::span<const std::uint8_t> payload);
+    void on_refresh_request(server::core::Session& s, std::span<const std::uint8_t> payload);
     void on_session_close(std::shared_ptr<server::core::Session> s);
 
     // 외부(fanout 등)에서 재사용할 룸 브로드캐스트 helper
@@ -119,6 +122,7 @@ private:
                               const server::wire::v1::StateSnapshot::SnapshotMessage& message);
     bool load_recent_messages_from_cache(const std::string& room_id,
                                          std::vector<server::wire::v1::StateSnapshot::SnapshotMessage>& out);
+    void handle_refresh(std::shared_ptr<Session> session);
 
     friend struct ChatServiceHistoryTester;
 

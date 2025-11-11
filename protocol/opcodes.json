@@ -75,6 +75,21 @@
       "name": "MSG_ROOM_USERS",
       "id": "0x0201",
       "desc": "특정 방 유저 목록 응답"
+    },
+    {
+      "name": "MSG_ROOMS_REQ",
+      "id": "0x0202",
+      "desc": "방 목록 요청"
+    },
+    {
+      "name": "MSG_ROOM_USERS_REQ",
+      "id": "0x0203",
+      "desc": "특정 방 사용자 목록 요청"
+    },
+    {
+      "name": "MSG_REFRESH_REQ",
+      "id": "0x0204",
+      "desc": "현재 방 스냅샷 요청"
     }
   ]
 }

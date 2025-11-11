@@ -51,6 +51,14 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    net_.set_on_disconnected([this](std::string reason) {
+        screen_.Post([this, reason = std::move(reason)]() mutable {
+            state_.set_connected(false);
+            log_sink_(std::string("[warn] 연결 종료: ") + reason);
+            request_refresh_();
+        });
+    });
+
     net_.set_on_login_res([this](std::string effective_user, std::uint32_t sid) {
         screen_.Post([this, effective_user = std::move(effective_user), sid]() mutable {
             if (!effective_user.empty()) {
