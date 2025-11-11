@@ -12,6 +12,7 @@
 
 #include <cstdlib>
 #include <filesystem>
+#include <iostream>
 #include <memory>
 #include <string>
 #include <utility>
@@ -30,7 +31,7 @@ constexpr const char* kEnvPort = "DEVCLIENT_PORT";
 
 class Application::Impl {
 public:
-    Impl();
+    Impl(std::string host, unsigned short port, bool allow_env_override);
     ~Impl() = default;
 
     int Run();
@@ -49,11 +50,12 @@ private:
     CommandProcessor commands_;
     UiBuilder builder_;
     NetworkRouter router_;
-    std::string host_{kDefaultHost};
-    unsigned short port_{kDefaultPort};
+    std::string host_;
+    unsigned short port_;
+    bool allow_env_override_{true};
 };
 
-Application::Impl::Impl()
+Application::Impl::Impl(std::string host, unsigned short port, bool allow_env_override)
     : screen_(ftxui::ScreenInteractive::Fullscreen()),
       request_refresh_([this] { screen_.PostEvent(ftxui::Event::Custom); }),
       log_sink_([this](const std::string& message) {
@@ -62,7 +64,10 @@ Application::Impl::Impl()
       }),
       commands_(state_, net_, log_sink_),
       builder_(state_, commands_, net_, request_refresh_),
-      router_(state_, net_, screen_, request_refresh_, log_sink_) {}
+      router_(state_, net_, screen_, request_refresh_, log_sink_),
+      host_(std::move(host)),
+      port_(port),
+      allow_env_override_(allow_env_override) {}
 
 int Application::Impl::Run() {
     LoadEnvironment();
@@ -167,11 +172,13 @@ void Application::Impl::LoadEnvironment() {
         }
     }
 
-    if (const char* host_env = std::getenv(kEnvHost); host_env && *host_env) {
-        host_ = host_env;
-    }
-    if (const char* port_env = std::getenv(kEnvPort); port_env && *port_env) {
-        port_ = ParsePort(port_env, kDefaultPort);
+    if (allow_env_override_) {
+        if (const char* host_env = std::getenv(kEnvHost); host_env && *host_env) {
+            host_ = host_env;
+        }
+        if (const char* port_env = std::getenv(kEnvPort); port_env && *port_env) {
+            port_ = ParsePort(port_env, kDefaultPort);
+        }
     }
 }
 
@@ -189,8 +196,11 @@ unsigned short Application::Impl::ParsePort(const char* value, unsigned short fa
     return fallback;
 }
 
+Application::Application(std::string host, unsigned short port, bool allow_env_override)
+    : impl_(std::make_unique<Impl>(std::move(host), port, allow_env_override)) {}
+
 Application::Application()
-    : impl_(std::make_unique<Impl>()) {}
+    : Application(kDefaultHost, kDefaultPort, true) {}
 
 Application::~Application() = default;
 

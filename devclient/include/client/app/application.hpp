@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 class NetClient;
 
@@ -13,6 +14,7 @@ class UiBuilder;
 
 class Application {
 public:
+    Application(std::string host, unsigned short port, bool allow_env_override);
     Application();
     ~Application();
 
