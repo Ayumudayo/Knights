@@ -28,9 +28,9 @@ DbWorkerPool::~DbWorkerPool() {
     stop();
 }
 
-// DB 작업을 네트워크 스레드에서 직접 실행하면 지연이 급증하므로
-// 별도의 워커 풀에서 직렬 처리한다. start()는 worker_count(0이면 HW 동시성)를
-// 기준으로 스레드를 띄우고, stop() 전까지 큐를 poll 한다.
+// DB 작업은 네트워크 트랜잭션과 독립적으로 재시도되어야 하므로 별도의 worker pool로 분리한다.
+// start()는 worker_count(0이면 HW 동시성)를 기준으로 스레드를 띄우고,
+// stop()은 큐에 중단 신호를 넣어 안전하게 종료한다.
 void DbWorkerPool::start(std::size_t worker_count) {
     if (running_) {
         return;
@@ -88,6 +88,8 @@ void DbWorkerPool::worker_loop(std::size_t index) {
             continue;
         }
         runtime_metrics::record_db_job_queue_depth(queue_.size());
+        // DB 호출은 외부 시스템 상태에 따라 예외가 자주 발생하므로,
+        // 작업 단위별로 metrics를 남기고 계속 루프를 돌린다.
         try {
             process_job(*job);
             runtime_metrics::record_db_job_processed();
@@ -108,6 +110,8 @@ void DbWorkerPool::process_job(const Job& job) {
     }
 
     const bool auto_commit = job.auto_commit;
+    // unit_of_work는 commit/rollback을 명시적으로 호출해야 하므로
+    // auto_commit 여부에 따라 커서를 정리한다.
     try {
         job.task(*unit);
         if (auto_commit) {

@@ -50,6 +50,7 @@ bool load_dotenv(const std::string& path, bool override_existing) {
     std::ifstream in(path);
     if (!in.is_open()) return false;
     std::string line;
+        // ì¤ì  íì¼(.env)ì íëì© ì½ì´ íëì© íê²½ ë³ìì ì¤ì íë¤.
     while (std::getline(in, line)) {
         // 공백과 주석 줄을 제거한다.
         trim(line);

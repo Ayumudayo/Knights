@@ -22,6 +22,7 @@ namespace {
 std::atomic<bool> g_installed{false};
 
 void safe_write_literal(const char* text) noexcept {
+    // 신뢰할 수 있는 I/O만 사용해 시그널 핸들러 내에서도 crash 로그를 남긴다.
     if (!text) return;
     std::size_t len = 0;
     while (text[len] != '\0') ++len;
@@ -44,6 +45,7 @@ void safe_write_newline() noexcept {
 void safe_write_number(unsigned long long value) noexcept {
     char buffer[32];
     std::size_t pos = 0;
+    // snprintf와 같은 런타임 의존도를 피하고, 10진수 문자열을 수동으로 만든다.
     do {
         buffer[pos++] = static_cast<char>('0' + (value % 10));
         value /= 10;
@@ -57,6 +59,7 @@ void safe_write_number(unsigned long long value) noexcept {
 
 #if defined(_WIN32)
 void dump_stack() noexcept {
+    // Windows에선 DbgHelp API를 사용해 간단한 stack trace를 stderr로 복사한다.
     void* frames[64];
     USHORT captured = ::RtlCaptureStackBackTrace(0, 64, frames, nullptr);
     HANDLE process = ::GetCurrentProcess();
@@ -94,6 +97,7 @@ void dump_stack() noexcept {
 }
 #else
 void dump_stack() noexcept {
+    // POSIX 계열은 backtrace(3)를 그대로 사용해 파일 디스크립터에 전송한다.
     void* buffer[64];
     int size = ::backtrace(buffer, 64);
     if (size > 0) {
@@ -144,6 +148,7 @@ void install_handlers() {
 void install() {
     bool expected = false;
     if (!g_installed.compare_exchange_strong(expected, true)) {
+        // 여러 번 install()을 호출해도 OS 핸들러는 한 번만 세팅되도록 보장한다.
         return;
     }
 
@@ -165,6 +170,7 @@ void install() {
     install_handlers();
 #endif
 
+    // main() 시작 시점에 호출하면 예외/시그널 모두 동일한 로그 경로로 수집할 수 있다.
     server::core::log::info("CrashHandler installed.");
 }
 

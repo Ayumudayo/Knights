@@ -14,6 +14,7 @@ namespace {
 constexpr const char* kContentTypeHeader = "application/json";
 } // namespace
 
+// 테스트나 단일 프로세스용 인메모리 레지스트리 구현.
 bool InMemoryStateBackend::upsert(const InstanceRecord& record) {
     std::lock_guard<std::mutex> lock(mutex_);
     records_[record.instance_id] = record;
@@ -47,6 +48,7 @@ std::vector<InstanceRecord> InMemoryStateBackend::list_instances() const {
 
 namespace detail {
 
+// Redis registry와 통신하기 위해 간단한 JSON 직렬화를 구현한다.
 std::string serialize_json(const InstanceRecord& record) {
     std::ostringstream oss;
     oss << '{';
@@ -60,6 +62,7 @@ std::string serialize_json(const InstanceRecord& record) {
     oss << '}';
     return oss.str();
 }
+// Redis에서 가져온 문자열을 InstanceRecord로 역직렬화한다.
 std::optional<InstanceRecord> deserialize_json(std::string_view payload) {
     InstanceRecord record{};
     std::string json(payload);
@@ -127,6 +130,7 @@ std::optional<InstanceRecord> deserialize_json(std::string_view payload) {
 
 namespace {
 
+// 기존 redis::IRedisClient를 instance registry 인터페이스로 감싸는 어댑터.
 class RedisClientAdapter final : public RedisInstanceStateBackend::IRedisClient {
 public:
     explicit RedisClientAdapter(std::shared_ptr<server::storage::redis::IRedisClient> client)
@@ -166,6 +170,7 @@ private:
 
 } // namespace
 
+// Redis 키 prefix와 TTL을 표준화해 instance heartbeat 정보를 저장한다.
 RedisInstanceStateBackend::RedisInstanceStateBackend(std::shared_ptr<IRedisClient> client,
                                                      std::string key_prefix,
                                                      std::chrono::seconds ttl)
@@ -183,12 +188,14 @@ RedisInstanceStateBackend::RedisInstanceStateBackend(std::shared_ptr<IRedisClien
     }
 }
 
+// 캐시를 최신으로 갱신한 뒤 Redis에도 써 넣는다.
 bool RedisInstanceStateBackend::upsert(const InstanceRecord& record) {
     std::lock_guard<std::mutex> lock(mutex_);
     cache_[record.instance_id] = record;
     return write_record(record);
 }
 
+// 캐시에서 제거하고 Redis 키를 삭제한다.
 bool RedisInstanceStateBackend::remove(const std::string& instance_id) {
     std::lock_guard<std::mutex> lock(mutex_);
     cache_.erase(instance_id);
@@ -198,6 +205,7 @@ bool RedisInstanceStateBackend::remove(const std::string& instance_id) {
     return client_->del(key_prefix_ + instance_id);
 }
 
+// heartbeat 시각만 갱신해 TTL을 연장한다.
 bool RedisInstanceStateBackend::touch(const std::string& instance_id, std::uint64_t heartbeat_ms) {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = cache_.find(instance_id);
@@ -208,6 +216,7 @@ bool RedisInstanceStateBackend::touch(const std::string& instance_id, std::uint6
     return write_record(it->second);
 }
 
+// Redis 키를 스캔해 캐시를 재구성한다 (게이트웨이 장애 복구 대비).
 bool RedisInstanceStateBackend::reload_cache_from_backend() const {
     if (!client_) {
         return false;
@@ -252,6 +261,7 @@ std::vector<InstanceRecord> RedisInstanceStateBackend::list_instances() const {
     return result;
 }
 
+// Redis에 JSON을 setex로 저장해 TTL 기반 heartbeat를 유지한다.
 bool RedisInstanceStateBackend::write_record(const InstanceRecord& record) {
     if (!client_) {
         return true;

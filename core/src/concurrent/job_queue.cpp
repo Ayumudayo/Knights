@@ -3,6 +3,8 @@
 
 namespace server::core {
 
+// JobQueue는 생산자 스레드가 DB/백그라운드 작업을 밀어 넣고,
+// 워커 스레드가 Pop()으로 끌어가는 간단한 FIFO 구조다.
 void JobQueue::Push(Job job) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -18,7 +20,7 @@ Job JobQueue::Pop() {
 
     if (stopping_ && jobs_.empty()) {
         runtime_metrics::record_job_queue_depth(jobs_.size());
-        return nullptr; // nullptr 이면 종료 신호
+        return nullptr; // nullptr이면 종료 신호
     }
 
     Job job = std::move(jobs_.front());

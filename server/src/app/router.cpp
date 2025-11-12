@@ -6,7 +6,8 @@
 
 namespace server::app {
 
-// Gateway/LoadBalancer가 Session을 accept하면 이 함수가 opcode→핸들러 매핑을 등록한다.
+// Gateway나 LoadBalancer가 새 Session을 넘겨주면 opcode → handler 매핑을 모두 등록한다.
+// 현재 서버는 ChatService 단일 모듈이 모든 메시지를 처리하므로 dispatcher 테이블만 채우면 된다.
 // ChatService가 대부분의 메시지를 처리하므로 dispatcher는 단순한 라우팅 테이블 역할을 한다.
 void register_routes(server::core::Dispatcher& dispatcher, server::app::chat::ChatService& chat) {
     using server::core::protocol::MSG_PING;
@@ -20,6 +21,7 @@ void register_routes(server::core::Dispatcher& dispatcher, server::app::chat::Ch
     using server::core::protocol::MSG_ROOM_USERS_REQ;
     using server::core::protocol::MSG_REFRESH_REQ;
 
+    // keep-alive 핸들러: ping payload를 그대로 pong으로 반사한다.
     dispatcher.register_handler(MSG_PING,
         [&chat](server::core::Session& s, std::span<const std::uint8_t> payload) { chat.on_ping(s, payload); });
 

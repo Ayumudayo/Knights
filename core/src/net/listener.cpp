@@ -22,6 +22,7 @@ Listener::Listener(std::shared_ptr<Hive> hive,
         acceptor_.listen(boost::asio::socket_base::max_listen_connections, ec);
     }
     if (ec) {
+        // 초기화가 실패하면 이후 start 호출이 들어와도 accept를 재시도하지 않는다.
         on_error(ec);
         stopped_.store(true, std::memory_order_relaxed);
     }
@@ -35,6 +36,8 @@ void Listener::start() {
     if (stopped_.load(std::memory_order_relaxed)) {
         return;
     }
+    // Listener는 Acceptor와 달리 핸들러를 가볍게 감싸는 추상화이므로 별도의 running 플래그 없이
+    // stopped_만으로 생명주기를 제어한다.
     do_accept();
 }
 
@@ -69,6 +72,8 @@ void Listener::do_accept() {
         if (ec) {
             self->on_error(ec);
         } else if (!self->stopped_.load(std::memory_order_relaxed)) {
+            // 외부에서 제공한 factory를 통해 파생 Connection을 생성하므로,
+            // Listener는 transport 초기화까지만 책임진다.
             auto connection = self->factory_(self->hive_);
             connection->socket() = std::move(socket);
             connection->start();

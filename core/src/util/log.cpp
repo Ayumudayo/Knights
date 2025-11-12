@@ -17,7 +17,7 @@ namespace {
 std::atomic<level> g_level{level::info};
 std::mutex g_mu;
 std::deque<std::string> g_buffer;
-std::size_t g_buffer_capacity = 256;
+std::size_t g_buffer_capacity = 256; // 최근 로그를 /metrics, /debug 등에 노출하기 위한 ring buffer
 
 const char* to_cstr(level lv) {
     switch (lv) {
@@ -45,6 +45,7 @@ std::string format_line(level lv, const std::string& msg) {
 }
 
 void push_buffer(const std::string& line) {
+    // g_buffer는 diagnostics 용도로만 사용되므로, capacity가 0이면 완전히 비활성화한다.
     if (g_buffer_capacity == 0) return;
     g_buffer.push_back(line);
     if (g_buffer.size() > g_buffer_capacity) {
@@ -55,6 +56,7 @@ void push_buffer(const std::string& line) {
 void emit(level lv, const std::string& msg) {
     if (static_cast<int>(lv) < static_cast<int>(g_level.load())) return;
     std::lock_guard<std::mutex> lk(g_mu);
+    // 로그 라인은 포맷팅 후 stderr로 바로 내보내고, 필요 시 buffer에 보관한다.
     std::string line = format_line(lv, msg);
     push_buffer(line);
     std::cerr << line << std::endl;

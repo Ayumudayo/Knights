@@ -29,6 +29,7 @@ void ChatService::on_whisper(Session& s, std::span<const std::uint8_t> payload) 
         return;
     }
     auto session_sp = s.shared_from_this();
+    // whisper 처리는 DB 조회/타 세션 접근이 필요하므로 job_queue에서 비동기로 처리한다.
     job_queue_.Push([this, session_sp, target = std::move(target), text = std::move(text)]() {
         dispatch_whisper(session_sp, target, text);
     });
@@ -45,12 +46,12 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
     auto session_sp = s.shared_from_this();
     job_queue_.Push([this, session_sp, room, text]() {
         corelog::info(std::string("CHAT_SEND: room=") + (room.empty()?"(empty)":room) + ", text=" + text);
-        // 슬래시 명령으로 들어온 /refresh는 서버에서 즉시 스냅샷을 전송해 준다.
+        // /refresh는 상태 스냅샷을 강제로 다시 받게 하는 관리 명령이다.
         if (text == "/refresh") {
             handle_refresh(session_sp);
             return;
         }
-        // 인증 상태와 현재 방 정보를 확인한다.
+        // 현재 세션이 보고 있는 room 정보와 authoritative room을 비교한다.
         std::string current_room = room;
         {
             std::lock_guard<std::mutex> lk(state_.mu);
@@ -134,7 +135,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); 
         pb.set_ts_ms(static_cast<std::uint64_t>(now64));
         std::string bytes; pb.SerializeToString(&bytes);
-        // 영속화(옵션): Postgres 메시지 저장 후 Redis 최근 목록을 갱신한다.
+        // 영속화(선택): Postgres에 저장해 Redis recent cache가 비어도 복구되게 한다.
         std::string persisted_room_id;
         std::uint64_t persisted_msg_id = 0;
         if (db_pool_) {
@@ -156,6 +157,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 corelog::error(std::string("Failed to persist message: ") + e.what());
             }
         }
+        // Redis 캐시는 recent history 스펙을 만족하기 위해 DB id와 payload를 그대로 복제한다.
         if (redis_ && !persisted_room_id.empty() && persisted_msg_id != 0) {
             server::wire::v1::StateSnapshot::SnapshotMessage snapshot_msg;
             snapshot_msg.set_id(persisted_msg_id);

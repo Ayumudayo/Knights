@@ -32,6 +32,7 @@ Acceptor::Acceptor(asio::io_context& io,
         return true;
     };
 
+    // 초기 바인드 단계는 실패 시 다시 복구하기 어렵기 때문에 각 단계를 명시적으로 검증한다.
     acceptor_.open(ep.protocol(), ec);
     if (fail("open")) return;
     acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true), ec);
@@ -45,6 +46,7 @@ Acceptor::Acceptor(asio::io_context& io,
 void Acceptor::start() {
     if (running_) return;
     running_ = true;
+    // 외부에서 start/stop을 여러 번 호출해도 accept loop가 중복되지 않도록 플래그로 보호한다.
     log::info("Acceptor started");
     do_accept();
 }
@@ -71,6 +73,8 @@ void Acceptor::do_accept() {
             if (self->state_ && self->state_->max_connections > 0) {
                 auto cur = self->state_->connection_count.load();
                 if (cur >= self->state_->max_connections) {
+                    // 상태 공유 객체가 제공하는 상한을 넘으면 TCP 레벨에서 바로 끊어
+                    // 리소스(버퍼, 세션 객체) 할당을 최소화한다.
                     log::warn("max concurrent connections reached; closing new connection");
                     error_code ignored;
                     socket.shutdown(asio::ip::tcp::socket::shutdown_both, ignored);
@@ -82,6 +86,8 @@ void Acceptor::do_accept() {
 
             runtime_metrics::record_accept();
             try {
+                // Session은 공유 상태 및 Dispatcher 의존성이 많으므로 예외가 발생하면
+                // accept loop만 유지하고 연결을 폐기한다.
                 auto session = std::make_shared<Session>(std::move(socket), self->dispatcher_, self->buffer_manager_, self->options_, self->state_);
                 if (self->on_new_session_) self->on_new_session_(session);
                 session->start();
@@ -94,7 +100,6 @@ void Acceptor::do_accept() {
 }
 
 } // namespace server::core
-
 
 
 

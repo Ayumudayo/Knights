@@ -41,13 +41,13 @@
 #include "server/core/memory/memory_pool.hpp"
 #include "server/core/runtime_metrics.hpp"
 #include "server/chat/chat_service.hpp"
-// Protobuf (수신 payload ts_ms 파싱용)
+// Protobuf: payload ts_ms 파싱/직렬화에 사용
 #include "wire.pb.h"
-// 저장소 DI: Postgres 커넥션 풀 팩토리
+// 저장소 DI: Postgres 커넥션 풀 모듈
 #include "server/storage/postgres/connection_pool.hpp"
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/db_worker_pool.hpp"
-// 캐시/팬아웃: Redis 클라이언트(스켈레톤)
+// 캐시/큐잉: Redis 클라이언트 (옵션)
 #include "server/storage/redis/client.hpp"
 #include "server/state/instance_registry.hpp"
 // .env 로더
@@ -63,13 +63,13 @@ namespace pathutil = server::core::util::paths;
 namespace crash = server::core::util::crash;
 
 namespace server::app {
-
-// 간단 메트릭 카운터/게이지(HTTP /metrics 노출용)
+// /metrics 노출용 간단 메트릭 카운터 (구독/self-echo 통계)
 static std::atomic<std::uint64_t> g_subscribe_total{0};
 static std::atomic<std::uint64_t> g_self_echo_drop_total{0};
 static std::atomic<long long>     g_subscribe_last_lag_ms{0};
 
 int run_server(int argc, char** argv) {
+    // 런타임에서 재사용할 scheduler/db worker/registry 핸들을 모아둔다.
     core::concurrent::TaskScheduler scheduler;
     std::shared_ptr<asio::steady_timer> scheduler_timer;
     std::shared_ptr<core::storage::DbWorkerPool> db_workers;
@@ -83,8 +83,10 @@ int run_server(int argc, char** argv) {
         SetConsoleCP(CP_UTF8);
         std::setlocale(LC_ALL, ".UTF-8");
 #endif
+        // CrashHandler를 최소 수준에서 먼저 설치한다.
         crash::install();
 
+        // 실행 파일 경로와 저장소 루트를 순회하며 .env를 로드한다.
         bool env_loaded = false;
         std::filesystem::path env_path;
         std::filesystem::path exe_dir;
@@ -134,19 +136,22 @@ int run_server(int argc, char** argv) {
             corelog::info("No .env file located; using existing environment variables");
         }
 
+        // 로그 버퍼 용량도 env로 조정 가능하도록 했다.
         if (const char* buf_cap = std::getenv("LOG_BUFFER_CAPACITY"); buf_cap && *buf_cap) {
             auto cap = std::strtoull(buf_cap, nullptr, 10);
             if (cap > 0) {
                 corelog::set_buffer_capacity(static_cast<std::size_t>(cap));
-                corelog::info(std::string("Log buffer capacity set to ") + std::to_string(cap));
+        // 로그 버퍼 용량도 env로 조정 가능하게 했다.
             }
         }
 
+        // 기본 리슨 포트는 CLI 첫 인자 또는 env로 오버라이드한다.
         unsigned short port = 5000;
         if (argc >= 2) {
             port = static_cast<unsigned short>(std::stoi(argv[1]));
         }
 
+        // gateway/registry 광고 주소는 advertise_* 값으로 분리 설정한다.
         std::string advertise_host = "127.0.0.1";
         if (const char* host_env = std::getenv("SERVER_ADVERTISE_HOST"); host_env && *host_env) {
             advertise_host = host_env;
@@ -173,12 +178,13 @@ int run_server(int argc, char** argv) {
             }
         }
 
-        std::string registry_prefix = "gateway/instances";
+        // Redis registry key prefix/TTL을 env로 조정한다.
+        // Redis registry key prefix/TTL을 env로 조정한다.
         if (const char* prefix_env = std::getenv("SERVER_REGISTRY_PREFIX"); prefix_env && *prefix_env) {
-            registry_prefix = prefix_env;
+        // Redis registry key prefix/TTL을 env로 조정한다.
         }
-        if (!registry_prefix.empty() && registry_prefix.back() != '/') {
-            registry_prefix.push_back('/');
+        // Redis registry key prefix/TTL을 env로 조정한다.
+        // Redis registry key prefix/TTL을 env로 조정한다.
         }
 
         std::chrono::seconds registry_ttl{std::chrono::seconds{30}};
@@ -193,6 +199,7 @@ int run_server(int argc, char** argv) {
             }
         }
 
+        // 인스턴스 ID는 외부 입력이 없으면 timestamp 기반 문자열로 만든다.
         std::string server_instance_id;
         if (const char* id_env = std::getenv("SERVER_INSTANCE_ID"); id_env && *id_env) {
             server_instance_id = id_env;
@@ -204,9 +211,12 @@ int run_server(int argc, char** argv) {
 
         asio::io_context io;
         core::JobQueue job_queue;
+        // job_queue는 DB 작업이나 채팅 로직 등 백그라운드 잡을 처리한다.
         auto* job_queue_ptr = &job_queue;
         core::ThreadManager workers(job_queue);
-        core::BufferManager buffer_manager(2048, 1024); // 2KB buffers, 1024 count
+        // ThreadManager는 job_queue를 소비하는 워커 스레드 풀이다.
+        // 2KB 메모리 블록 1024개를 준비해 네트워크 버퍼를 재사용한다.
+        // 2KB 메모리 블록 1024개를 준비해 I/O 버퍼를 재사용한다.
 
         core::Dispatcher dispatcher;
         auto options = std::make_shared<core::SessionOptions>();
@@ -214,6 +224,7 @@ int run_server(int argc, char** argv) {
         options->heartbeat_interval_ms = 10'000;
         auto state = std::make_shared<core::SharedState>();
 
+        // services::set에 스택 객체를 등록하기 위해 custom deleter shared_ptr를 사용한다.
         const auto make_ref = [](auto& instance) {
             using T = std::remove_reference_t<decltype(instance)>;
             return std::shared_ptr<T>(&instance, [](T*) {});
@@ -228,9 +239,11 @@ int run_server(int argc, char** argv) {
 
         services::set(make_ref(scheduler));
 
+        // TaskScheduler를 50ms 주기로 poll하는 타이머를 등록한다.
         scheduler_timer = std::make_shared<asio::steady_timer>(io);
         services::set(scheduler_timer);
 
+        // self-rescheduling lambda가 scheduler.poll()을 반복 호출한다.
         auto scheduler_tick = std::make_shared<std::function<void()>>();
         std::weak_ptr<std::function<void()>> scheduler_tick_weak = scheduler_tick;
         *scheduler_tick = [scheduler_timer, scheduler_tick_weak, scheduler_ptr = &scheduler]() {
@@ -250,7 +263,7 @@ int run_server(int argc, char** argv) {
         };
         (*scheduler_tick)();
 
-        // DB 커넥션 풀 구성(환경 변수 기반)
+        // DB 커넥션 풀 설정 (환경 변수 없으면 비활성화)
         std::shared_ptr<core::storage::IConnectionPool> db_pool;
         {
             const char* uri = std::getenv("DB_URI");
@@ -289,6 +302,7 @@ int run_server(int argc, char** argv) {
             services::set(db_workers);
             corelog::info(std::string("DB worker pool started: ") + std::to_string(log_workers) + " threads.");
 
+            // 60초마다 health check를 job_queue에 푸시한다.
             scheduler.schedule_every([job_queue_ptr, db_pool]() {
                 job_queue_ptr->Push([db_pool]() {
                     try {
@@ -298,7 +312,7 @@ int run_server(int argc, char** argv) {
                     } catch (const std::exception& ex) {
                         corelog::error(std::string("Periodic DB health check exception: ") + ex.what());
                     } catch (...) {
-                        corelog::error("Periodic DB health check unknown exception");
+        // Redis 클라이언트 설정 (옵션)
                     }
                 });
             }, std::chrono::seconds(60));
@@ -312,7 +326,8 @@ int run_server(int argc, char** argv) {
             if (const char* v = std::getenv("REDIS_POOL_MAX")) ropts.pool_max = static_cast<std::size_t>(std::strtoul(v, nullptr, 10));
             if (const char* v = std::getenv("REDIS_USE_STREAMS")) ropts.use_streams = (std::strcmp(v, "0") != 0);
             redis = server::storage::redis::make_redis_client(ruri, ropts);
-            // 최소 복원: PRESENCE_CLEAN_ON_START != 0 이면 presence:room:* 정리(개발/단일 게이트웨이 전제)
+            // PRESENCE_CLEAN_ON_START가 활성화되면 기존 presence 키를 정리한다.
+        // Redis를 준비하면 services 레지스트리에 공유한다.
             if (redis) {
                 if (const char* clean = std::getenv("PRESENCE_CLEAN_ON_START"); clean && std::strcmp(clean, "0") != 0) {
                     std::string prefix;
@@ -332,6 +347,7 @@ int run_server(int argc, char** argv) {
         }
         if (redis) {
             services::set(redis);
+            // Redis도 동일한 주기 health check를 유지한다.
             scheduler.schedule_every([job_queue_ptr, redis]() {
                 job_queue_ptr->Push([redis]() {
                     try {
@@ -346,8 +362,10 @@ int run_server(int argc, char** argv) {
                 });
             }, std::chrono::seconds(60));
             try {
+            // Redis 기반 instance registry를 구성해 gateway에게 heartbeat를 보낸다.
                 auto registry_client = server::state::make_redis_state_client(redis);
-                registry_backend = std::make_shared<server::state::RedisInstanceStateBackend>(registry_client, registry_prefix, registry_ttl);
+        // Redis registry key prefix/TTL을 env로 조정한다.
+                // InstanceRecord를 구성한 뒤 heartbeat 스케줄러가 Redis에 저장한다.
                 registry_record.instance_id = server_instance_id;
                 registry_record.host = advertise_host;
                 registry_record.port = advertise_port;
@@ -378,7 +396,7 @@ int run_server(int argc, char** argv) {
 
         server::app::chat::ChatService chat(io, job_queue, db_pool, redis);
         services::set(make_ref(chat));
-        // TODO: ChatService에 저장소 주입(후속 단계)
+        // TODO: ChatService 부팅(세부 구성)
 
         register_routes(dispatcher, chat);
 
@@ -391,12 +409,12 @@ int run_server(int argc, char** argv) {
         acceptor->start();
         corelog::info("server_app listening on 0.0.0.0:" + std::to_string(port));
 
-        // 워커 스레드 풀 시작
+        // 네트워크 수신용 worker 스택
         unsigned int num_worker_threads = std::max(1u, std::thread::hardware_concurrency());
         workers.Start(num_worker_threads);
         corelog::info(std::to_string(num_worker_threads) + " worker threads started.");
 
-        // I/O 스레드 풀 시작
+        // I/O worker 스레드 풀
         unsigned int num_io_threads = std::max(1u, std::thread::hardware_concurrency());
         std::vector<std::thread> io_threads;
         io_threads.reserve(num_io_threads);
@@ -412,7 +430,7 @@ int run_server(int argc, char** argv) {
         corelog::info(std::to_string(num_io_threads) + " I/O threads started.");
 
         // 정상 종료(Ctrl+C) 처리
-        // Pub/Sub 분산 브로드캐스트 구독(옵션)
+        // Pub/Sub 팬아웃 브로드캐스트 (옵션)
         if (redis) {
             if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
                 std::string prefix; if (const char* p = std::getenv("REDIS_CHANNEL_PREFIX")) if (*p) prefix = p;
@@ -430,7 +448,7 @@ int run_server(int argc, char** argv) {
                         std::string payload = message.substr(nl + 1);
                         std::string room = channel; auto pos = room.rfind(':'); if (pos != std::string::npos) room = room.substr(pos + 1);
                         std::vector<std::uint8_t> body(payload.begin(), payload.end());
-                        // subscribe lag 측정(ts_ms가 있으면 now - ts_ms)
+                        // subscribe lag 측정 (ts_ms 기준)
                         try {
                             server::wire::v1::ChatBroadcast pb;
                             if (pb.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
@@ -452,7 +470,8 @@ int run_server(int argc, char** argv) {
             }
         }
 
-        // Metrics HTTP 엔드포인트(METRICS_PORT 설정 시 활성화)
+        // METRICS_PORT 설정 시 내장 /metrics HTTP 서버 활성화
+        // /metrics HTTP 엔드포인트를 별도 io_context에서 구동한다.
         std::unique_ptr<std::thread> metrics_thread;
         std::shared_ptr<asio::io_context> metrics_io;
         std::shared_ptr<tcp::acceptor> metrics_acc;
@@ -460,6 +479,7 @@ int run_server(int argc, char** argv) {
         if (const char* mp = std::getenv("METRICS_PORT"); mp && *mp) {
             unsigned long v = std::strtoul(mp, nullptr, 10); if (v > 0 && v < 65536) metrics_port = static_cast<unsigned short>(v);
         }
+        // metrics_port가 설정된 경우에만 HTTP 서버를 띄운다.
         if (metrics_port != 0) {
             metrics_io = std::make_shared<asio::io_context>();
             metrics_acc = std::make_shared<tcp::acceptor>(*metrics_io, tcp::endpoint(tcp::v4(), metrics_port));
@@ -510,6 +530,7 @@ int run_server(int argc, char** argv) {
                                         }
                                     }
                                     body = body_stream.str();
+                                    // /metrics 또는 root 요청에는 runtime_metrics 스냅샷을 직렬화한다.
                                 } else if (target == "/metrics" || target == "/") {
                                     auto snap = server::core::runtime_metrics::snapshot();
                                     std::ostringstream stream;
@@ -594,7 +615,7 @@ int run_server(int argc, char** argv) {
                             } catch (...) {}
                         });
                     }
-                    // 다음 accept
+                    // metrics accept loop 재시작
                     asio::post(metrics_io->get_executor(), *do_accept);
                 });
             };
@@ -617,7 +638,7 @@ int run_server(int argc, char** argv) {
                 }
                 registry_registered = false;
             }
-            // Redis Pub/Sub 구독 중지(있다면)
+            // Redis Pub/Sub 팬아웃 종료 처리 (사용 중일 때만)
             try { if (redis) { redis->stop_psubscribe(); } } catch (...) {}
             if (metrics_io) { try { metrics_io->stop(); } catch (...) {} }
             scheduler.shutdown();

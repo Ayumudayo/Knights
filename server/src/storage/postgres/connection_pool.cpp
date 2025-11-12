@@ -25,6 +25,7 @@ using server::core::storage::Room;
 using server::core::storage::Message;
 using server::core::storage::Session;
 
+// users 테이블을 다루는 PostgreSQL 전용 Repository.
 class PgUserRepository final : public IUserRepository {
 public:
     explicit PgUserRepository(pqxx::work* w) : w_(w) {}
@@ -69,6 +70,7 @@ private:
     pqxx::work* w_{};
 };
 
+// rooms 관련 CRUD/검색을 담당한다.
 class PgRoomRepository final : public IRoomRepository {
 public:
     explicit PgRoomRepository(pqxx::work* w) : w_(w) {}
@@ -116,6 +118,7 @@ private:
     pqxx::work* w_{};
 };
 
+// messages 테이블 접근 레이어.
 class PgMessageRepository final : public IMessageRepository {
 public:
     explicit PgMessageRepository(pqxx::work* w) : w_(w) {}
@@ -168,6 +171,7 @@ private:
     pqxx::work* w_{};
 };
 
+// sessions 테이블을 다루는 Repository.
 class PgSessionRepository final : public ISessionRepository {
 public:
     explicit PgSessionRepository(pqxx::work* w) : w_(w) {}
@@ -201,6 +205,7 @@ private:
     pqxx::work* w_{};
 };
 
+// memberships 테이블에서 last_seen 등 멤버 상태를 관리한다.
 class PgMembershipRepository final : public IMembershipRepository {
 public:
     explicit PgMembershipRepository(pqxx::work* w) : w_(w) {}
@@ -243,6 +248,7 @@ private:
     pqxx::work* w_{};
 };
 
+// pqxx::work 하나에 모든 Repository를 묶어 transaction을 관리한다.
 class PgUnitOfWork final : public IUnitOfWork {
 public:
     explicit PgUnitOfWork(std::shared_ptr<pqxx::connection> conn)
@@ -268,18 +274,21 @@ private:
     PgMembershipRepository memberships_;
 };
 
+// 간단한 연결 팩토리 구현: 요청마다 pqxx connection을 생성한다.
 class PgConnectionPool final : public IConnectionPool {
 public:
     PgConnectionPool(std::string db_uri, PoolOptions opts)
         : db_uri_(std::move(db_uri)), opts_(opts) {}
 
     std::unique_ptr<IUnitOfWork> make_unit_of_work() override {
+        // 요청마다 새로운 pqxx::connection을 열어 트랜잭션 경계를 분리한다.
         auto conn = std::make_shared<pqxx::connection>(db_uri_);
         if (!conn->is_open()) throw std::runtime_error("PQXX connection failed");
         return std::make_unique<PgUnitOfWork>(std::move(conn));
     }
 
     bool health_check() override {
+        // 간단한 SELECT 1로 연결 가능 여부를 확인한다.
         try {
             pqxx::connection c(db_uri_);
             if (!c.is_open()) return false;
@@ -303,4 +312,3 @@ make_connection_pool(const std::string& db_uri, const PoolOptions& opts) {
 }
 
 } // namespace server::storage::postgres
-

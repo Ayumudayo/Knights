@@ -12,6 +12,7 @@
 
 namespace server::core::util::paths {
 
+// 실행 중인 바이너리의 정규화된 경로를 반환한다. (테스트 실행 시에도 동일하게 동작)
 std::filesystem::path executable_path() {
 #if defined(_WIN32)
     std::wstring buffer(MAX_PATH, L'\0');
@@ -40,6 +41,7 @@ std::filesystem::path executable_path() {
     return std::filesystem::weakly_canonical(exe_path);
 }
 
+// 리소스 탐색을 위해 실행 파일 디렉터리를 별도로 노출한다.
 std::filesystem::path executable_dir() {
     auto path = executable_path();
     auto dir = path.parent_path();

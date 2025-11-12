@@ -63,14 +63,14 @@ void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
             } else if (!provided_password.empty() && room_to_join != "lobby") {
                 state_.room_passwords[room_to_join] = hash_room_password(provided_password);
             }
-        // 기존 방에서 세션을 제거한다.
+        // 기존에 참여 중인 방이 있으면 그 방에서 먼저 제거한다.
             auto itold = state_.cur_room.find(session_sp.get());
             if (itold != state_.cur_room.end()) { previous_room = itold->second; }
             if (itold != state_.cur_room.end() && itold->second != room_to_join) {
                 auto itroom = state_.rooms.find(itold->second);
                 if (itroom != state_.rooms.end()) {
                     itroom->second.erase(session_sp);
-            // 기존 방이 비어 있다면(lobby 제외) 방과 비밀번호 정보를 제거한다.
+                    // 방에 남아 있는 세션이 없다면(로비 제외) 비밀번호도 함께 삭제한다.
                     bool is_empty = true;
                     for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
                         if (wit->expired()) wit = itroom->second.erase(wit); 
@@ -102,7 +102,7 @@ void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
                 std::string bytes; pb.SerializeToString(&bytes);
                 body.assign(bytes.begin(), bytes.end());
             }
-            // 브로드캐스트 대상 세션을 수집한다.
+            // 브로드캐스트 대상 목록(weak_ptr)을 실제 세션 포인터로 정리한다.
             auto it = state_.rooms.find(room_to_join);
             if (it != state_.rooms.end()) {
                 collect_room_sessions(it->second, targets);
@@ -110,7 +110,7 @@ void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
         }
         for (auto& t : targets) t->async_send(proto::MSG_CHAT_BROADCAST, body, 0);
 
-        // 멤버십을 upsert로 영속화하고 Redis 프레즌스를 갱신한다.
+        // DB upsert와 Redis presence를 동시에 갱신한다.
         if (db_pool_) {
             try {
                 std::string uid;

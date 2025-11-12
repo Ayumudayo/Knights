@@ -27,6 +27,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
     }
 
     auto session_sp = s.shared_from_this();
+    // 로그인은 DB/Redis 작업과 write-behind 이벤트가 함께 수행되므로 job_queue로 넘긴다.
     job_queue_.Push([this, session_sp, user, token]() {
         const std::string session_id_str = get_or_create_session_uuid(*session_sp);
         std::string tracked_user_uuid;
@@ -39,6 +40,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
 
         {
             std::lock_guard<std::mutex> lk(state_.mu);
+            // 동일 세션이 이전에 사용했던 이름/guest 상태를 정리하고 새 사용자 맵을 구성한다.
             if (auto itold = state_.user.find(session_sp.get()); itold != state_.user.end()) {
                 auto itset = state_.by_user.find(itold->second);
                 if (itset != state_.by_user.end()) {
@@ -124,7 +126,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         std::vector<std::uint8_t> res(bytes.begin(), bytes.end());
         session_sp->async_send(proto::MSG_LOGIN_RES, res, 0);
 
-        // Redis presence:user:{uid} TTL을 주기적으로 갱신해 세션 유지를 표시한다.
+        // presence:user:{uid} 키의 TTL을 주기적으로 갱신해 온라인 리스트를 유지한다.
         if (redis_) {
             try {
                 std::string uid;
@@ -150,6 +152,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         if (!login_ip.empty()) {
             wb_fields.emplace_back("ip", login_ip);
         }
+        // 로그인 과정도 stream에 남겨 이후 감사/재처리 파이프라인과 동기화한다.
         emit_write_behind_event("session_login", session_id_str, uid_opt, lobby_id_opt, std::move(wb_fields));
     });
 }

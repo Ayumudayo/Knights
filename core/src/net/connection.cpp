@@ -20,6 +20,7 @@ void Connection::start() {
     if (stopped_.load(std::memory_order_relaxed)) {
         return;
     }
+    // 템플릿 메서드 패턴을 따르므로 파생 클래스에서 on_connect/on_read 등을 오버라이드한다.
     on_connect();
     read_loop();
 }
@@ -49,6 +50,7 @@ void Connection::async_send(const std::vector<std::uint8_t>& data) {
         const bool idle = self->write_queue_.empty();
         self->write_queue_.push_back(std::move(payload));
         if (idle) {
+            // 기존 write 작업이 없을 때만 do_write를 시작해 순서를 보장한다.
             self->do_write();
         }
     });
@@ -74,6 +76,7 @@ void Connection::read_loop() {
 
 void Connection::handle_read(const boost::system::error_code& ec, std::size_t bytes_transferred) {
     if (ec) {
+        // read/write 루프는 하나라도 실패하면 세션 전체를 닫아 정의되지 않은 상태를 피한다.
         on_error(ec);
         stop();
         return;
@@ -99,6 +102,7 @@ void Connection::handle_write(const boost::system::error_code& ec, std::size_t b
 
     write_queue_.pop_front();
     if (!write_queue_.empty()) {
+        // 큐가 비워질 때까지 한 번에 하나의 async_write만 유지해 backpressure를 단순화한다.
         do_write();
     }
 }

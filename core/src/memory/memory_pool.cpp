@@ -13,6 +13,7 @@ MemoryPool::MemoryPool(size_t blockSize, size_t blockCount)
         runtime_metrics::register_memory_pool_capacity(0);
         return;
     }
+    // 고정 길이 blockCount 개를 한 번에 할당하면 운영체제 할당/해제 비용을 숨길 수 있다.
     memoryChunk_.resize(blockSize * blockCount);
     for (size_t i = 0; i < blockCount; ++i) {
         freeList_.push(memoryChunk_.data() + i * blockSize);
@@ -56,6 +57,7 @@ BufferManager::PooledBuffer BufferManager::Acquire() {
     }
 
     // pool 로 복귀시키는 custom deleter 를 가진 unique_ptr 을 만든다.
+    // unique_ptr가 scope를 벗어나면 Release()가 자동으로 호출되므로 호출자는 생명주기만 관리하면 된다.
     return PooledBuffer(raw_ptr, [this](std::byte* p) {
         pool_.Release(p);
     });

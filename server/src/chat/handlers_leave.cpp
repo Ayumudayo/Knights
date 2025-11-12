@@ -16,9 +16,10 @@ namespace server::app::chat {
 void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
     auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
     std::string room;
-    proto::read_lp_utf8(sp, room); // 방 이름 파싱은 실패해도 계속 진행한다.
+    proto::read_lp_utf8(sp, room); // 방 이름은 선택 사항이며 비워두면 현재 방 기준으로 처리한다.
 
     auto session_sp = s.shared_from_this();
+    // DB, Redis, fanout 처리까지 필요하므로 job_queue에서 비동기로 처리한다.
     job_queue_.Push([this, session_sp, room]() {
         const std::string session_id_str = get_or_create_session_uuid(*session_sp);
         std::string user_uuid;
@@ -61,6 +62,7 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
             state_.rooms["lobby"].insert(session_sp);
         }
         // 방 퇴장 브로드캐스트 메시지를 구성한다.
+        // 해당 방 참여자에게 퇴장 알림을 먼저 팬아웃한다.
         if (!room_to_leave.empty()) {
             server::wire::v1::ChatBroadcast pb;
             pb.set_room(room_to_leave);
@@ -78,6 +80,7 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
             }
         }
         // Redis 프레즌스 SET에서 사용자를 제거한다.
+        // presence SET에서도 사용자를 제거해 TTL 기반 알림과 일치시키는다.
         if (redis_ && !room_to_leave.empty()) {
             try {
                 std::string uid;
@@ -96,6 +99,7 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
             } catch (...) {}
         }
         // 로비 입장 알림 메시지를 전송한다.
+        // 로비에 입장했다는 알림을 전체 로비 인원에게 재전송한다.
         std::vector<std::shared_ptr<Session>> t2;
         std::vector<std::uint8_t> body2;
         {
@@ -132,10 +136,11 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
             wb_fields.emplace_back("room", room_to_leave);
             wb_fields.emplace_back("user_name", sender_name);
             wb_fields.emplace_back("next_room", next_room);
+            // DLQ/재처리를 위해 leave 이벤트 메타데이터를 Redis stream에 남긴다.
             emit_write_behind_event("room_leave", session_id_str, uid_opt, room_id_opt, std::move(wb_fields));
         }
 
-        // 로비 상태를 즉시 전달해 클라이언트가 새로고침 없이도 갱신되도록 한다.
+        // 마지막으로 로비 상태 스냅샷을 내려 클라이언트 UI를 즉시 업데이트한다.
         send_snapshot(*session_sp, next_room);
     });
 }

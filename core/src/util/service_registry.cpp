@@ -7,6 +7,7 @@
 namespace server::core::util::services {
 
 namespace {
+// DLL이나 테스트 바이너리가 분리된 주소 공간에서 동일 레지스트리를 재사용하기 위한 환경 변수 키
 constexpr const char* kRegistryEnvVar = "KNIGHTS_SERVICE_REGISTRY";
 
 std::string pointer_to_string(const Registry* reg) {
@@ -47,6 +48,7 @@ Registry& Registry::instance() {
 }
 
 void Registry::set_any(std::string key, std::any value) {
+    // Registry는 경량 DI 용도로 사용되므로 std::any로 원시 포인터도 안전하게 저장한다.
     std::lock_guard<std::mutex> lock(mutex_);
     services_[std::move(key)] = std::move(value);
 }
@@ -92,4 +94,3 @@ std::string normalize_type_name(const std::type_info& info) {
 } // namespace detail
 
 } // namespace server::core::util::services
-

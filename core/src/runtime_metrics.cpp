@@ -10,6 +10,7 @@
 namespace server::core::runtime_metrics {
 
 namespace {
+// 런타임에서 빠르게 꺼내 쓸 수 있도록 모든 카운터를 단일 구조체의 원자 타입으로 모아둔다.
 struct RuntimeCounters {
     std::atomic<std::uint64_t> accept_total{0};
     std::atomic<std::uint64_t> session_started_total{0};
@@ -39,6 +40,7 @@ struct RuntimeCounters {
     std::atomic<std::uint64_t> db_job_queue_depth_peak{0};
     std::atomic<std::uint64_t> db_job_processed_total{0};
     std::atomic<std::uint64_t> db_job_failed_total{0};
+    // opcode 단위 집계를 위해 16bit 전체 공간을 미리 확보한다. (프로파일 기반으로 대부분은 0을 유지)
     std::array<std::atomic<std::uint64_t>, 65536> opcode_counters{};
 };
 
@@ -89,6 +91,7 @@ void record_frame_payload(std::size_t bytes) {
     auto& max_ref = counters().frame_payload_max_bytes;
     std::uint64_t current = max_ref.load(std::memory_order_relaxed);
     const std::uint64_t value = static_cast<std::uint64_t>(bytes);
+    // frame payload 최대치는 순서가 없으므로 CAS loop로 경합을 줄인다.
     while (current < value && !max_ref.compare_exchange_weak(current, value, std::memory_order_relaxed)) {
         // retry
     }
@@ -110,6 +113,7 @@ void record_dispatch_attempt(bool handler_found, std::chrono::nanoseconds elapse
 
     auto& max_ref = counters().dispatch_latency_max_ns;
     std::uint64_t current_max = max_ref.load(std::memory_order_relaxed);
+    // P99 등을 계산할 여지는 남겨두고, 일단 최대 지연만 추적해 장애 시점을 빠르게 찾는다.
     while (current_max < ns && !max_ref.compare_exchange_weak(current_max, ns, std::memory_order_relaxed)) {
         // retry until successfully updated or observed newer max
     }
@@ -124,6 +128,7 @@ void record_job_queue_depth(std::size_t depth) {
     auto& peak_ref = counters().job_queue_depth_peak;
     std::uint64_t current_peak = peak_ref.load(std::memory_order_relaxed);
     std::uint64_t value = static_cast<std::uint64_t>(depth);
+    // worker tuning을 위해 최대 backlog만 저장하면 되므로 lock-free CAS로 최대값만 교체한다.
     while (current_peak < value && !peak_ref.compare_exchange_weak(current_peak, value, std::memory_order_relaxed)) {
         // retry
     }
@@ -134,6 +139,7 @@ void record_db_job_queue_depth(std::size_t depth) {
     auto& peak_ref = counters().db_job_queue_depth_peak;
     std::uint64_t current_peak = peak_ref.load(std::memory_order_relaxed);
     std::uint64_t value = static_cast<std::uint64_t>(depth);
+    // DB worker pool도 동일 로직으로 가장 심했던 backlog를 추적한다.
     while (current_peak < value && !peak_ref.compare_exchange_weak(current_peak, value, std::memory_order_relaxed)) {
         // retry
     }

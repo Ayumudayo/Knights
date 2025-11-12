@@ -12,6 +12,7 @@ namespace proto = server::core::protocol;
 namespace server::app::chat {
 
 void ChatService::on_session_close(std::shared_ptr<Session> s) {
+    // 세션 종료 시에는 Redis/DB 정리와 방 브로드캐스트가 필요하므로 worker 큐에서 처리한다.
     job_queue_.Push([this, s]() {
         const std::string session_id_str = get_or_create_session_uuid(*s);
         std::string user_uuid;
@@ -35,7 +36,7 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                 if (itset != state_.by_user.end()) { itset->second.erase(s); }
             }
             state_.user.erase(s.get());
-            // 세션 UUID 매핑을 정리한다.
+            // 세션 UUID 캐시도 더 이상 필요 없으므로 제거한다.
             state_.session_uuid.erase(s.get());
             auto itcr = state_.cur_room.find(s.get());
             if (itcr != state_.cur_room.end()) {
@@ -46,7 +47,7 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                     server::wire::v1::ChatBroadcast pb;
                     pb.set_room(room_left);
                     pb.set_sender("(system)");
-                    pb.set_text(name + std::string(" 님이 떠났습니다"));
+                    pb.set_text(name + std::string(" 님이 연결을 종료했습니다"));
                     pb.set_sender_sid(0);
                     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch()).count();
@@ -94,6 +95,7 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
             std::vector<std::pair<std::string, std::string>> wb_fields;
             wb_fields.emplace_back("room", room_left);
             wb_fields.emplace_back("user_name", name);
+            // session_close 이벤트를 stream에 남겨 재처리/감사에 활용한다.
             emit_write_behind_event("session_close", session_id_str, uid_opt, room_id_opt, std::move(wb_fields));
         }
     });

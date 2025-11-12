@@ -16,6 +16,7 @@
 namespace server::storage::redis {
 
 #if defined(HAVE_REDIS_PLUS_PLUS)
+// redis++ 기반 실제 Redis 클라이언트 구현
 class RedisClientImpl final : public IRedisClient {
 public:
     explicit RedisClientImpl(const std::string& uri, Options opts) {
@@ -66,6 +67,7 @@ public:
         try { redis_->publish(channel, message); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis PUBLISH failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis PUBLISH failed: unknown"); return false; }
     }
 
+    // pattern에 대해 별도 쓰레드로 consume()을 돌리며 콜백을 호출한다.
     bool start_psubscribe(const std::string& pattern,
                           std::function<void(const std::string& channel, const std::string& message)> on_message) override {
         try {
@@ -81,6 +83,7 @@ public:
             });
             subscriber_->psubscribe(sub_pattern_);
             sub_running_ = true;
+            // consume() 실패 시 짧은 backoff 후 재시도한다.
             sub_thread_ = std::thread([this]() {
                 // 예외 시 점증 백오프(최대 1초), 필요 시 재구독
                 int backoff_ms = 10;
@@ -360,6 +363,7 @@ private:
 #endif
 
 // 항상 사용 가능한 안전한 폴백 Stub 구현
+// redis++가 없는 빌드에서는 no-op Stub을 사용한다.
 class RedisClientStub final : public IRedisClient {
 public:
     explicit RedisClientStub(std::string uri, Options opts)
@@ -390,6 +394,7 @@ private:
     Options opts_;
 };
 
+// redis++이 가능하면 실제 구현을, 아니면 Stub을 반환한다.
 std::shared_ptr<IRedisClient> make_redis_client(const std::string& uri, const Options& opts) {
 #if defined(HAVE_REDIS_PLUS_PLUS)
     try {

@@ -40,6 +40,7 @@ void TaskScheduler::schedule(Task task, Clock::duration delay) {
         post(std::move(task));
         return;
     }
+    // 지연 작업은 우선순위 큐(top = 가장 빠른 due)로 관리된다.
     std::lock_guard<std::mutex> lock(mutex_);
     delayed_.push(DelayedTask{Clock::now() + delay, std::move(task)});
 }
@@ -53,6 +54,7 @@ void TaskScheduler::schedule_every(Task task, Clock::duration interval) {
     schedule([this, interval, task = std::move(task)]() mutable {
         if (is_shutdown()) return;
         task();
+        // 주기 작업은 자기 자신을 다시 enqueue하여 close/shutdown까지 반복한다.
         schedule_every(task, interval);
     }, interval);
 }

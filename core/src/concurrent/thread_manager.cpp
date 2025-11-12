@@ -10,6 +10,8 @@ ThreadManager::~ThreadManager() {
     Stop();
 }
 
+// ThreadManagerë JobQueueë¥¼ ìë¹íë ê³ ì  ì¤ë ë íì´ë¤.
+// ê° ìì»¤ ì¤ë ëë JobQueue::Pop()ì´ nullptrë¥¼ ë°íí  ëê¹ì§ ë°ë³µ ì¤íëë¤.
 void ThreadManager::Start(int num_threads) {
     stopped_.store(false, std::memory_order_relaxed);
     threads_.reserve(num_threads);
@@ -24,7 +26,7 @@ void ThreadManager::Stop() {
         return;
     }
 
-    job_queue_.Stop(); // 대기 중인 스레드를 깨워 종료시킨다.
+    job_queue_.Stop(); // Pop() ëê¸° ì¤ì¸ ìì»¤ë¤ì ê¹¨ì¸ì´ ì¢ë£ ì í¸ë¥¼ ë°ëë¤.
 
     for (auto& t : threads_) {
         if (t.joinable()) {
@@ -34,6 +36,7 @@ void ThreadManager::Stop() {
     threads_.clear();
 }
 
+// 각 워커 스레드는 JobQueue::Pop()이 nullptr를 반환할 때까지 반복 실행된다.
 void ThreadManager::WorkerLoop() {
     while (!stopped_.load(std::memory_order_acquire)) {
         Job job = job_queue_.Pop();
