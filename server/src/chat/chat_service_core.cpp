@@ -6,7 +6,7 @@
 #include "server/core/util/service_registry.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "wire.pb.h"
-// 저장소/캐시 연동 헤더
+// 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/repositories.hpp"
 #include "server/storage/redis/client.hpp"
@@ -29,7 +29,6 @@ ChatService::ChatService(boost::asio::io_context& io,
                          std::shared_ptr<server::core::storage::IConnectionPool> db_pool,
                          std::shared_ptr<server::storage::redis::IRedisClient> redis)
     : io_(&io), job_queue_(job_queue), db_pool_(std::move(db_pool)), redis_(std::move(redis)) {
-    // ChatService는 런타임 DI를 지원하므로 인자가 nullptr이면 Registry에서 기본 인스턴스를 조회한다.
     if (!db_pool_) {
         db_pool_ = services::get<server::core::storage::IConnectionPool>();
     }
@@ -66,7 +65,6 @@ ChatService::ChatService(boost::asio::io_context& io,
     if (const char* prefix = std::getenv("REDIS_CHANNEL_PREFIX"); prefix && *prefix) {
         presence_.prefix = prefix;
     }
-    // 베타 환경에서는 접두사가 자주 바뀌므로 여러 이름을 허용한다.
     const auto read_env = [](const char* primary, const char* secondary = nullptr) -> const char* {
         if (primary) {
             if (const char* value = std::getenv(primary); value && *value) {
@@ -169,7 +167,6 @@ void ChatService::emit_write_behind_event(const std::string& type,
     if (!write_behind_enabled() || type.empty() || session_id.empty()) {
         return;
     }
-    // Redis Streams XADD 필드 구성을 표준화해 두면 DLQ/재처리 파이프라인이 단순해진다.
     std::vector<std::pair<std::string, std::string>> fields;
     fields.reserve(6 + extra_fields.size());
     fields.emplace_back("type", type);
@@ -197,7 +194,6 @@ void ChatService::emit_write_behind_event(const std::string& type,
 }
 
 void ChatService::collect_room_sessions(RoomSet& set, std::vector<std::shared_ptr<Session>>& out) {
-    // RoomSet은 weak_ptr만 유지하므로 살아 있는 세션만 옮기면서 청소한다.
     for (auto it = set.begin(); it != set.end(); ) {
         if (auto session_sp = it->lock()) {
             out.emplace_back(std::move(session_sp));
@@ -221,20 +217,20 @@ std::string ChatService::make_presence_key(std::string_view category, const std:
     return key;
 }
 
-// presence:user:<uid> TTL을 갱신해 온라인 상태를 유지한다.
 void ChatService::touch_user_presence(const std::string& uid) {
+    if (!redis_ || uid.empty()) {
         return;
     }
     redis_->setex(make_presence_key("presence:user:", uid), "1", presence_ttl());
 }
-// guest 사용자를 위한 8자리 헥사 닉네임 생성기.
+
 std::string ChatService::gen_temp_name_uuid8() {
     static thread_local std::mt19937_64 rng{std::random_device{}()};
     std::uint32_t v = static_cast<std::uint32_t>(rng());
     std::ostringstream oss; oss << std::hex; oss.width(8); oss.fill('0'); oss << v; return oss.str();
 }
 
-// 원하는 닉네임이 이미 사용 중이면 오류를 반환하고, 아니면 등록한다.
+std::string ChatService::ensure_unique_or_error(Session& s, const std::string& desired) {
     std::lock_guard<std::mutex> lk(state_.mu);
     if (!desired.empty() && desired != "guest") {
         auto itset = state_.by_user.find(desired);
@@ -252,7 +248,7 @@ std::string ChatService::gen_temp_name_uuid8() {
         return desired;
     }
     // 임시 닉네임은 UUID의 앞 8자를 잘라 32비트 난수 근사로 사용한다.
-    // 임시 닉네임은 UUID 앞 8자리를 잘라 32비트 난수 형태로 사용한다.
+    for (int i=0;i<4;++i) {
         std::string cand = gen_temp_name_uuid8();
         if (!state_.by_user.count(cand) || state_.by_user[cand].empty()) return cand;
     }
@@ -261,35 +257,21 @@ std::string ChatService::gen_temp_name_uuid8() {
 
 void ChatService::send_rooms_list(Session& s) {
     std::vector<std::uint8_t> body;
-    // 슬래시 명령 응답용으로 방 목록을 텍스트 형태로 구성한다.
     std::string msg = "rooms:";
     {
         std::lock_guard<std::mutex> lk(state_.mu);
         std::vector<std::string> to_remove;
         for (auto it = state_.rooms.begin(); it != state_.rooms.end(); ++it) {
             std::size_t alive = 0;
-            for (auto wit = it->second.begin(); wit != it->second.end(); ) {
-                if (auto p = wit->lock()) {
-                    ++alive;
-                    ++wit;
-                } else {
-                    wit = it->second.erase(wit);
-                }
-            }
-            if (alive == 0 && it->first != std::string("lobby")) {
-                to_remove.push_back(it->first);
-                continue;
-            }
+            for (auto wit = it->second.begin(); wit != it->second.end(); ) { if (auto p = wit->lock()) { ++alive; ++wit; } else { wit = it->second.erase(wit); } }
+            if (alive == 0 && it->first != std::string("lobby")) { to_remove.push_back(it->first); continue; }
             std::string display_name = it->first;
             if (state_.room_passwords.count(it->first)) {
                 display_name = "🔒" + display_name;
             }
             msg += " " + display_name + "(" + std::to_string(alive) + ")";
         }
-        for (auto& name : to_remove) {
-            state_.rooms.erase(name);
-            state_.room_passwords.erase(name);
-        }
+        for (auto& name : to_remove) { state_.rooms.erase(name); state_.room_passwords.erase(name); }
     }
     server::wire::v1::ChatBroadcast pb; pb.set_room("(system)"); pb.set_sender("(system)"); pb.set_text(msg); pb.set_sender_sid(0);
     {
@@ -305,7 +287,6 @@ void ChatService::send_rooms_list(Session& s) {
 }
 
 void ChatService::send_room_users(Session& s, const std::string& target) {
-    // target이 비어 있으면 현재 방 기준으로 사용자 리스트를 내려준다.
     std::vector<std::string> names;
     bool allow = true;
     {
@@ -354,40 +335,21 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
 
 void ChatService::send_snapshot(Session& s, const std::string& current) {
     std::vector<std::uint8_t> body;
-    server::wire::v1::StateSnapshot pb;
-    pb.set_current_room(current);
+    server::wire::v1::StateSnapshot pb; pb.set_current_room(current);
     {
         std::lock_guard<std::mutex> lk(state_.mu);
         std::vector<std::string> to_remove;
         for (auto it = state_.rooms.begin(); it != state_.rooms.end(); ++it) {
-            std::uint32_t alive = 0;
-            for (auto wit = it->second.begin(); wit != it->second.end(); ) {
-                if (auto p = wit->lock()) {
-                    ++alive;
-                    ++wit;
-                } else {
-                    wit = it->second.erase(wit);
-                }
-            }
-            if (alive == 0 && it->first != std::string("lobby")) {
-                to_remove.push_back(it->first);
-                continue;
-            }
-            auto* ri = pb.add_rooms();
-            ri->set_name(it->first);
-            ri->set_members(alive);
-            ri->set_locked(state_.room_passwords.count(it->first) > 0);
+            std::uint32_t alive = 0; for (auto wit = it->second.begin(); wit != it->second.end(); ) { if (auto p = wit->lock()) { ++alive; ++wit; } else { wit = it->second.erase(wit); } }
+            if (alive == 0 && it->first != std::string("lobby")) { to_remove.push_back(it->first); continue; }
+            auto* ri = pb.add_rooms(); ri->set_name(it->first); ri->set_members(alive); ri->set_locked(state_.room_passwords.count(it->first) > 0);
         }
-        for (auto& name : to_remove) {
-            state_.rooms.erase(name);
-            state_.room_passwords.erase(name);
-        }
+        for (auto& name : to_remove) { state_.rooms.erase(name); state_.room_passwords.erase(name); }
     }
     {
         std::lock_guard<std::mutex> lk(state_.mu);
         auto itroom = state_.rooms.find(current);
         if (itroom != state_.rooms.end()) {
-            // 현재 방에 있는 세션 이름을 snapshot users 필드에 추가한다.
             for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
                 if (auto p = wit->lock()) {
                     auto itu = state_.user.find(p.get());
@@ -398,7 +360,7 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         }
     }
     // 최근 메시지를 Redis에서 우선 조회하고 필요 시 DB로 폴백한다.
-    // 최근 메시지는 Redis 캐시를 먼저 조회하고 필요 시 DB로 보충한다.
+    std::string rid;
     {
         std::lock_guard<std::mutex> lk(state_.mu);
         auto it = state_.room_ids.find(current);
@@ -427,7 +389,6 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
     std::uint64_t last_seen_value = 0;
     bool last_seen_loaded = false;
     if (db_pool_ && !rid.empty()) {
-        // Redis 캐시가 부족한 경우를 대비해 membership/메시지를 DB에서 보충한다.
         try {
             std::string uid;
             {
@@ -450,7 +411,6 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                 const std::size_t fetch_span = limit * fetch_factor;
                 const std::size_t fetch_count = std::min(history_.max_list_len, std::max(limit, fetch_span));
 
-                // 마지막 읽음 ID를 기준으로 limit*fetch_factor 만큼 context를 확보한다.
                 auto last_id = uow->messages().get_last_id(rid);
                 std::uint64_t since_id = 0;
                 if (last_id > 0) {
@@ -513,7 +473,7 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
 } // namespace server::app::chat
 
 // 외부에서 수신한 브로드캐스트를 방에 전달한다.
-// 외부에서 수신한 브로드캐스트를 방에 전달한다.
+namespace server::app::chat {
 
 void ChatService::broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, Session* self) {
     std::vector<std::shared_ptr<Session>> targets;
@@ -525,8 +485,7 @@ void ChatService::broadcast_room(const std::string& room, const std::vector<std:
         }
     }
     for (auto& t : targets) {
-        // 현재는 전체 브로드캐스트에 동일 flag를 사용하지만 self echo 방지 등 확장이 가능하다.
-        // 현재는 전체 브로드캐스트에 동일 flag를 사용하지만 self echo 확장 여지는 남겨둔다.
+        int f = 0; // 재전파에서는 self 플래그를 사용하지 않는다.
         t->async_send(proto::MSG_CHAT_BROADCAST, body, f);
     }
 }
@@ -534,11 +493,10 @@ void ChatService::broadcast_room(const std::string& room, const std::vector<std:
 } // namespace server::app::chat
 
 // 저장소 보조 함수를 별도 섹션으로 분리한다.
-// 저장소 보조 함수를 별도 섹션으로 분리한다.
+namespace server::app::chat {
 
 void ChatService::send_system_notice(Session& s, const std::string& text) {
-    // (system) 발신자는 클라 측에서 회색 메시지로 표현되므로 운영 메시지를 일관되게 노출할 수 있다.
-    // (system) 발신자는 클라이언트에서 회색 메시지로 표기되므로 운영 공지를 일관되게 보낼 수 있다.
+    server::wire::v1::ChatBroadcast pb;
     pb.set_room("(system)");
     pb.set_sender("(system)");
     pb.set_text(text);
@@ -553,8 +511,7 @@ void ChatService::send_system_notice(Session& s, const std::string& text) {
 }
 
 void ChatService::send_whisper_result(Session& s, bool ok, const std::string& reason) {
-    // 슬래시 커맨드 UX를 위해 whisper 결과를 별도 opcode로 보내고, 실패 사유를 명확히 설명한다.
-    // 슬래시 커맨드 UX를 위해 whisper 결과를 별도 opcode로 내려 실패 사유를 명시한다.
+    server::wire::v1::WhisperResult pb;
     pb.set_ok(ok);
     if (!reason.empty()) {
         pb.set_reason(reason);
@@ -573,8 +530,7 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
         return;
     }
 
-    // 귓속말 대상은 로그인 세션만 허용하므로 인증/guest 상태를 먼저 검사한다.
-    // 귓속말은 로그인 세션만 허용하므로 인증/guest 상태를 먼저 검사한다.
+    {
         std::lock_guard<std::mutex> lk(state_.mu);
         if (!state_.authed.count(session_sp.get())) {
             session_sp->send_error(proto::errc::UNAUTHORIZED, "unauthorized");
@@ -681,7 +637,6 @@ std::string ChatService::hash_room_password(const std::string& password) {
     return oss.str();
 }
 
-// room_name을 대소문자 구분 없이 조회/생성해 room_id 캐시를 반환한다.
 std::string ChatService::ensure_room_id_ci(const std::string& room_name) {
     if (!db_pool_) return std::string();
     // 캐시 확인
@@ -711,12 +666,10 @@ std::string ChatService::ensure_room_id_ci(const std::string& room_name) {
 }
 
 
-// Redis recent list 키(prefix room:<id>:recent)를 생성한다.
 std::string ChatService::make_recent_list_key(const std::string& room_id) const {
     return std::string("room:") + room_id + ":recent";
 }
 
-// 개별 메시지 payload는 msg:<id> 키로 저장한다.
 std::string ChatService::make_recent_message_key(std::uint64_t message_id) const {
     return std::string("msg:") + std::to_string(message_id);
 }
@@ -724,7 +677,6 @@ std::string ChatService::make_recent_message_key(std::uint64_t message_id) const
 bool ChatService::cache_recent_message(
     const std::string& room_id,
     const server::wire::v1::StateSnapshot::SnapshotMessage& message) {
-    // recent history는 메시지 payload를 setex(msg:<id>)로 저장하고 리스트에는 ID만 넣는다.
     if (!redis_ || room_id.empty() || message.id() == 0) {
         return false;
     }
@@ -743,7 +695,6 @@ bool ChatService::cache_recent_message(
 bool ChatService::load_recent_messages_from_cache(
     const std::string& room_id,
     std::vector<server::wire::v1::StateSnapshot::SnapshotMessage>& out) {
-    // recent 목록을 끝에서 recent_limit 만큼 읽어오고, setex된 payload를 역직렬화한다.
     if (!redis_ || room_id.empty() || history_.recent_limit == 0) {
         return false;
     }

@@ -50,7 +50,7 @@ bool load_dotenv(const std::string& path, bool override_existing) {
     std::ifstream in(path);
     if (!in.is_open()) return false;
     std::string line;
-        // ì¤ì  íì¼(.env)ì íëì© ì½ì´ íëì© íê²½ ë³ìì ì¤ì íë¤.
+    // 설정 파일(.env)을 한 줄씩 읽어 환경 변수에 반영한다.
     while (std::getline(in, line)) {
         // 공백과 주석 줄을 제거한다.
         trim(line);

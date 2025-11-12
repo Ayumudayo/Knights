@@ -21,7 +21,8 @@ param(
   [switch]$ReleasePackage,
   [string]$ReleaseOutput = "artifacts",
   [string[]]$ReleaseTargets = @('server_app','gateway_app','load_balancer_app','dev_chat_cli','wb_worker'),
-  [switch]$ReleaseZip
+  [switch]$ReleaseZip,
+  [int]$MaxJobs = 0
 )
 
 $ErrorActionPreference = 'Stop'
@@ -140,7 +141,17 @@ Info "빌드 중..."
 if (-not $Target -or $Target -eq '') {
   if ($onWindows -and $Generator -like 'Visual Studio*') { $Target = 'ALL_BUILD' } else { $Target = 'all' }
 }
-& cmake --build $BuildDir --config $Config --target $Target -j
+$buildArgs = @('--build', $BuildDir, '--config', $Config, '--target', $Target)
+if ($MaxJobs -gt 0) {
+  if ($onWindows -and $Generator -like 'Visual Studio*') {
+    $buildArgs += @('--', "/m:$MaxJobs")
+  } else {
+    $buildArgs += @('--', "-j$MaxJobs")
+  }
+} elseif (-not ($onWindows -and $Generator -like 'Visual Studio*')) {
+  $buildArgs += @('--', '-j')
+}
+& cmake @buildArgs
 if ($LASTEXITCODE -ne 0) { Fail "빌드 실패" }
 
 if ($InstallPrefix -and $InstallPrefix -ne '') {
