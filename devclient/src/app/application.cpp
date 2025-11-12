@@ -29,6 +29,7 @@ constexpr const char* kEnvHost = "DEVCLIENT_HOST";
 constexpr const char* kEnvPort = "DEVCLIENT_PORT";
 } // namespace
 
+// UI 구성 요소, 명령 처리기, 네트워크 클라이언트를 묶어 운영하는 내부 구현체.
 class Application::Impl {
 public:
     Impl(std::string host, unsigned short port, bool allow_env_override);
@@ -88,11 +89,12 @@ int Application::Impl::Run() {
             request_refresh_();
             return true;
         }
+        // F5: 현재 방의 스냅샷을 다시 요청한다.
         if (event == ftxui::Event::F5) {
             if (state_.connected()) {
                 net_.send_refresh(state_.current_room());
             } else {
-                log_sink_("연결되지 않았습니다.");
+                log_sink_("연결되어 있지 않습니다.");
             }
             return true;
         }
@@ -106,13 +108,14 @@ int Application::Impl::Run() {
             request_refresh_();
             return true;
         }
+        // Enter 키 입력 시 명령어/채팅을 구분해 처리한다.
         if (event == ftxui::Event::Return && input->Focused()) {
             const std::string line = state_.input_buffer();
             state_.input_buffer().clear();
             if (!line.empty()) {
                 if (!commands_.Process(line)) {
                     if (state_.username() == AppState::kDefaultUser) {
-                        log_sink_("[warn] 게스트는 채팅을 보낼 수 없습니다. /login 명령으로 로그인하세요.");
+                        log_sink_("[warn] 게스트는 채팅을 보낼 수 없습니다. /login 으로 로그인하세요.");
                     } else {
                         net_.send_chat(state_.current_room(), line);
                     }
@@ -135,13 +138,15 @@ int Application::Impl::Run() {
 }
 
 void Application::Impl::AppendInitialLogs() {
+    // UI 시작 시 기본 안내 메시지를 출력한다.
     log_sink_("[system] FTXUI 클라이언트를 시작했습니다.");
     log_sink_("[hint] 명령어: /login <name>, /join <room> [password], /whisper <user> <message>, /leave, /refresh");
-    log_sink_("[hint] 자물쇠가 표시된 방은 비밀번호가 필요합니다.");
-    log_sink_("[hint] 입력 후 Enter 키로 전송합니다.");
+    log_sink_("[hint] 방이 잠겨 있으면 비밀번호가 필요합니다.");
+    log_sink_("[hint] 입력 후 Enter 키를 누르세요.");
 }
 
 void Application::Impl::Connect() {
+    // 현재 host/port로 TCP 연결을 시도하고 실패 시 로그만 남긴다.
     if (net_.connect(host_, port_)) {
         state_.set_connected(true);
         log_sink_(std::string("연결됨: ") + host_ + ":" + std::to_string(port_));
@@ -153,6 +158,7 @@ void Application::Impl::Connect() {
 }
 
 void Application::Impl::LoadEnvironment() {
+    // 실행 파일 위치와 repo 루트 순으로 .env를 찾고, DEVCLIENT_HOST/PORT를 덮어쓴다.
     namespace paths = server::core::util::paths;
     bool loaded = false;
     try {

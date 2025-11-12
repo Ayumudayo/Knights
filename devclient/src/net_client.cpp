@@ -17,6 +17,7 @@ namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 namespace proto = server::core::protocol;
 
+// 단일 io_context 위에서 strand로 I/O 순서를 보장한다.
 NetClient::NetClient() : socket_(io_), strand_(io_.get_executor()) {
     read_header_.resize(proto::k_header_bytes);
 }
@@ -44,7 +45,7 @@ bool NetClient::connect(const std::string& host, unsigned short port) {
     work_guard_ = std::make_unique<WorkGuard>(asio::make_work_guard(io_));
     ping_timer_ = std::make_unique<Timer>(io_);
 
-    start_read_header();
+    start_read_header(); // 연결 직후 서버 HELLO를 기다린다.
     schedule_ping();
 
     io_thread_ = std::thread([this] { io_.run(); });
@@ -52,6 +53,7 @@ bool NetClient::connect(const std::string& host, unsigned short port) {
 }
 
 void NetClient::close() {
+    // 연결 상태 플래그를 내려두면 enqueue_frame 등이 더 이상 새 요청을 보내지 않는다.
     running_.store(false);
     connected_.store(false);
 
@@ -78,6 +80,7 @@ void NetClient::close() {
 }
 
 void NetClient::start_read_header() {
+    // 고정 길이 헤더를 읽어 길이/ID를 파싱한 뒤 본문을 이어서 읽는다.
     asio::async_read(
         socket_,
         asio::buffer(read_header_),
@@ -97,6 +100,7 @@ void NetClient::start_read_header() {
 
 void NetClient::start_read_body(const proto::FrameHeader& header) {
     if (read_body_.empty()) {
+        // payload가 없는 메시지는 바로 처리하고 다음 헤더로 이동한다.
         handle_frame(header, std::span<const std::uint8_t>{});
         start_read_header();
         return;
@@ -119,6 +123,7 @@ void NetClient::start_read_body(const proto::FrameHeader& header) {
 
 void NetClient::schedule_ping() {
     if (!ping_timer_) return;
+    // 서버 타임아웃을 피하기 위해 8초 간격으로 ping을 보낸다.
     ping_timer_->expires_after(std::chrono::seconds(8));
     ping_timer_->async_wait(boost::asio::bind_executor(
         strand_,
@@ -160,6 +165,7 @@ void NetClient::enqueue_frame(std::uint16_t msg_id, std::uint16_t flags, std::ve
     });
 }
 
+// async_write 완료 시까지 큐를 유지하며 순차적으로 전송한다.
 void NetClient::drain_send_queue() {
     if (write_queue_.empty()) return;
     auto buffer = write_queue_.front();
@@ -183,6 +189,7 @@ void NetClient::drain_send_queue() {
 
 void NetClient::handle_frame(const proto::FrameHeader& hh, std::span<const std::uint8_t> in) {
     if (hh.msg_id == proto::MSG_PING) {
+        // 서버에서 ping이 오면 pong으로 즉시 응답해 RTT를 맞춘다.
         enqueue_frame(proto::MSG_PONG, 0);
         return;
     }
@@ -318,6 +325,7 @@ void NetClient::handle_disconnect(const boost::system::error_code& ec, const cha
     }
     connected_.store(false);
 
+    // 모든 I/O 자원을 닫고 콜백에 reason을 전달한다.
     boost::system::error_code ignore;
     socket_.cancel(ignore);
     socket_.close(ignore);
