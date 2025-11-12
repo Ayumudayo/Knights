@@ -28,7 +28,6 @@ std::string Trim(std::string s) {
     return RTrim(LTrim(std::move(s)));
 }
 
-std::string NormalizeCommand(std::string line) {
 // 사용자 입력을 트리밍하고 alias를 canonical 명령으로 치환한다.
 std::string NormalizeCommand(std::string line) {
     static constexpr std::pair<std::string_view, std::string_view> kAliases[] = {
@@ -77,7 +76,7 @@ bool CommandProcessor::HandleCommand(const std::string& line) {
     }
 
     PrintUsage("알 수 없는 명령입니다: " + line);
-    PrintUsage("알 수 없는 명령입니다: " + line);
+    return true;
 }
 
 bool CommandProcessor::HandleLogin(const std::string& args) {
@@ -132,11 +131,11 @@ bool CommandProcessor::HandleWhisper(const std::string& args) {
 
     if (state_.username() == AppState::kDefaultUser) {
         Warn("[warn] 로그인 상태에서만 귓속말을 보낼 수 있습니다.");
-        Warn("[warn] 로그인 상태에서만 귓속말을 보낼 수 있습니다.");
+        return true;
     }
     if (target == state_.username()) {
-        Warn("[warn] 자신에게는 귓속말을 보낼 수 없습니다.");
         Warn("[warn] 자기 자신에게는 귓속말을 보낼 수 없습니다.");
+        return true;
     }
 
     net_.send_whisper(target, message);
@@ -150,15 +149,16 @@ bool CommandProcessor::HandleLeave(const std::string& args) {
     return true;
 }
 
-bool CommandProcessor::HandleRefresh(const std::string& args) {
 // /refresh는 인자가 없으며 연결 상태에서만 허용된다.
 bool CommandProcessor::HandleRefresh(const std::string& args) {
+    if (!Trim(args).empty()) {
         PrintUsage("usage: /refresh");
         return true;
     }
     if (!state_.connected()) {
-    if (!state_.connected()) {
         Warn("연결되어 있지 않습니다.");
+        return true;
+    }
     net_.send_refresh(state_.current_room());
     return true;
 }
