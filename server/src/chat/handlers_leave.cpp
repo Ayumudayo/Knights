@@ -79,8 +79,7 @@ void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
                 t->async_send(proto::MSG_CHAT_BROADCAST, body, f);
             }
         }
-        // Redis 프레즌스 SET에서 사용자를 제거한다.
-        // presence SET에서도 사용자를 제거해 TTL 기반 알림과 일치시키는다.
+        // Redis presence SET에서도 사용자를 제거해 TTL 기반 알림과 일치시킨다.
         if (redis_ && !room_to_leave.empty()) {
             try {
                 std::string uid;

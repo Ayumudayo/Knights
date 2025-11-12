@@ -26,7 +26,7 @@ void ChatService::on_ping(Session& s, std::span<const std::uint8_t> payload) {
         if (uid.empty()) return;
         touch_user_presence(uid);
     } catch (...) {
-    // 네트워크 hiccup 등으로 실패해도 치명적이지 않으므로 조용히 무시한다.
+        // 네트워크 hiccup 등으로 실패해도 치명적이지 않으므로 조용히 무시한다.
     }
 }
 } // namespace server::app::chat
