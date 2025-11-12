@@ -31,6 +31,7 @@ UiBuilder::UiBuilder(AppState& state,
 UiBuilder::UiComponents UiBuilder::Build() {
     MenuOption rooms_opt;
     rooms_opt.on_change = [this] {
+        // 방 선택이 바뀌면 preview를 갱신하고 서버에 /who를 보낸다.
         auto& rooms = state_.rooms();
         const int index = state_.rooms_selected();
         if (index >= 0 && index < static_cast<int>(rooms.size())) {
@@ -59,6 +60,7 @@ UiBuilder::UiComponents UiBuilder::Build() {
     rooms_menu_ = Menu(&state_.rooms(), &state_.rooms_selected(), rooms_opt);
     users_menu_ = Menu(&state_.users(), &state_.users_selected());
 
+    // 로그 영역은 paragraph 렌더링을 사용하고 auto-scroll 여부를 추적한다.
     MenuOption log_option = MenuOption::Vertical();
     log_option.underline.enabled = false;
     log_option.entries_option.transform = [](const EntryState& entry_state) {
@@ -111,6 +113,7 @@ UiBuilder::UiComponents UiBuilder::Build() {
 }
 
 Component UiBuilder::BuildLeftPane() {
+    // 좌측 패널: 방 목록 + 사용자 목록
     auto left_container = Container::Vertical({rooms_menu_, users_menu_});
     return Renderer(left_container, [this] {
         auto rooms_panel = window(text("방"), rooms_menu_->Render() | vscroll_indicator | yframe);
@@ -131,6 +134,7 @@ Component UiBuilder::BuildRightPane() {
         const bool mid = width >= 80;
         const bool small = width >= 60;
 
+        // 상단 상태줄: 방 이름/인원수/사용자/연결 상태를 표시한다.
         Elements header_parts;
         header_parts.push_back(text(" 방:") | dim);
         header_parts.push_back(text(" "));

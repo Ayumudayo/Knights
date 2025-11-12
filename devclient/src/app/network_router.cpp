@@ -26,6 +26,7 @@ NetworkRouter::NetworkRouter(AppState& state,
       log_sink_(std::move(log_sink)) {}
 
 void NetworkRouter::Initialize() {
+    // 서버 HELLO는 capability 정보를 담고 있으므로 저장 후 로그로 남긴다.
     net_.set_on_hello([this](std::uint16_t caps) {
         screen_.Post([this, caps]() {
             const bool sender_sid = (caps & 0x0002) != 0;
@@ -35,6 +36,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 서버 ERR 응답은 프로토콜 코드별로 힌트를 붙여 로그에 표시한다.
     net_.set_on_err([this](std::uint16_t code, std::string msg) {
         screen_.Post([this, code, msg = std::move(msg)]() mutable {
             std::string hint;
@@ -51,6 +53,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 연결 종료 시 상태를 초기화하고 이유를 출력한다.
     net_.set_on_disconnected([this](std::string reason) {
         screen_.Post([this, reason = std::move(reason)]() mutable {
             state_.set_connected(false);
@@ -59,6 +62,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 로그인 응답이 오면 username/sid를 갱신하고 즉시 스냅샷을 요청한다.
     net_.set_on_login_res([this](std::string effective_user, std::uint32_t sid) {
         screen_.Post([this, effective_user = std::move(effective_user), sid]() mutable {
             if (!effective_user.empty()) {
@@ -71,6 +75,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 일반 채팅 브로드캐스트는 system rooms 메시지인지 검사한 뒤 로그에 출력한다.
     net_.set_on_broadcast([this](std::string room,
                                  std::string sender,
                                  std::string text,
@@ -101,6 +106,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 귓속말은 방향에 따라 prefix를 달리하고 로그에 기록한다.
     net_.set_on_whisper([this](std::string sender,
                                std::string recipient,
                                std::string text,
@@ -117,6 +123,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 실패한 귓속말 결과만 사용자에게 경고한다.
     net_.set_on_whisper_result([this](bool ok, std::string reason) {
         if (ok || reason.empty()) {
             return;
@@ -127,6 +134,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 현재/프리뷰 방과 일치하는 사용자 목록만 업데이트한다.
     net_.set_on_room_users([this](std::string room, std::vector<std::string> list) {
         screen_.Post([this,
                       room = std::move(room),
@@ -138,6 +146,7 @@ void NetworkRouter::Initialize() {
         });
     });
 
+    // 스냅샷에는 방 목록/잠금 상태/현재 방 사용자 등이 포함된다.
     net_.set_on_snapshot([this](std::string snap_room,
                                 std::vector<std::string> new_rooms,
                                 std::vector<std::string> new_users,
