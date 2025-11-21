@@ -2,8 +2,8 @@
   "name": "knights",
   "version-string": "0.1.0",
   "description": "Chat server + FTXUI-based CLI client",
-  "homepage": "",
   "dependencies": [
+    "boost-asio",
     "ftxui",
     "protobuf",
     "grpc",

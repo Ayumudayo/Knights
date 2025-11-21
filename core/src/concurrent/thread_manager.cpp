@@ -10,8 +10,8 @@ ThreadManager::~ThreadManager() {
     Stop();
 }
 
-// ThreadManager는 JobQueue를 소비하는 고정 스레드 풀이다.
-// 각 워커 스레드는 JobQueue::Pop()이 nullptr를 반환할 때까지 반복 실행된다.
+// ThreadManager는 JobQueue를 소비하는 고정 스레드 풀입니다.
+// 각 워커 스레드는 JobQueue::Pop()이 nullptr를 반환할 때까지 반복 실행됩니다.
 void ThreadManager::Start(int num_threads) {
     stopped_.store(false, std::memory_order_relaxed);
     threads_.reserve(num_threads);
@@ -26,7 +26,7 @@ void ThreadManager::Stop() {
         return;
     }
 
-    job_queue_.Stop(); // Pop()에서 대기 중인 워커들을 모두 깨워 종료 신호를 전달한다.
+    job_queue_.Stop(); // Pop()에서 대기 중인 워커들을 모두 깨워 종료 신호를 전달합니다.
 
     for (auto& t : threads_) {
         if (t.joinable()) {
@@ -36,11 +36,11 @@ void ThreadManager::Stop() {
     threads_.clear();
 }
 
-// 각 워커 스레드는 JobQueue::Pop()이 nullptr를 반환할 때까지 반복 실행된다.
+// 각 워커 스레드는 JobQueue::Pop()이 nullptr를 반환할 때까지 반복 실행됩니다.
 void ThreadManager::WorkerLoop() {
     while (!stopped_.load(std::memory_order_acquire)) {
         Job job = job_queue_.Pop();
-        if (!job) { // nullptr 작업이 오면 종료한다.
+        if (!job) { // nullptr 작업이 오면 종료합니다.
             break;
         }
         job();

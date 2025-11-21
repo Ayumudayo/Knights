@@ -41,4 +41,4 @@ devclient/
 cmake --build build-msvc --target dev_chat_cli
 .\build-msvc\devclient\Debug\dev_chat_cli.exe
 ```
-FTXUI 는 vcpkg 패키지를 사용하므로, `scripts/build.ps1` 실행 시 `-UseVcpkg` 옵션을 붙이는 것을 권장합니다.
+FTXUI 는 vcpkg 패키지를 사용하므로, 빌드 전에 `scripts/setup_vcpkg.ps1` 또는 `scripts/setup_vcpkg.sh`로 의존성을 준비해 주세요.

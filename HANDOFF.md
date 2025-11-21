@@ -52,7 +52,7 @@
   - `tools/wb_check/main.cpp` — DB 반영 확인(.env 로드)
 - 스크립트/설정
   - `scripts/run_all.ps1`, `scripts/run_all.sh`
-  - `scripts/build.ps1` (BuildDir/UseVcpkg/Fail-fast)
+  - `scripts/build.ps1` (BuildDir/Fail-fast)
   - 루트 `.env` 및 각 바이너리 폴더에 복사된 `.env`
 
 ## 실행 절차(권장)

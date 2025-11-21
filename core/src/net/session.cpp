@@ -11,15 +11,13 @@
 #include <cstring>
 #include <algorithm>
 #include <chrono>
-#include "server/core/protocol/frame.hpp"
-
 using boost::system::error_code;
 
 namespace server::core {
 
-// Session은 단일 TCP 연결을 비동기적으로 관리하는 핵심 객체다.
+// Session은 단일 TCP 연결을 비동기적으로 관리하는 핵심 객체입니다.
 // 모든 작업이 strand 위에서 진행되어 송수신 경합이 발생하지 않으며,
-// SharedState는 총 연결 수와 session_id를 추적해 관측 지표를 제공한다.
+// SharedState는 총 연결 수와 session_id를 추적해 관측 지표를 제공합니다.
 Session::Session(asio::ip::tcp::socket socket,
                  Dispatcher& dispatcher,
                  BufferManager& buffer_manager,
@@ -48,8 +46,8 @@ std::string Session::remote_ip() const {
 }
 
 void Session::start() {
-    // 서버와 클라이언트의 버전/옵션을 맞추기 위해 HELLO를 가장 먼저 보낸다.
-    // 이후 read/ping 타이머를 동시에 설정해 두면 I/O 경합 없이 진행된다.
+    // 서버와 클라이언트의 버전/옵션을 맞추기 위해 HELLO를 가장 먼저 보냅니다.
+    // 이후 read/ping 타이머를 동시에 설정해 두면 I/O 경합 없이 진행됩니다.
     send_hello();
     do_read_header();
     arm_read_timeout();
@@ -125,7 +123,6 @@ std::pair<BufferManager::PooledBuffer, size_t> Session::make_frame(std::uint16_t
     }
     return {std::move(buffer), frame_size};
 }
-
 
 void Session::do_read_header() {
     auto self = shared_from_this();
@@ -314,6 +311,19 @@ void Session::arm_heartbeat() {
         heartbeat_timer_.expires_after(std::chrono::milliseconds(options_->heartbeat_interval_ms));
         heartbeat_timer_.async_wait(asio::bind_executor(strand_, [this, self](const error_code& ec) {
             if (ec || stopped_) return; // 타이머가 취소되었거나 세션이 이미 종료된 경우 무시한다.
+            
+            // PING 메시지 전송 (MSG_PING = 0x0002)
+            // 페이로드는 비워둔다.
+            auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
+            
+            auto [buffer, frame_size] = make_frame(0x0002 /*MSG_PING*/, 0, {}, tx_seq_++, now32);
+            if (buffer) {
+                async_send(std::move(buffer), frame_size);
+            }
+
+            // 다음 하트비트 예약
             arm_heartbeat();
         }));
     });

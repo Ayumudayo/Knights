@@ -15,7 +15,8 @@ Hive::io_context& Hive::context() {
 }
 
 void Hive::run() {
-    // work_guard가 살아 있는 동안 run()은 큐가 빌 때까지 블로킹된다.
+    // work_guard가 살아 있는 동안 io_context::run()은 리턴하지 않고 계속 실행됩니다.
+    // 즉, 이 함수를 호출한 스레드는 이벤트 루프가 되어 I/O 작업을 처리합니다.
     stopped_.store(false, std::memory_order_relaxed);
     io_.run();
 }
@@ -26,7 +27,8 @@ void Hive::stop() {
         return;
     }
 
-    // guard를 해제해야 io_context::run이 빠져나와 스레드가 종료된다.
+    // guard를 reset()하면 io_context에 더 이상 할 일이 없다고 알리게 됩니다.
+    // 처리 중인 작업이 모두 끝나면 run()이 반환되고 스레드가 종료됩니다.
     guard_.reset();
     io_.stop();
 }

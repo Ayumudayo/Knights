@@ -7,10 +7,10 @@
 - CMake 3.20+, C++20 컴파일러(MSVC 19.3x+/GCC 11+/Clang 14+) (CMakeLists.txt:1)
 - vcpkg(권장) — 루트의 `vcpkg.json` 매니페스트 사용 (vcpkg.json:1)
 - Redis, PostgreSQL (로컬 또는 원격 인스턴스) (server/src/app/bootstrap.cpp:88; server/src/app/bootstrap.cpp:111)
-
+- vcpkg(필수) — manifest(`vcpkg.json`) 기반 의존성 해결
 ## 1) 의존성 설치(권장: vcpkg)
-- VCPKG_ROOT 환경변수 설정(예: `C:\Program Files\Microsoft Visual Studio\2022\Community\VC\vcpkg`)
-- 첫 빌드시 스크립트가 자동으로 `vcpkg install`을 수행합니다.
+- `scripts/setup_vcpkg.ps1`(Windows) 또는 `scripts/setup_vcpkg.sh`(Linux/WSL)을 실행해 `external/vcpkg`를 준비하세요.
+- 스크립트가 자동으로 `vcpkg install`을 호출하므로 별도 명령이 필요 없습니다.
 
 ## 2) 환경 변수(.env) 준비
 프로젝트 루트에 `.env` 파일을 만들고 다음 예시를 기반으로 값을 설정합니다.
@@ -73,8 +73,8 @@ psql "$DB_URI" -f tools/migrations/0004_session_events.sql
 Windows PowerShell:
 
 ```
-scripts/build.ps1 -UseVcpkg -Config Debug -Target server_app
-scripts/build.ps1 -UseVcpkg -Config Debug -Target wb_worker
+scripts/build.ps1  -Config Debug -Target server_app
+scripts/build.ps1  -Config Debug -Target wb_worker
 ```
 
 산출물 예시(Visual Studio 제너레이터):

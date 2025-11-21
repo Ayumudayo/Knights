@@ -1,0 +1,60 @@
+<#
+  Knights용 vcpkg 부트스트랩 + 의존성 설치 스크립트
+  - external/vcpkg 아래에 공식 vcpkg 저장소를 자동으로 클론합니다.
+  - OS에 맞는 bootstrap 스크립트를 호출해 vcpkg 실행파일을 생성합니다.
+  - manifest(vcpkg.json)에 정의된 패키지를 지정된 triplet으로 설치합니다.
+#>
+[CmdletBinding()]
+param(
+  [string]$Triplet = "",
+  [switch]$SkipInstall,
+  [string]$Repo = "https://github.com/microsoft/vcpkg.git"
+)
+
+$ErrorActionPreference = 'Stop'
+function Info($msg){ Write-Host "[info] $msg" -ForegroundColor Cyan }
+function Warn($msg){ Write-Host "[warn] $msg" -ForegroundColor Yellow }
+function Fail($msg){ Write-Host "[fail] $msg" -ForegroundColor Red; exit 1 }
+
+$repoRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
+$vcpkgRoot = Join-Path $repoRoot "external/vcpkg"
+
+if (-not $Triplet -or $Triplet -eq '') {
+  if ($IsWindows) { $Triplet = 'x64-windows' }
+  else { $Triplet = 'x64-linux' }
+}
+
+if (-not (Test-Path $vcpkgRoot)) {
+  Info "vcpkg 저장소가 없어 새로 클론합니다: $Repo -> $vcpkgRoot"
+  git clone --depth 1 $Repo $vcpkgRoot | Out-Null
+} else {
+  Info "기존 vcpkg 경로 사용: $vcpkgRoot"
+}
+
+$exeName = $IsWindows ? 'vcpkg.exe' : 'vcpkg'
+$exePath = Join-Path $vcpkgRoot $exeName
+if (-not (Test-Path $exePath)) {
+  $bootstrap = $IsWindows ? 'bootstrap-vcpkg.bat' : 'bootstrap-vcpkg.sh'
+  $bootstrapPath = Join-Path $vcpkgRoot $bootstrap
+  if (-not (Test-Path $bootstrapPath)) { Fail "bootstrap 스크립트를 찾지 못했습니다: $bootstrapPath" }
+  Info "vcpkg bootstrap 실행: $bootstrapPath"
+  Push-Location $vcpkgRoot
+  try {
+    if ($IsWindows) {
+      & $bootstrapPath
+    } else {
+      bash $bootstrapPath
+    }
+  } finally {
+    Pop-Location
+  }
+  if (-not (Test-Path $exePath)) { Fail "vcpkg 실행파일 생성 실패: $exePath" }
+}
+
+if (-not $SkipInstall) {
+  Info "manifest 의존성 설치(vcpkg install --triplet $Triplet)"
+  & $exePath install --triplet $Triplet
+  if ($LASTEXITCODE -ne 0) { Fail "vcpkg install 실패" }
+}
+
+Write-Output (Resolve-Path $vcpkgRoot).Path

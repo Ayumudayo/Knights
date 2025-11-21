@@ -1,25 +1,31 @@
 #include "server/core/net/dispatcher.hpp"
 #include "server/core/net/session.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/net/dispatcher.hpp"
+#include "server/core/net/session.hpp"
+#include "server/core/util/log.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/runtime_metrics.hpp"
 
 namespace server::core {
 
 void Dispatcher::register_handler(std::uint16_t msg_id, handler_t handler) {
-    // msg_id는 protocol/opcodes.json에서 보장하므로 간단히 map에 저장한다.
+    // msg_id는 protocol/opcodes.json에서 정의된 메시지 ID입니다.
+    // 이 함수는 서버 시작 시점에 호출되어 메시지 ID와 처리 함수를 매핑합니다.
     table_[msg_id] = std::move(handler);
 }
 
 bool Dispatcher::dispatch(std::uint16_t msg_id, Session& s, std::span<const std::uint8_t> payload) const {
     auto it = table_.find(msg_id);
-    if (it == table_.end()) return false;
+    if (it == table_.end()) return false; // 등록되지 않은 메시지는 처리하지 않습니다.
     try {
-        // 핸들러 예외는 세션 단위 오류로 보고, metrics + 에러 패킷을 함께 발생시킨다.
+        // 핸들러 실행 중 발생하는 예외는 세션 단위 오류로 처리합니다.
+        // 즉, 특정 클라이언트의 요청 처리 중 오류가 발생해도 서버 전체가 죽지 않도록 방어합니다.
         it->second(s, payload);
     } catch (const std::exception& ex) {
         runtime_metrics::record_dispatch_exception();
         server::core::log::error(std::string("handler exception for msg=") + std::to_string(msg_id) + ": " + ex.what());
+        // 클라이언트에게 내부 오류임을 알립니다.
         try { s.send_error(server::core::protocol::errc::INTERNAL_ERROR, "internal error"); } catch (...) {}
     } catch (...) {
         runtime_metrics::record_dispatch_exception();
@@ -30,5 +36,3 @@ bool Dispatcher::dispatch(std::uint16_t msg_id, Session& s, std::span<const std:
 }
 
 } // namespace server::core
-
-

@@ -50,7 +50,7 @@ chat_dispatch_latency_avg_ms 12.3
 cmake --build build-msvc --target server_app
 .\build-msvc\server\Debug\server_app.exe 5000
 ```
-PowerShell 스크립트: `scripts/build.ps1 -UseVcpkg -Config Debug -Target server_app -Run`.
+PowerShell 스크립트: `scripts/build.ps1 -Config Debug -Target server_app -Run`.
 
 ## 테스트
 ```powershell

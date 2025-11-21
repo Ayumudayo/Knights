@@ -1,7 +1,7 @@
 <#
   빌드/구성 스크립트 (PowerShell)
-  - Windows/MSVC 기본. 환경변수 또는 인자로 BOOST 경로 지정 가능.
-  - WSL/Linux에서도 사용 가능하지만, 리눅스용 Boost가 필요합니다.
+  - Windows/MSVC default. All dependencies come from vcpkg manifest (cpkg.json).
+  - WSL/Linux follows the same flow; Boost and the rest install via vcpkg as well.
 #>
 [CmdletBinding()]
 param(
@@ -9,7 +9,6 @@ param(
   [ValidateSet('Debug','Release','RelWithDebInfo','MinSizeRel')]
   [string]$Config = "RelWithDebInfo",
   [string]$BuildDir = "",
-  [string]$BoostRoot = "",
   [string]$Target = "",
   [switch]$Clean,
   [string]$InstallPrefix = "",
@@ -83,17 +82,6 @@ if ($Clean) {
   if (Test-Path $BuildDir) { Info "빌드 폴더 정리: $BuildDir"; Remove-Item -Recurse -Force $BuildDir }
 }
 
-# Boost 경로 설정 (선택)
-if (-not $BoostRoot -or $BoostRoot -eq '') {
-  if ($env:BOOST_ROOT) { $BoostRoot = $env:BOOST_ROOT }
-  elseif ($onWindows) { $BoostRoot = 'C:/local/boost_1_89_0' }
-}
-if ($BoostRoot -and (Test-Path $BoostRoot)) {
-  Info "BOOST_ROOT=$BoostRoot"
-} else {
-  if ($BoostRoot) { Warn "BOOST_ROOT 경로가 존재하지 않습니다: $BoostRoot (무시하고 진행)" }
-}
-
 # 제너레이터 설정
 if (-not $Generator -or $Generator -eq '') {
   if ($onWindows) { $Generator = 'Visual Studio 17 2022' } else { $Generator = 'Unix Makefiles' }
@@ -101,32 +89,25 @@ if (-not $Generator -or $Generator -eq '') {
 
 $cmakeArgs = @('-S','.', '-B', $BuildDir, '-G', $Generator, "-DCMAKE_BUILD_TYPE=$Config")
 if ($onWindows -and $Generator -like 'Visual Studio*') { $cmakeArgs += @('-A','x64') }
-if ($BoostRoot -and (Test-Path $BoostRoot)) { $cmakeArgs += @("-DBOOST_ROOT=$BoostRoot") }
-
-# vcpkg toolchain
-$vcpkgRoot = $env:VCPKG_ROOT
-if (-not $vcpkgRoot -or -not (Test-Path $vcpkgRoot)) {
-  # VS 내장 vcpkg 경로 추정
-  $vsVcpkg = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/vcpkg"
-  if (Test-Path $vsVcpkg) { $vcpkgRoot = $vsVcpkg }
-}
-
+# vcpkg toolchain (local checkout)
 $vcpkgJsonExists = Test-Path 'vcpkg.json'
-if ($UseVcpkg -or $vcpkgJsonExists -or ($vcpkgRoot -and (Test-Path $vcpkgRoot))) {
-  if (-not $vcpkgRoot -or -not (Test-Path $vcpkgRoot)) { Fail "vcpkg 사용이 요청되었지만 VCPKG_ROOT를 찾을 수 없습니다." }
-  Info "VCPKG_ROOT=$vcpkgRoot"
+if (-not $VcpkgTriplet -or $VcpkgTriplet -eq '') {
+  if ($onWindows) { $VcpkgTriplet = 'x64-windows' } else { $VcpkgTriplet = 'x64-linux' }
+}
+if ($UseVcpkg -or $vcpkgJsonExists) {
+  $setupScript = Join-Path $PSScriptRoot 'setup_vcpkg.ps1'
+  if (-not (Test-Path $setupScript)) { Fail "setup_vcpkg.ps1 스크립트를 찾을 수 없습니다: $setupScript" }
+  $vcpkgRoot = & $setupScript -Triplet $VcpkgTriplet
+  if (-not $vcpkgRoot) { Fail "vcpkg root 경로를 확인할 수 없습니다." }
+  Info "vcpkg root: $vcpkgRoot"
   $toolchain = Join-Path $vcpkgRoot 'scripts/buildsystems/vcpkg.cmake'
-  if (-not (Test-Path $toolchain)) { Fail "vcpkg toolchain 파일을 찾지 못했습니다: $toolchain" }
-  $cmakeArgs += @("-DCMAKE_TOOLCHAIN_FILE=$toolchain")
-  if (-not $VcpkgTriplet -or $VcpkgTriplet -eq '') { if ($onWindows) { $VcpkgTriplet = 'x64-windows' } else { $VcpkgTriplet = 'x64-linux' } }
-  $cmakeArgs += @("-DVCPKG_TARGET_TRIPLET=$VcpkgTriplet")
-  # CMAKE_PREFIX_PATH에 매니페스트 설치 경로 추가(발견 안정성 강화)
+  if (-not (Test-Path $toolchain)) { Fail "vcpkg toolchain 스크립트를 찾지 못했습니다: $toolchain" }
+  $cmakeArgs += @("-DCMAKE_TOOLCHAIN_FILE=$toolchain", "-DVCPKG_TARGET_TRIPLET=$VcpkgTriplet")
   try {
     $prefix = Join-Path (Resolve-Path .) "vcpkg_installed/$VcpkgTriplet"
     if (Test-Path $prefix) { $cmakeArgs += @("-DCMAKE_PREFIX_PATH=$prefix") }
   } catch {}
 }
-
 # Windows/MSVC + vcpkg + FTXUI: 일부 패키지가 RelWithDebInfo 매핑을 제공하지 않아 Debug 런타임과의 링크 충돌이 있을 수 있음
 if ($onWindows -and ($UseVcpkg -or $vcpkgJsonExists) -and $Generator -like 'Visual Studio*' -and $Config -eq 'RelWithDebInfo') {
   Info "MSVC+vcpkg 환경에서 RelWithDebInfo 대신 Debug 구성으로 빌드(런타임 불일치 회피)"
@@ -234,3 +215,4 @@ if ($Run -ne 'none') {
 }
 
 Info "완료"
+

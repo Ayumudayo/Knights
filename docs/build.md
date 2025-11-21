@@ -1,33 +1,48 @@
-﻿# 빌드 가이드
+# 빌드 가이드
 
 ## 전제
 - C++20 컴파일러(MSVC 19.3x+, GCC 11+, Clang 14+) (CMakeLists.txt:8)
 - CMake 3.20+ (CMakeLists.txt:1)
-- Boost 1.78+ (권장: 1.89) (CMakeLists.txt:81)
+- Boost 1.78+ (권장: 1.89) — manifest(`vcpkg.json`)에 선언되어 있으므로 `scripts/setup_vcpkg.ps1`(Windows) 또는 `scripts/setup_vcpkg.sh`(Linux) 실행 시 자동으로 설치됩니다. (CMakeLists.txt:81)
 - Python 3 (선택: opcode 헤더 자동 생성) (CMakeLists.txt:97)
-- vcpkg(권장): FTXUI 및 의존성 설치에 사용. 매니페스트 `vcpkg.json` 제공. (scripts/build.ps1:72)
+- vcpkg(필수): 저장소 루트의 `scripts/setup_vcpkg.*`가 `external/vcpkg/`에 공식 vcpkg를 부트스트랩하므로 `VCPKG_ROOT` 환경변수가 필요 없습니다. (scripts/build.ps1:72)
 
 ## 권장: vcpkg 매니페스트 빌드(FTXUI 포함)
-- 의존성: `vcpkg.json`에 `ftxui`가 선언되어 있습니다.
-- 환경 변수 `VCPKG_ROOT`를 vcpkg 루트로 설정(예: `C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\vcpkg`).
-- 기본 트리플릿: Windows `x64-windows`, Linux `x64-linux`.
+1. scripts/setup_vcpkg.ps1(Windows) 또는 scripts/setup_vcpkg.sh(Linux/WSL)을 실행해 xternal/vcpkg/에 공식 vcpkg를 클론하고 manifest 의존성을 설치합니다.
+2. 위 스크립트는 triplet(-Triplet/-t)만 지정하면 되며, 기본값은 Windows x64-windows, Linux x64-linux입니다.
+3. 한 번 부트스트랩하면 VS2022, PowerShell, WSL 어느 환경에서든 동일한 xternal/vcpkg를 사용하므로 추가 환경변수 없이 
+ind_package(Boost ...)가 성공합니다.
+4. 필요 시 scripts/setup_vcpkg.* --skip-install로 재설치 없이 갱신할 수 있습니다.
 
 ### PowerShell(Windows)
 - 자동 구성/빌드/실행(서버+클라): (scripts/build.ps1:168)
-  - `scripts/build.ps1 -UseVcpkg -Run both` (scripts/build.ps1:168)
-- 서버만 실행: `scripts/build.ps1 -UseVcpkg -Run server -Port 5000` (scripts/build.ps1:152)
-- 클라만 실행: `scripts/build.ps1 -UseVcpkg -Run client -Port 5000` (scripts/build.ps1:160)
-- 메모
-- manifest 모드만 자동 설정되며 toolchain만 지정된다. 의존성 설치(`vcpkg install --triplet <...>`)는 `scripts/bootstrap_vcpkg.ps1`로 수동 실행하거나 직접 명령을 수행한다.
-  - MSVC+vcpkg 환경에서 런타임 불일치를 피하기 위해 `RelWithDebInfo` 요청 시 자동으로 `Debug` 구성으로 빌드합니다.
+- 최초 1회: `pwsh scripts/setup_vcpkg.ps1 -Triplet x64-windows`로 vcpkg를 부트스트랩합니다.
+- 빌드 + 실행 예시(scripts/build.ps1:168):
+  - `scripts/build.ps1 -Run both -Config Debug`
+  - `scripts/build.ps1 -Run server -Port 5000`
+  - `scripts/build.ps1 -Run client -Port 5000`
+- manifest 모드가 자동 활성화되므로 추가 파라미터 없이 Boost/Protobuf를 가져옵니다. RelWithDebInfo는 MSVC+vcpkg 조합에서 Debug로 강제 변환될 수 있습니다.
 
+### Visual Studio 2022 (CMakePresets)
+- 루트에 `CMakePresets.json`이 있으므로 VS 메뉴에서 **CMake > Change Configure Preset > windows-vcpkg**를 선택하면 됩니다.
+- `scripts/setup_vcpkg.ps1`을 한 번 실행했다면 VS 메뉴에서 **CMake > Change Configure Preset > windows-vcpkg**만 선택하면 됩니다.
+- preset은 `${sourceDir}/cmake/knights_vcpkg_toolchain.cmake`를 통해 `external/vcpkg`를 자동으로 찾으므로 `VCPKG_ROOT` 환경변수가 필요 없습니다.
+- 기존 CMake 캐시에 수동 Boost 경로가 남아 있다면 **CMake > Delete Cache and Reconfigure**로 초기화하세요.
+- CLI에서도 동일하게 사용 가능:
+  ```powershell
+  cmake --preset windows-vcpkg
+  cmake --build --preset windows-vcpkg-relwithdebinfo --target server_app
+  ```
 ### Linux/WSL
+```bash
+sudo apt-get update && sudo apt-get install -y build-essential cmake ninja-build
+bash scripts/setup_vcpkg.sh -t x64-linux
+cmake --preset linux-vcpkg-debug
+cmake --build --preset linux-vcpkg-debug --target server_app
+# 또는
+./scripts/build.sh -c Debug -r all
 ```
-sudo apt-get update && sudo apt-get install -y build-essential cmake
-# vcpkg 설치 후 VCPKG_ROOT 지정
-export VCPKG_ROOT=$HOME/vcpkg
-pwsh scripts/build.ps1 -UseVcpkg -Config Debug
-
+- Ninja 대신 Makefiles를 쓰고 싶다면 `-g "Unix Makefiles"` 옵션을 추가하세요.
 ## 모듈 선택 빌드
 루트 `CMakeLists.txt`는 각 모듈을 개별 옵션으로 제어한다. 기본값은 모두 ON이며 필요한 컴포넌트만 선택해 빌드할 수 있다.
 
@@ -50,13 +65,6 @@ Load Balancer만 확인하고 싶다면 `-DBUILD_GATEWAY_APP=OFF -DBUILD_DEVCLIE
 
 ```
 
-## 대안: 수동 Boost 경로 지정(비권장)
-- Boost가 `C:\\local\\boost_1_89_0`에 있다고 가정(다르면 `-DBOOST_ROOT=...`).
-```
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DBOOST_ROOT=C:/local/boost_1_89_0 -DCMAKE_BUILD_TYPE=RelWithDebInfo
-cmake --build build --config RelWithDebInfo -j
-```
-
 ## VSCode 설정(요약)
 - 확장: CMake Tools, C/C++(ms-vscode.cpptools)
 - 절차
@@ -76,7 +84,7 @@ cmake --build build --config RelWithDebInfo -j
   - 서버: 기본 포트 `5000`
   - 클라: 인자 생략 시 `127.0.0.1:5000` 접속
 - 스크립트 실행 예
-  - `scripts/build.ps1 -UseVcpkg -Run both` → 서버 백그라운드 실행 후 클라 시작
+  - `scripts/build.ps1  -Run both` → 서버 백그라운드 실행 후 클라 시작
   - 개별 실행은 `-Run server | client` 활용
 
 ## 빠른 시작(요약)

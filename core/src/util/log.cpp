@@ -10,14 +10,100 @@
 #include <mutex>
 #include <sstream>
 #include <vector>
+#include <thread>
+#include <condition_variable>
+#include <queue>
 
 namespace server::core::log {
 
 namespace {
+
+// 로그 레벨을 저장하는 원자적 변수 (기본값: INFO)
 std::atomic<level> g_level{level::info};
-std::mutex g_mu;
+
+// 최근 로그를 저장하는 버퍼 (디버깅/모니터링 용도)
 std::deque<std::string> g_buffer;
-std::size_t g_buffer_capacity = 256; // 최근 로그를 /metrics, /debug 등에 노출하기 위한 ring buffer
+std::size_t g_buffer_capacity = 256;
+std::mutex g_buffer_mu; // g_buffer 보호용 뮤텍스
+
+// 비동기 로깅을 위한 구조체
+// 이 클래스는 백그라운드 스레드에서 로그 메시지를 처리하여
+// 메인 스레드의 블로킹을 최소화합니다.
+class AsyncLogger {
+public:
+    // 로그 메시지를 큐에 넣고 워커 스레드를 깨웁니다.
+    // 이 함수는 메인 로직 스레드에서 호출되므로 최대한 빨리 리턴해야 합니다.
+    void push(const std::string& msg) {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            queue_.push(msg);
+        }
+        cv_.notify_one();
+    }
+
+private:
+    // 생성자는 private으로 선언하여 싱글톤 패턴을 강제합니다.
+    AsyncLogger() : stop_(false) {
+        // 백그라운드 워커 스레드를 시작합니다.
+        worker_ = std::thread([this] { worker_loop(); });
+    }
+
+    // 소멸자에서 워커 스레드가 안전하게 종료되도록 대기합니다.
+    ~AsyncLogger() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            stop_ = true; // 스레드 종료 플래그 설정
+        }
+        cv_.notify_one(); // 대기 중인 스레드를 깨웁니다.
+        if (worker_.joinable()) {
+            worker_.join(); // 스레드가 종료될 때까지 기다립니다.
+        }
+    }
+
+    // 워커 스레드에서 실행될 메인 루프입니다.
+    void worker_loop() {
+        while (true) {
+            std::string msg;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                // 큐가 비어있거나 종료 플래그가 설정될 때까지 대기합니다.
+                cv_.wait(lock, [this] { return stop_ || !queue_.empty(); });
+
+                // 종료 플래그가 설정되었고 큐가 비어있으면 스레드를 종료합니다.
+                if (stop_ && queue_.empty()) {
+                    return;
+                }
+
+                // 큐에 메시지가 있으면 가져옵니다.
+                if (!queue_.empty()) {
+                    msg = std::move(queue_.front());
+                    queue_.pop();
+                }
+            }
+
+            // 실제 출력은 락을 푼 상태에서 수행하여 생산자 스레드의 대기를 최소화합니다.
+            if (!msg.empty()) {
+                std::cerr << msg << std::endl; // 표준 에러 스트림으로 출력
+            }
+        }
+    }
+
+    std::mutex mutex_; // 큐 접근을 위한 뮤텍스
+    std::condition_variable cv_; // 큐 상태 변경을 알리는 조건 변수
+    std::queue<std::string> queue_; // 로그 메시지를 저장하는 큐
+    std::thread worker_; // 로그 처리를 담당하는 백그라운드 스레드
+    bool stop_; // 스레드 종료를 위한 플래그
+
+    // AsyncLogger 인스턴스를 얻기 위한 friend 함수 선언
+    friend AsyncLogger& get_logger();
+};
+
+// 정적 로컬 변수를 사용하여 싱글톤 인스턴스를 생성합니다.
+// C++11부터는 스레드 안전성이 보장됩니다.
+AsyncLogger& get_logger() {
+    static AsyncLogger logger;
+    return logger;
+}
 
 const char* to_cstr(level lv) {
     switch (lv) {
@@ -45,7 +131,7 @@ std::string format_line(level lv, const std::string& msg) {
 }
 
 void push_buffer(const std::string& line) {
-    // g_buffer는 diagnostics 용도로만 사용되므로, capacity가 0이면 완전히 비활성화한다.
+    std::lock_guard<std::mutex> lk(g_buffer_mu);
     if (g_buffer_capacity == 0) return;
     g_buffer.push_back(line);
     if (g_buffer.size() > g_buffer_capacity) {
@@ -54,19 +140,24 @@ void push_buffer(const std::string& line) {
 }
 
 void emit(level lv, const std::string& msg) {
-    if (static_cast<int>(lv) < static_cast<int>(g_level.load())) return;
-    std::lock_guard<std::mutex> lk(g_mu);
-    // 로그 라인은 포맷팅 후 stderr로 바로 내보내고, 필요 시 buffer에 보관한다.
+    // 현재 로그 레벨보다 낮으면 무시
+    if (static_cast<int>(lv) < static_cast<int>(g_level.load(std::memory_order_relaxed))) return;
+
     std::string line = format_line(lv, msg);
+    
+    // 1. 최근 로그 버퍼에 저장 (동기적, 뮤텍스 사용)
     push_buffer(line);
-    std::cerr << line << std::endl;
+
+    // 2. 비동기 로거 큐에 삽입 (백그라운드 스레드가 출력)
+    get_logger().push(std::move(line));
 }
+
 } // namespace
 
 void set_level(level lv) { g_level.store(lv); }
 
 void set_buffer_capacity(std::size_t capacity) {
-    std::lock_guard<std::mutex> lk(g_mu);
+    std::lock_guard<std::mutex> lk(g_buffer_mu);
     g_buffer_capacity = capacity;
     while (g_buffer.size() > g_buffer_capacity) {
         g_buffer.pop_front();
@@ -74,7 +165,7 @@ void set_buffer_capacity(std::size_t capacity) {
 }
 
 std::vector<std::string> recent(std::size_t limit) {
-    std::lock_guard<std::mutex> lk(g_mu);
+    std::lock_guard<std::mutex> lk(g_buffer_mu);
     if (limit == 0 || limit > g_buffer.size()) {
         limit = g_buffer.size();
     }
