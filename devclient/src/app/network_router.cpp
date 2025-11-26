@@ -34,6 +34,7 @@ NetworkRouter::NetworkRouter(AppState& state,
 // 멀티스레드 환경에서의 UI 갱신 안전성을 보장합니다.
 void NetworkRouter::Initialize() {
     // 서버 HELLO는 capability 정보를 담고 있으므로 저장 후 로그로 남긴다.
+    // capability 플래그를 통해 서버가 지원하는 기능(예: sender_sid)을 파악하고 클라이언트 동작을 조정합니다.
     net_.set_on_hello([this](std::uint16_t caps) {
         screen_.Post([this, caps]() {
             const bool sender_sid = (caps & 0x0002) != 0;
@@ -211,6 +212,7 @@ void NetworkRouter::Initialize() {
 // -----------------------------------------------------------------------------
 // 서버가 주기적으로 보내는 방 목록 텍스트를 파싱하여 UI 상태를 갱신합니다.
 // 포맷 예: "Lobby(L) Room1 Room2(L)"
+// 정규식 대신 문자열 파싱을 사용하여 가볍게 구현했습니다.
 void NetworkRouter::HandleSystemRoomsBroadcast(const std::string& payload) {
     std::istringstream iss(payload);
     std::string token;

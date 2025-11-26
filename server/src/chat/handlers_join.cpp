@@ -21,29 +21,18 @@ namespace server::app::chat {
 // 방 입장 (Join) 핸들러
 // -----------------------------------------------------------------------------
 // 사용자가 특정 방에 입장을 요청할 때 호출됩니다.
-// 1. 페이로드 파싱 (방 이름, 비밀번호)
-// 2. 권한 및 비밀번호 검증
-// 3. 기존 방에서 퇴장 처리 (이전 방의 비밀번호 정리 포함)
-// 4. 새 방 입장 및 브로드캐스트 (입장 알림)
-// 5. DB/Redis 상태 갱신 (멤버십, Presence)
-// 6. Write-behind 이벤트 발행
-
-void ChatService::on_join(Session& s, std::span<const std::uint8_t> payload) {
-    auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
+void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t> payload) {
     std::string room;
-    // 페이로드 파싱: 방 이름
-    if (!proto::read_lp_utf8(sp, room)) { 
-        s.send_error(proto::errc::INVALID_PAYLOAD, "bad join payload"); 
-        return; 
+    std::string sp;
+    if (!proto::read_lp_utf8(payload, room)) {
+        s.send_error(proto::errc::INVALID_PAYLOAD, "bad join payload");
+        return;
     }
-    std::string password;
-    // 선택적 비밀번호 파싱
-    if (!sp.empty()) {
-        if (!proto::read_lp_utf8(sp, password)) {
-            s.send_error(proto::errc::INVALID_PAYLOAD, "bad join payload");
-            return;
-        }
+    // payload is now advanced past room
+    if (!payload.empty()) {
+        proto::read_lp_utf8(payload, sp);
     }
+    std::string password = sp;
 
     auto session_sp = s.shared_from_this();
     job_queue_.Push([this, session_sp, room, password]() {

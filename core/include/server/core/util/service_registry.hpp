@@ -23,6 +23,16 @@ std::string type_key() {
 
 } // namespace detail
 
+/**
+ * @brief 전역 서비스 레지스트리 (Service Locator 패턴)
+ * 
+ * 애플리케이션 전역에서 공유해야 하는 서비스 객체(싱글톤 등)를 타입 기반으로 관리합니다.
+ * 의존성 주입(DI) 컨테이너의 단순화된 형태입니다.
+ * 
+ * 예:
+ * services::set(std::make_shared<MyService>());
+ * auto service = services::get<MyService>();
+ */
 class Registry {
 public:
     static Registry& instance();

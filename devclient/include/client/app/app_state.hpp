@@ -8,6 +8,9 @@
 
 namespace client::app {
 
+// FTXUI 기반 클라이언트의 전체 상태를 관리하는 클래스입니다.
+// UI 렌더링에 필요한 모든 데이터(방 목록, 사용자 목록, 로그, 입력 버퍼 등)를 담고 있습니다.
+// 여러 스레드(네트워크 스레드, UI 스레드)에서 접근하므로 동기화가 필요할 수 있습니다.
 class AppState {
 public:
     static constexpr std::size_t kMaxLogs = 1000;
@@ -44,6 +47,8 @@ public:
     void clear_pending_join_room() { pending_join_room_.clear(); }
 
     // rooms/users
+    // UI의 사이드바에 표시될 데이터들입니다.
+    // FTXUI의 Menu 컴포넌트가 이 벡터들을 참조하여 화면을 그립니다.
     std::vector<std::string>& rooms() { return rooms_; }
     const std::vector<std::string>& rooms() const { return rooms_; }
     std::vector<bool>& rooms_locked() { return rooms_locked_; }

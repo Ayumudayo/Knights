@@ -50,6 +50,9 @@ std::optional<std::string> SessionDirectory::find_backend(const std::string& cli
     return std::nullopt;
 }
 
+// 특정 클라이언트에게 할당된 백엔드가 있는지 확인하고, 없으면 desired_backend를 할당합니다.
+// Redis의 SETNX(Set if Not Exists)와 유사한 원자적(Atomic) 연산을 수행하여
+// 동시성 환경에서도 중복 할당을 방지합니다.
 std::optional<std::string> SessionDirectory::ensure_backend(const std::string& client_id, const std::string& desired_backend) {
     if (client_id.empty() || desired_backend.empty()) {
         return std::nullopt;

@@ -102,6 +102,7 @@ void NetClient::close() {
 // -----------------------------------------------------------------------------
 // 고정 길이 헤더(4바이트 등)를 비동기로 읽습니다.
 // 헤더를 다 읽으면 콜백에서 파싱 후 본문(Body) 읽기를 시작합니다.
+// 이 과정은 재귀적으로 호출되어 지속적인 수신 루프를 형성합니다.
 void NetClient::start_read_header() {
     asio::async_read(
         socket_,
@@ -175,6 +176,7 @@ void NetClient::schedule_ping() {
 // -----------------------------------------------------------------------------
 // 메시지를 직렬화하여 전송 큐에 추가하고, 전송 중이 아니라면 전송을 시작합니다.
 // strand를 사용하여 스레드 안전성을 보장합니다.
+// 즉, 여러 스레드에서 동시에 send를 호출해도 큐에 순서대로 쌓이고 하나씩 전송됩니다.
 void NetClient::enqueue_frame(std::uint16_t msg_id, std::uint16_t flags, std::vector<std::uint8_t> payload) {
     asio::post(strand_, [this, msg_id, flags, payload = std::move(payload)]() mutable {
         if (!connected_.load()) {

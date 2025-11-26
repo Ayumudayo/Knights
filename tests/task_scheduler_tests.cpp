@@ -9,6 +9,7 @@
 using namespace std::chrono_literals;
 using server::core::concurrent::TaskScheduler;
 
+// 즉시 실행 작업(post)이 순서대로 실행되는지 확인합니다.
 TEST(TaskSchedulerTests, PostExecutesInOrder) {
     TaskScheduler scheduler;
     std::vector<int> results;
@@ -26,18 +27,22 @@ TEST(TaskSchedulerTests, PostExecutesInOrder) {
     EXPECT_EQ(results[2], 3);
 }
 
+// 지연 실행 작업(schedule)이 지정된 시간이 지난 후에만 실행되는지 확인합니다.
 TEST(TaskSchedulerTests, DelayedTasksExecuteAfterDelay) {
     TaskScheduler scheduler;
     std::atomic<int> counter{0};
 
     scheduler.schedule([&]() { counter.fetch_add(1); }, 20ms);
 
+    // 아직 시간이 안 지났으므로 실행되지 않음
     EXPECT_EQ(scheduler.poll(), 0u);
     std::this_thread::sleep_for(30ms);
+    // 시간이 지났으므로 실행됨
     EXPECT_EQ(scheduler.poll(), 1u);
     EXPECT_EQ(counter.load(), 1);
 }
 
+// 반복 실행 작업(schedule_every)이 주기적으로 실행되는지 확인합니다.
 TEST(TaskSchedulerTests, ScheduleEveryRepeatsUntilShutdown) {
     TaskScheduler scheduler;
     std::atomic<int> counter{0};
@@ -56,6 +61,7 @@ TEST(TaskSchedulerTests, ScheduleEveryRepeatsUntilShutdown) {
     auto before = counter.load();
     std::this_thread::sleep_for(20ms);
     scheduler.poll();
+    // 셧다운 후에는 더 이상 실행되지 않음
     EXPECT_EQ(counter.load(), before);
     EXPECT_TRUE(scheduler.empty());
 }

@@ -112,33 +112,41 @@ private:
     std::shared_ptr<FakeUnitState> state_;
 };
 
+// DB 워커 풀 테스트를 위한 Fake 구현체들입니다.
+// 실제 DB 연결 없이 UnitOfWork의 커밋/롤백 동작을 검증하기 위해 사용합니다.
 } // namespace
 
+// 자동 커밋(Auto-Commit) 모드에서 작업이 성공하면 커밋이 호출되는지 확인합니다.
 TEST(DbWorkerPoolTests, ProcessesJobWithAutoCommit) {
     auto state = std::make_shared<FakeUnitState>();
     auto pool = std::make_shared<FakeConnectionPool>(state);
     DbWorkerPool workers(pool);
 
     auto before = snapshot();
-    workers.start(1);
+    workers.start(1); // 워커 스레드 1개 시작
 
     std::promise<void> completion;
     auto future = completion.get_future();
+    // auto_commit = true로 작업 제출
     workers.submit([&](IUnitOfWork&) { completion.set_value(); }, true);
 
     ASSERT_EQ(future.wait_for(200ms), std::future_status::ready);
 
     workers.stop();
 
+    // 커밋 호출 횟수 확인
     EXPECT_EQ(state->commit_calls.load(), 1);
     EXPECT_EQ(state->rollback_calls.load(), 0);
 
+    // 메트릭 업데이트 확인
     auto after = snapshot();
     EXPECT_EQ(after.db_job_processed_total, before.db_job_processed_total + 1);
     EXPECT_EQ(after.db_job_failed_total, before.db_job_failed_total);
     EXPECT_EQ(after.db_job_queue_depth, 0u);
 }
 
+// 자동 커밋을 끄면(manual commit), 작업이 성공해도 커밋이 호출되지 않고 롤백됩니다.
+// (작업 내부에서 명시적으로 커밋하지 않았을 경우 안전을 위해 롤백됨)
 TEST(DbWorkerPoolTests, ProcessesJobWithoutAutoCommit) {
     auto state = std::make_shared<FakeUnitState>();
     auto pool = std::make_shared<FakeConnectionPool>(state);
@@ -149,12 +157,14 @@ TEST(DbWorkerPoolTests, ProcessesJobWithoutAutoCommit) {
 
     std::promise<void> completion;
     auto future = completion.get_future();
+    // auto_commit = false로 작업 제출
     workers.submit([&](IUnitOfWork&) { completion.set_value(); }, false);
 
     ASSERT_EQ(future.wait_for(200ms), std::future_status::ready);
 
     workers.stop();
 
+    // 커밋 0회, 롤백 1회 예상
     EXPECT_EQ(state->commit_calls.load(), 0);
     EXPECT_EQ(state->rollback_calls.load(), 1);
 
@@ -163,6 +173,7 @@ TEST(DbWorkerPoolTests, ProcessesJobWithoutAutoCommit) {
     EXPECT_EQ(after.db_job_failed_total, before.db_job_failed_total);
 }
 
+// 작업 수행 중 예외가 발생하면 자동으로 롤백되고 실패 메트릭이 증가하는지 확인합니다.
 TEST(DbWorkerPoolTests, JobExceptionTriggersRollbackAndFailureMetric) {
     auto state = std::make_shared<FakeUnitState>();
     auto pool = std::make_shared<FakeConnectionPool>(state);
@@ -177,6 +188,7 @@ TEST(DbWorkerPoolTests, JobExceptionTriggersRollbackAndFailureMetric) {
         throw std::runtime_error("fail");
     });
 
+    // 작업이 처리될 때까지 대기
     for (int i = 0; i < 50 && !invoked.load(); ++i) {
         std::this_thread::sleep_for(5ms);
     }
@@ -184,9 +196,11 @@ TEST(DbWorkerPoolTests, JobExceptionTriggersRollbackAndFailureMetric) {
     std::this_thread::sleep_for(20ms);
     workers.stop();
 
+    // 롤백 호출 확인
     EXPECT_GE(state->rollback_calls.load(), 1);
     EXPECT_EQ(state->commit_calls.load(), 0);
 
+    // 실패 메트릭 증가 확인
     auto after = snapshot();
     EXPECT_EQ(after.db_job_failed_total, before.db_job_failed_total + 1);
     EXPECT_EQ(after.db_job_processed_total, before.db_job_processed_total);

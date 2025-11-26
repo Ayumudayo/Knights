@@ -12,6 +12,8 @@ namespace client::app {
 class AppState;
 class CommandProcessor;
 
+// FTXUI 라이브러리를 사용하여 터미널 UI 컴포넌트를 조립합니다.
+// 좌측 사이드바(방/유저 목록), 우측 채팅창, 하단 입력창 등의 레이아웃을 정의합니다.
 class UiBuilder {
 public:
     using RefreshRequest = std::function<void()>;

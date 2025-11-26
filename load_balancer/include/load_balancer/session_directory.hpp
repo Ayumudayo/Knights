@@ -13,6 +13,9 @@ class IRedisClient;
 
 namespace load_balancer {
 
+// Sticky Session을 관리하는 클래스입니다.
+// Redis를 사용하여 클라이언트 ID와 백엔드 서버 ID 간의 매핑 정보를 저장하고 조회합니다.
+// 로컬 인메모리 캐시(L1)와 Redis(L2)를 함께 사용하여 성능을 최적화합니다.
 class SessionDirectory {
 public:
     SessionDirectory(std::shared_ptr<server::storage::redis::IRedisClient> redis_client,

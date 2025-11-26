@@ -10,18 +10,34 @@
 
 namespace server::core::protocol {
 
+// ==============================================================================
+// 프로토콜 프레임 정의
+// 
+// 모든 메시지는 [헤더(14바이트)] + [바디(가변 길이)] 형태로 전송됩니다.
+// 네트워크 전송 시 바이트 순서는 Big-Endian (Network Byte Order)을 따릅니다.
+// ==============================================================================
+
 // 프로토콜 v1.1 고정 헤더 길이(바이트)
 inline constexpr std::size_t k_header_bytes = 14;
 
+/**
+ * @brief 메시지 헤더 구조체
+ */
 struct FrameHeader {
-    std::uint16_t length{0};
-    std::uint16_t msg_id{0};
-    std::uint16_t flags{0};
-    std::uint32_t seq{0};
-    std::uint32_t utc_ts_ms32{0};
+    std::uint16_t length{0};      // 바디 길이 (헤더 제외)
+    std::uint16_t msg_id{0};      // 메시지 타입 ID (Opcode)
+    std::uint16_t flags{0};       // 플래그 (예: 압축 여부, 암호화 여부 등)
+    std::uint32_t seq{0};         // 시퀀스 번호 (패킷 순서 보장 및 중복 방지)
+    std::uint32_t utc_ts_ms32{0}; // 타임스탬프 (밀리초 단위, 하위 32비트)
 };
 
-// Big-endian 인코딩/디코딩 헬퍼
+// ==============================================================================
+// Big-Endian 인코딩/디코딩 헬퍼
+// 
+// x86/x64 CPU는 Little-Endian을 사용하지만, 네트워크 표준은 Big-Endian입니다.
+// 따라서 데이터를 전송하기 전에 변환(Encoding)하고, 받을 때 다시 변환(Decoding)해야 합니다.
+// ==============================================================================
+
 inline std::uint16_t read_be16(const std::uint8_t* p) {
     return static_cast<std::uint16_t>((p[0] << 8) | p[1]);
 }
@@ -45,6 +61,7 @@ inline void write_be32(std::uint32_t v, std::uint8_t* out) {
     out[3] = static_cast<std::uint8_t>(v & 0xFF);
 }
 
+// 헤더 구조체를 바이트 배열로 직렬화 (Serialize)
 inline void encode_header(const FrameHeader& h, std::uint8_t* out14) {
     write_be16(h.length, out14 + 0);
     write_be16(h.msg_id, out14 + 2);
@@ -53,6 +70,7 @@ inline void encode_header(const FrameHeader& h, std::uint8_t* out14) {
     write_be32(h.utc_ts_ms32, out14 + 10);
 }
 
+// 바이트 배열을 헤더 구조체로 역직렬화 (Deserialize)
 inline void decode_header(const std::uint8_t* in14, FrameHeader& h) {
     h.length = read_be16(in14 + 0);
     h.msg_id = read_be16(in14 + 2);
@@ -97,6 +115,7 @@ inline bool is_valid_utf8(std::span<const std::uint8_t> s) {
 }
 
 // length-prefixed UTF-8 문자열을 out 벡터 끝에 인코딩한다.
+// [길이(2바이트)] + [문자열 바이트]
 inline void write_lp_utf8(std::vector<std::uint8_t>& out, std::string_view str) {
     if (str.size() > 0xFFFF) {
         str = str.substr(0, 0xFFFF);

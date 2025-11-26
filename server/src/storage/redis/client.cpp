@@ -17,6 +17,9 @@ namespace server::storage::redis {
 
 #if defined(HAVE_REDIS_PLUS_PLUS)
 // redis++ 기반 실제 Redis 클라이언트 구현
+// redis-plus-plus 라이브러리를 사용하여 Redis 서버와 통신합니다.
+// 모든 메서드는 예외를 잡아서 false나 nullopt를 반환하도록 래핑되어 있어,
+// Redis 장애가 서버 전체의 크래시로 이어지지 않도록 방어적으로 구현되었습니다.
 class RedisClientImpl final : public IRedisClient {
 public:
     explicit RedisClientImpl(const std::string& uri, Options opts) {
@@ -68,6 +71,8 @@ public:
     }
 
     // pattern에 대해 별도 쓰레드로 consume()을 돌리며 콜백을 호출한다.
+    // Pub/Sub은 블로킹 작업이므로 별도의 스레드에서 실행해야 메인 로직을 방해하지 않습니다.
+    // 네트워크 단절 시 자동으로 재접속 및 재구독을 시도하는 복구 로직이 포함되어 있습니다.
     bool start_psubscribe(const std::string& pattern,
                           std::function<void(const std::string& channel, const std::string& message)> on_message) override {
         try {
@@ -364,6 +369,8 @@ private:
 
 // 항상 사용 가능한 안전한 폴백 Stub 구현
 // redis++가 없는 빌드에서는 no-op Stub을 사용한다.
+// 이를 통해 Redis 라이브러리가 없는 환경에서도 컴파일 및 실행이 가능하며(기능은 동작 안 함),
+// 개발 초기 단계나 로컬 테스트 시 유용합니다.
 class RedisClientStub final : public IRedisClient {
 public:
     explicit RedisClientStub(std::string uri, Options opts)

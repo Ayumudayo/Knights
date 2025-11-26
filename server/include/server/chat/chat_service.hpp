@@ -26,89 +26,113 @@ namespace server::app::chat {
 /**
  * @brief 채팅 서비스의 핵심 로직을 담당하는 클래스입니다.
  * 
- * 이 클래스는 다음과 같은 기능을 수행합니다:
- * - 사용자 로그인 및 세션 관리
- * - 채팅방 생성, 입장, 퇴장 및 메시지 전송
- * - 귓속말(1:1 채팅) 기능
- * - Redis Pub/Sub을 이용한 분산 환경에서의 메시지 브로드캐스팅
- * - DB 및 Redis 캐시를 이용한 메시지 히스토리 관리 (Write-behind 패턴 지원)
- * - 사용자 접속 상태(Presence) 관리
+ * 이 클래스는 서버의 "두뇌" 역할을 하며, 모든 비즈니스 로직을 처리합니다.
+ * (Facade 패턴과 Mediator 패턴의 혼합 형태)
+ * 
+ * 주요 기능:
+ * 1. 세션 및 유저 관리: 로그인, 로그아웃, 중복 접속 방지
+ * 2. 채팅방 관리: 방 생성, 입장, 퇴장, 목록 조회
+ * 3. 메시지 처리: 일반 채팅, 귓속말, 시스템 메시지
+ * 4. 데이터 동기화: DB(PostgreSQL) 저장 및 Redis Pub/Sub을 통한 서버 간 통신
+ * 
+ * 설계 노트:
+ * - 현재는 단일 클래스에서 모든 로직을 처리하지만, 규모가 커지면 `RoomManager`, `UserManager` 등으로 분리할 수 있습니다.
+ * - 모든 상태 변경은 `job_queue_`를 통해 단일 스레드(또는 Strand)에서 순차적으로 처리되거나,
+ *   내부 `mutex`를 통해 보호받아야 합니다.
  */
 class ChatService {
 public:
     /**
      * @brief ChatService 생성자
-     * @param io Boost.Asio IO Context
-     * @param job_queue 작업 큐 (비동기 작업 처리용)
-     * @param db_pool DB 연결 풀 (선택적)
-     * @param redis Redis 클라이언트 (선택적)
+     * @param io Boost.Asio IO Context (비동기 작업용)
+     * @param job_queue 작업 큐 (순차적 로직 처리용)
+     * @param db_pool DB 연결 풀 (영구 저장소)
+     * @param redis Redis 클라이언트 (캐시 및 Pub/Sub)
      */
     ChatService(boost::asio::io_context& io,
                 server::core::JobQueue& job_queue,
                 std::shared_ptr<server::core::storage::IConnectionPool> db_pool = {},
                 std::shared_ptr<server::storage::redis::IRedisClient> redis = {});
 
-    // --- 핸들러 메서드 (패킷 처리) ---
+    // ======================================================================
+    // 패킷 핸들러 (Packet Handlers)
+    // Dispatcher에 의해 호출되며, 각 Opcode에 대응하는 로직을 수행합니다.
+    // ======================================================================
 
     /**
-     * @brief 로그인 요청을 처리합니다.
-     * 닉네임 중복 검사 및 세션 인증 처리를 수행합니다.
+     * @brief 로그인 요청 (MSG_LOGIN_REQ) 처리
+     * - 토큰 검증 (현재는 단순 닉네임 기반)
+     * - 중복 접속 처리 (기존 세션 끊기)
+     * - 유저 상태 등록
      */
     void on_login(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 방 입장 요청을 처리합니다.
-     * 비밀번호 확인, 방 생성(필요 시), 입장 메시지 브로드캐스팅을 수행합니다.
+     * @brief 방 입장 요청 (MSG_JOIN_ROOM) 처리
+     * - 방 존재 여부 확인 및 생성
+     * - 비밀번호 검사 (비공개 방)
+     * - 방 멤버십 등록 및 브로드캐스팅
      */
     void on_join(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 방 퇴장 요청을 처리합니다.
+     * @brief 방 퇴장 요청 (MSG_LEAVE_ROOM) 처리
      */
     void on_leave(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 채팅 메시지 전송 요청을 처리합니다.
-     * 메시지를 DB/Redis에 저장하고 방 내의 다른 사용자들에게 브로드캐스팅합니다.
+     * @brief 채팅 메시지 전송 (MSG_CHAT_SEND) 처리
+     * - 메시지 DB 저장 (비동기/Write-behind)
+     * - 같은 방의 모든 유저에게 브로드캐스팅
      */
     void on_chat_send(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 귓속말 요청을 처리합니다.
+     * @brief 귓속말 요청 (MSG_WHISPER_REQ) 처리
+     * - 대상 유저 찾기 (로컬 또는 Redis를 통해 다른 서버 검색)
+     * - 메시지 전송
      */
     void on_whisper(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 핑(Ping) 요청을 처리합니다. (Heartbeat)
+     * @brief 핑(Ping) 요청 (MSG_PING) 처리
+     * - 연결이 살아있는지 확인하는 Heartbeat
+     * - PONG 응답 전송
      */
     void on_ping(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 방 목록 요청을 처리합니다.
+     * @brief 방 목록 요청 (MSG_ROOMS_REQ) 처리
+     * - 현재 활성화된 방 목록 반환
      */
     void on_rooms_request(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 방 참여자 목록 요청을 처리합니다.
+     * @brief 방 참여자 목록 요청 (MSG_ROOM_USERS_REQ) 처리
      */
     void on_room_users_request(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 상태 갱신 요청을 처리합니다.
+     * @brief 상태 갱신 요청 (MSG_REFRESH_REQ) 처리
+     * - 클라이언트가 재접속 후 놓친 메시지 등을 요청할 때 사용
      */
     void on_refresh_request(server::core::Session& s, std::span<const std::uint8_t> payload);
 
     /**
-     * @brief 세션 종료 시 호출되어 정리 작업을 수행합니다.
+     * @brief 세션 종료 시 호출 (연결 끊김)
+     * - 유저 상태 정리 (방 나가기 처리 등)
      */
     void on_session_close(std::shared_ptr<server::core::Session> s);
 
     /**
      * @brief 특정 방에 메시지를 브로드캐스트합니다.
-     * 외부(예: Redis Pub/Sub 핸들러)에서 호출하여 로컬 세션들에게 메시지를 전달할 때 사용합니다.
+     * 
+     * 로컬 세션뿐만 아니라, Redis Pub/Sub을 통해 수신된 메시지를
+     * 로컬에 있는 해당 방 유저들에게 전달할 때도 사용됩니다.
+     * 
      * @param room 방 이름
-     * @param body 전송할 메시지 본문
-     * @param self 발신자 세션 (자신에게는 전송하지 않으려면 설정)
+     * @param body 전송할 메시지 본문 (직렬화된 Protobuf 등)
+     * @param self 발신자 세션 (자신에게는 다시 보내지 않기 위해 사용, nullptr이면 모두에게 전송)
      */
     void broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, server::core::Session* self = nullptr);
 
@@ -116,12 +140,12 @@ private:
     using Session = server::core::Session;
     using WeakSession = std::weak_ptr<Session>;
     using WeakLess = std::owner_less<WeakSession>;
-    using RoomSet = std::set<WeakSession, WeakLess>;
+    using RoomSet = std::set<WeakSession, WeakLess>; // 세션들의 집합 (약한 참조로 저장하여 순환 참조 방지)
 
     using Exec = boost::asio::io_context::executor_type;
-    using Strand = boost::asio::strand<Exec>;
+    using Strand = boost::asio::strand<Exec>; // 핸들러 동기화를 위한 Strand
 
-    // Write-behind 설정 구조체
+    // Write-behind (지연 쓰기) 설정
     struct WriteBehindConfig {
         bool enabled{false};
         std::string stream_key{"session_events"};
@@ -129,25 +153,34 @@ private:
         bool approximate{true};
     };
 
-    // Presence 설정 구조체
+    // Presence (접속 현황) 설정
     struct PresenceConfig {
-        unsigned int ttl{30};
+        unsigned int ttl{30}; // 초 단위
         std::string prefix;
     };
 
-    // 서버 상태 구조체 (Mutex로 보호됨)
+    // 서버의 전체 상태를 관리하는 구조체
+    // 멀티스레드 환경에서 안전하게 접근하기 위해 mutex로 보호됩니다.
     struct State {
         std::mutex mu;
-        std::unordered_map<std::string, RoomSet> rooms;          // 방 이름 -> 세션 목록
-        std::unordered_map<Session*, std::string> user;          // 세션 -> 닉네임
-        std::unordered_map<Session*, std::string> user_uuid;     // 세션 -> 사용자 UUID
-        std::unordered_map<Session*, std::string> session_uuid;  // 세션 -> 세션 UUID (v4)
-        std::unordered_map<Session*, std::string> cur_room;      // 세션 -> 현재 방 이름
-        std::unordered_set<Session*> authed;                     // 인증된 세션 목록
-        std::unordered_set<Session*> guest;                      // 게스트 세션 목록
-        std::unordered_map<std::string, RoomSet> by_user;        // 닉네임 -> 세션 목록 (다중 접속 지원)
-        std::unordered_map<std::string, std::string> room_ids;   // 방 이름 -> Room ID (UUID)
+        
+        // 방 관리
+        std::unordered_map<std::string, RoomSet> rooms;          // 방 이름 -> 참여 중인 세션 목록
+        std::unordered_map<std::string, std::string> room_ids;   // 방 이름 -> 방 UUID
         std::unordered_map<std::string, std::string> room_passwords; // 방 이름 -> 비밀번호 해시
+
+        // 유저/세션 관리
+        std::unordered_map<Session*, std::string> user;          // 세션 -> 닉네임
+        std::unordered_map<Session*, std::string> user_uuid;     // 세션 -> 유저 UUID
+        std::unordered_map<Session*, std::string> session_uuid;  // 세션 -> 세션 UUID
+        std::unordered_map<Session*, std::string> cur_room;      // 세션 -> 현재 참여 중인 방 이름
+        
+        // 세션 집합
+        std::unordered_set<Session*> authed;                     // 로그인한 세션 목록
+        std::unordered_set<Session*> guest;                      // 로그인하지 않은 게스트 세션
+        
+        // 닉네임 역참조 (중복 로그인 방지 및 귓속말용)
+        std::unordered_map<std::string, RoomSet> by_user;        // 닉네임 -> 세션 목록 (다중 접속 허용 시 여러 개일 수 있음)
     } state_;
 
     boost::asio::io_context* io_{};
@@ -156,14 +189,14 @@ private:
     std::shared_ptr<server::storage::redis::IRedisClient> redis_{};
     std::string gateway_id_{"gw-default"};
     
-    // 방별 Strand 관리 (동시성 제어)
+    // 방별 Strand 관리 (방 단위로 메시지 순서를 보장하기 위함)
     std::unordered_map<std::string, std::shared_ptr<Strand>> room_strands_;
     Strand& strand_for(const std::string& room);
 
     WriteBehindConfig write_behind_;
     PresenceConfig presence_{};
     
-    // 히스토리 설정 구조체
+    // 메시지 히스토리 캐싱 설정
     struct HistoryConfig {
         std::size_t recent_limit{20};
         std::size_t max_list_len{200};
@@ -177,7 +210,7 @@ private:
     std::string generate_uuid_v4();
     std::string get_or_create_session_uuid(Session& s);
     
-    // Write-behind 이벤트 발행
+    // Write-behind 이벤트 발행 (Redis Stream에 추가)
     void emit_write_behind_event(const std::string& type,
                                  const std::string& session_id,
                                  const std::optional<std::string>& user_id,

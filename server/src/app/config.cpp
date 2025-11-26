@@ -10,6 +10,10 @@ namespace server::app {
 
 namespace corelog = server::core::log;
 
+// 서버 설정을 로드하는 함수
+// 우선순위:
+// 1. 커맨드 라인 인자 (포트 등)
+// 2. 환경 변수 (Docker/K8s 환경에서 주로 사용)
 bool ServerConfig::load(int argc, char** argv) {
     // 1. 기본 설정 로드 (커맨드 라인 인자)
     if (argc >= 2) {

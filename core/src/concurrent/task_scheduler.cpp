@@ -42,6 +42,7 @@ void TaskScheduler::schedule(Task task, Clock::duration delay) {
     }
     // 지연 작업은 우선순위 큐(top = 가장 빠른 due)로 관리됩니다.
     // poll() 호출 시점에 시간이 된 작업들을 ready 큐로 옮깁니다.
+    // 이렇게 함으로써 별도의 타이머 스레드 없이도 지연 실행을 지원합니다.
     std::lock_guard<std::mutex> lock(mutex_);
     delayed_.push(DelayedTask{Clock::now() + delay, std::move(task)});
 }

@@ -6,13 +6,15 @@
 
 #include "gateway/gateway_app.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/protocol/frame.hpp"
+#include "server/core/protocol/opcodes.hpp"
 
 namespace gateway {
 
 namespace {
 // 게이트웨이 최초 메시지는 "client_id:opaque_token"을 기대하며,
 // client_id가 비어 있으면 remote_ip 등으로 대체한다.
-std::string extract_token(const std::string& message, std::string& client_id) {
+std::string extract_token_legacy(const std::string& message, std::string& client_id) {
     auto pos = message.find(':');
     if (pos == std::string::npos) {
         client_id.clear();
@@ -60,7 +62,7 @@ void GatewayConnection::on_connect() {
     }
 
     // pre-auth 단계에서는 remote_ip만으로 라우팅 정책(IP allowlist 등)을 적용할 수 있다.
-    // pre-auth 단계: remote_ip(L4 정보)만으로도 차단 정책을 적용할 수 있다.
+    // 아직 클라이언트가 누구인지(ID)는 모르지만, 어디서 왔는지(IP)는 알 수 있습니다.
     auth::AuthRequest request{};
     request.remote_address = remote_ip;
     if (authenticator_) {
@@ -106,7 +108,32 @@ void GatewayConnection::on_read(const std::uint8_t* data, std::size_t length) {
     // 첫 payload는 인증 토큰이므로 authenticator로 위임한 뒤 LB 세션을 연다.
     if (!authenticated_) {
         auth::AuthRequest request{};
-        request.token = extract_token(raw_message, request.client_id);
+        
+        // 1. MSG_LOGIN_REQ 프레임인지 확인 (바이너리 프로토콜)
+        bool is_login_frame = false;
+        if (length >= server::core::protocol::k_header_bytes) {
+            server::core::protocol::FrameHeader header{};
+            server::core::protocol::decode_header(data, header);
+            if (header.msg_id == server::core::protocol::MSG_LOGIN_REQ) {
+                is_login_frame = true;
+                // Payload 파싱: [User(LP)][Token(LP)]
+                auto payload = std::span<const std::uint8_t>(data + server::core::protocol::k_header_bytes, 
+                                                           length - server::core::protocol::k_header_bytes);
+                std::string user, token;
+                if (server::core::protocol::read_lp_utf8(payload, user)) {
+                    request.client_id = user;
+                    // Token은 옵션
+                    server::core::protocol::read_lp_utf8(payload, token);
+                    request.token = token;
+                }
+            }
+        }
+
+        // 2. 아니면 레거시 "user:token" 포맷 시도
+        if (!is_login_frame) {
+            request.token = extract_token_legacy(raw_message, request.client_id);
+        }
+
         try {
             request.remote_address = socket().remote_endpoint().address().to_string();
         } catch (...) {
@@ -144,6 +171,7 @@ void GatewayConnection::on_read(const std::uint8_t* data, std::size_t length) {
     }
 
     // 인증 이후에는 모든 클라이언트 바이트를 LB 세션으로 전달한다.
+    // Gateway는 L7 프로토콜을 깊게 이해하지 않고, 단순히 바이트 스트림을 중계(Tunneling)합니다.
     std::vector<std::uint8_t> payload(data, data + length);
     send_to_lb(payload, gateway::lb::ROUTE_KIND_CLIENT_PAYLOAD);
 }

@@ -15,6 +15,7 @@ MemoryPool::MemoryPool(size_t blockSize, size_t blockCount)
     }
     // 고정 길이 blockCount 개를 한 번에 할당하면 운영체제 할당/해제 비용을 숨길 수 있습니다.
     // 이는 잦은 new/delete 호출로 인한 단편화와 오버헤드를 줄여줍니다.
+    // 메모리 풀의 핵심 원리: 미리 할당하고 재사용한다.
     memoryChunk_.resize(blockSize * blockCount);
     for (size_t i = 0; i < blockCount; ++i) {
         freeList_.push(memoryChunk_.data() + i * blockSize);

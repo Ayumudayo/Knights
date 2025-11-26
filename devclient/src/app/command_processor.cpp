@@ -36,6 +36,7 @@ std::string Trim(std::string s) {
 // -----------------------------------------------------------------------------
 // 사용자 입력을 트리밍하고 별칭(alias)을 정식 명령어로 치환합니다.
 // 예: "/w" -> "/whisper"
+// 이를 통해 사용자는 단축 명령어를 사용할 수 있어 편의성이 증대됩니다.
 std::string NormalizeCommand(std::string line) {
     static constexpr std::pair<std::string_view, std::string_view> kAliases[] = {
         {"/w", "/whisper"},
@@ -79,6 +80,7 @@ bool CommandProcessor::Process(const std::string& line) {
 // 명령어 라우팅
 // -----------------------------------------------------------------------------
 // 정규화된 명령어를 파싱하여 핸들러 테이블에서 일치하는 함수를 찾아 실행합니다.
+// if-else 문 대신 테이블 기반(Table-driven) 방식을 사용하여 유지보수성을 높였습니다.
 bool CommandProcessor::HandleCommand(const std::string& line) {
     const std::string normalized = NormalizeCommand(line);
     const auto command_end = normalized.find(' ');

@@ -2,14 +2,12 @@
 
 #include <atomic>
 #include <chrono>
-#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string_view>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include <boost/asio/io_context.hpp>
@@ -20,11 +18,22 @@
 
 #include "gateway_lb.grpc.pb.h"
 #include "load_balancer/session_directory.hpp"
+#include "load_balancer/backend_registry.hpp"
+#include "load_balancer/config.hpp"
+#include "load_balancer/backend_refresher.hpp"
 #include "server/core/net/hive.hpp"
 #include "server/state/instance_registry.hpp"
 
 namespace load_balancer {
 
+class GrpcServiceImpl;
+
+/**
+ * @brief 로드 밸런서 애플리케이션 클래스
+ * 
+ * Gateway와 백엔드 서버(ServerApp) 사이에서 트래픽을 분산시키는 역할을 합니다.
+ * gRPC를 통해 Gateway로부터 요청을 받고, TCP를 통해 백엔드 서버로 전달합니다.
+ */
 class LoadBalancerApp {
 public:
     LoadBalancerApp();
@@ -33,89 +42,47 @@ public:
     int run();
     void stop();
 
+    // gRPC 스트림 핸들러 (메인 루프) - GrpcServiceImpl에서 호출
+    grpc::Status handle_stream(grpc::ServerContext* context,
+                               grpc::ServerReaderWriter<gateway::lb::RouteMessage, gateway::lb::RouteMessage>* stream);
+
 private:
-    struct BackendEndpoint {
-        std::string id;
-        std::string host;
-        std::uint16_t port{0};
-    };
-
-    struct BackendHealth {
-        int failure_count{0};
-        std::chrono::steady_clock::time_point retry_at{};
-    };
-
-    class GrpcServiceImpl final : public gateway::lb::LoadBalancerService::Service {
-    public:
-        explicit GrpcServiceImpl(LoadBalancerApp& owner);
-        grpc::Status Forward(grpc::ServerContext*, const gateway::lb::RouteRequest*,
-                             gateway::lb::RouteResponse*) override;
-        grpc::Status Stream(grpc::ServerContext*,
-                            grpc::ServerReaderWriter<gateway::lb::RouteMessage, gateway::lb::RouteMessage>*) override;
-    private:
-        LoadBalancerApp& owner_;
-    };
-
     void configure();
-    void configure_backends(std::string_view list);
-    void rebuild_hash_ring();
-    std::size_t set_backends(std::vector<BackendEndpoint> backends);
-    void schedule_backend_refresh();
-    void refresh_backends();
-    bool apply_backend_snapshot(std::vector<BackendEndpoint> candidates, std::string_view source);
-    std::vector<BackendEndpoint> make_backends_from_records(const std::vector<server::state::InstanceRecord>& records) const;
-    static bool backends_equal(const std::vector<BackendEndpoint>& lhs, const std::vector<BackendEndpoint>& rhs);
-    bool is_backend_available(const BackendEndpoint& endpoint, std::chrono::steady_clock::time_point now);
-    void mark_backend_success(const std::string& backend_id);
-    void mark_backend_failure(const std::string& backend_id);
+    
     void schedule_heartbeat();
     void publish_heartbeat();
     std::unique_ptr<server::state::IInstanceStateBackend> create_backend();
-    std::optional<BackendEndpoint> select_backend(const std::string& client_id);
-    std::optional<BackendEndpoint> find_backend_by_id(const std::string& backend_id) const;
-    grpc::Status handle_stream(grpc::ServerContext* context,
-                               grpc::ServerReaderWriter<gateway::lb::RouteMessage, gateway::lb::RouteMessage>* stream);
+    
+    // 백엔드 TCP 연결
     bool connect_backend(const BackendEndpoint& endpoint,
                          boost::asio::ip::tcp::socket& socket,
                          std::string& error) const;
+                         
     void start_grpc_server();
     void stop_grpc_server();
     void handle_signals();
-    void load_environment();
 
+    Config config_;
     boost::asio::io_context io_;
     std::shared_ptr<server::core::net::Hive> hive_;
     boost::asio::steady_timer heartbeat_timer_;
     boost::asio::signal_set signals_;
+    
     std::unique_ptr<server::state::IInstanceStateBackend> state_backend_;
     std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
-    std::unique_ptr<SessionDirectory> session_directory_;
+    std::unique_ptr<SessionDirectory> session_directory_; // Sticky Session 관리자
 
-    std::string grpc_listen_address_;
     std::unique_ptr<GrpcServiceImpl> grpc_service_;
     std::unique_ptr<grpc::Server> grpc_server_;
     std::thread grpc_thread_;
     int grpc_selected_port_{0};
 
-    std::string instance_id_;
-    std::vector<BackendEndpoint> static_backends_;
-    boost::asio::steady_timer backend_refresh_timer_;
-    std::chrono::seconds backend_refresh_interval_{std::chrono::seconds{5}};
-    std::string backend_registry_prefix_{"gateway/instances"};
-    bool dynamic_backends_active_{false};
-    std::vector<BackendEndpoint> backends_;
-    std::unordered_map<std::string, std::size_t> backend_index_map_;
-    std::map<std::uint32_t, std::size_t> hash_ring_;
-    std::mutex hash_mutex_;
-    std::unordered_map<std::string, BackendHealth> backend_health_;
-    mutable std::mutex health_mutex_;
-    std::atomic<std::size_t> backend_index_{0};
-    std::chrono::seconds heartbeat_interval_{std::chrono::seconds{5}};
-    std::chrono::seconds backend_state_ttl_{std::chrono::seconds{30}};
-    std::chrono::seconds session_binding_ttl_{std::chrono::seconds{45}};
-    std::chrono::seconds backend_idle_timeout_{std::chrono::seconds{30}};
-    std::size_t backend_failure_threshold_{3};
-    std::chrono::seconds backend_retry_cooldown_{std::chrono::seconds{5}};
+    // 백엔드 레지스트리 (상태 및 선택 로직 관리)
+    BackendRegistry backend_registry_;
+    
+    // 백엔드 리프레셔 (주기적 업데이트)
+    std::unique_ptr<BackendRefresher> backend_refresher_;
+    
     std::atomic<std::uint64_t> backend_idle_close_total_{0};
 };
 

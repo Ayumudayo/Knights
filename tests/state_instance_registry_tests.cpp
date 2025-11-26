@@ -74,6 +74,7 @@ private:
 
 } // namespace
 
+// InMemory 백엔드에서 인스턴스 등록 및 조회가 정상 동작하는지 확인합니다.
 TEST(InMemoryStateBackendTests, UpsertAndList) {
     InMemoryStateBackend backend;
     auto record = sample_record();
@@ -93,15 +94,18 @@ TEST(InMemoryStateBackendTests, TouchUpdatesHeartbeat) {
     EXPECT_EQ(all.front().last_heartbeat_ms, 999u);
 }
 
+// Redis 백엔드가 SETEX 명령어를 사용하여 TTL과 함께 인스턴스를 저장하는지 확인합니다.
 TEST(RedisInstanceStateBackendTests, PersistsWithSetex) {
     auto client = std::make_shared<FakeRedisClient>();
     RedisInstanceStateBackend backend(client, "gateway/test", std::chrono::seconds{5});
     auto record = sample_record();
 
+    // Upsert 시 SETEX 호출 확인
     EXPECT_TRUE(backend.upsert(record));
     EXPECT_EQ(client->setex_calls, 1u);
     EXPECT_NE(client->last_key.find("gateway/test/"), std::string::npos);
 
+    // Touch 시에도 SETEX 호출되어 TTL 갱신 확인
     EXPECT_TRUE(backend.touch("core-1", 1234));
     EXPECT_EQ(client->setex_calls, 2u);
     EXPECT_EQ(client->last_ttl, 5u);
@@ -110,6 +114,7 @@ TEST(RedisInstanceStateBackendTests, PersistsWithSetex) {
     ASSERT_EQ(all.size(), 1u);
     EXPECT_EQ(all.front().last_heartbeat_ms, 1234u);
 
+    // Remove 시 DEL 호출 확인
     EXPECT_TRUE(backend.remove("core-1"));
     EXPECT_EQ(client->del_calls, 1u);
 }

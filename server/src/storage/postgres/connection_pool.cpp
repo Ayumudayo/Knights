@@ -26,6 +26,8 @@ using server::core::storage::Message;
 using server::core::storage::Session;
 
 // users 테이블을 다루는 PostgreSQL 전용 Repository.
+// SQL 쿼리를 직접 작성하여 DB와 상호작용합니다.
+// ORM을 사용하지 않고 직접 SQL을 사용하는 이유는 명시적인 제어와 성능 최적화를 위해서입니다.
 class PgUserRepository final : public IUserRepository {
 public:
     explicit PgUserRepository(pqxx::work* w) : w_(w) {}
@@ -249,6 +251,8 @@ private:
 };
 
 // pqxx::work 하나에 모든 Repository를 묶어 transaction을 관리한다.
+// UnitOfWork 패턴을 구현하여, 여러 리포지토리의 변경사항이 하나의 트랜잭션으로 묶이도록 보장합니다.
+// commit()을 호출하기 전까지는 DB에 반영되지 않으며, 예외 발생 시 자동 롤백됩니다.
 class PgUnitOfWork final : public IUnitOfWork {
 public:
     explicit PgUnitOfWork(std::shared_ptr<pqxx::connection> conn)
@@ -282,6 +286,9 @@ public:
 
     std::unique_ptr<IUnitOfWork> make_unit_of_work() override {
         // 요청마다 새로운 pqxx::connection을 열어 트랜잭션 경계를 분리한다.
+        // 실제 운영 환경에서는 커넥션 풀링 라이브러리(예: pgBouncer)를 앞단에 두거나,
+        // 내부적으로 커넥션 객체를 재사용하는 풀을 구현해야 성능 오버헤드를 줄일 수 있습니다.
+        // 현재 구현은 단순함을 위해 매번 연결을 생성합니다.
         auto conn = std::make_shared<pqxx::connection>(db_uri_);
         if (!conn->is_open()) throw std::runtime_error("PQXX connection failed");
         return std::make_unique<PgUnitOfWork>(std::move(conn));

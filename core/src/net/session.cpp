@@ -138,6 +138,7 @@ void Session::do_read_header() {
             if (ec) {
                 runtime_metrics::record_frame_error();
                 log::debug(std::string("Failed to read header: ") + ec.message());
+                // 헤더 읽기 실패는 프로토콜 위반이거나 연결 끊김이므로 세션을 종료합니다.
                 stop();
                 return;
             }

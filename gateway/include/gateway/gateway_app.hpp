@@ -20,8 +20,14 @@ namespace gateway {
 
 class GatewayConnection;
 
+// Gateway 애플리케이션의 메인 클래스입니다.
+// TCP 리스너를 구동하여 클라이언트 연결을 수락하고,
+// 각 연결에 대해 로드 밸런서(LB)와의 gRPC 세션을 관리합니다.
 class GatewayApp {
 public:
+    // 로드 밸런서와의 개별 세션을 관리하는 내부 클래스입니다.
+    // gRPC의 양방향 스트리밍(Bi-directional streaming)을 사용하여
+    // GatewayConnection(TCP)과 로드 밸런서 간의 데이터를 실시간으로 중계합니다.
     class LbSession : public std::enable_shared_from_this<LbSession> {
     public:
         LbSession(GatewayApp& app,

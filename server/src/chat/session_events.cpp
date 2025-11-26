@@ -13,6 +13,7 @@ namespace server::app::chat {
 
 void ChatService::on_session_close(std::shared_ptr<Session> s) {
     // 세션 종료 시에는 Redis/DB 정리와 방 브로드캐스트가 필요하므로 worker 큐에서 처리한다.
+    // TCP 연결이 끊어지면 즉시 호출되며, 여기서 모든 정리 작업을 수행해야 좀비 세션이 남지 않습니다.
     job_queue_.Push([this, s]() {
         const std::string session_id_str = get_or_create_session_uuid(*s);
         std::string user_uuid;

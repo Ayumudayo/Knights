@@ -28,38 +28,36 @@ DbWorkerPool::~DbWorkerPool() {
     stop();
 }
 
-// DB 작업은 네트워크 트랜잭션과 독립적으로 재시도되어야 하므로 별도의 worker pool로 분리한다.
-// start()는 worker_count(0이면 HW 동시성)를 기준으로 스레드를 띄우고,
-// stop()은 큐에 중단 신호를 넣어 안전하게 종료한다.
 void DbWorkerPool::start(std::size_t worker_count) {
-    if (running_) {
+    if (running_.exchange(true)) {
         return;
     }
-    queue_.reset();
-    stopping_.store(false, std::memory_order_relaxed);
+    stopping_.store(false);
+    
     worker_count = normalize_worker_count(worker_count);
     workers_.reserve(worker_count);
+    
     for (std::size_t i = 0; i < worker_count; ++i) {
-        workers_.emplace_back([this, i]() { worker_loop(i); });
+        workers_.emplace_back(&DbWorkerPool::worker_loop, this, i);
     }
-    running_.store(true, std::memory_order_relaxed);
+    
+    log::info("DbWorkerPool started with " + std::to_string(worker_count) + " workers");
 }
 
 void DbWorkerPool::stop() {
-    if (!running_) {
+    if (!running_.exchange(false)) {
         return;
     }
-    stopping_.store(true, std::memory_order_relaxed);
-    queue_.stop();
+    stopping_.store(true);
+    queue_.stop(); // Wake up all waiting threads
+    
     for (auto& worker : workers_) {
         if (worker.joinable()) {
             worker.join();
         }
     }
     workers_.clear();
-    running_.store(false, std::memory_order_relaxed);
-    queue_.reset();
-    runtime_metrics::record_db_job_queue_depth(0);
+    log::info("DbWorkerPool stopped");
 }
 
 bool DbWorkerPool::running() const {

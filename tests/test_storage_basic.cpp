@@ -20,6 +20,8 @@ std::string unique_name(const std::string& prefix) {
 
 }
 
+// 방 생성, 유저 입장, 메시지 전송, 멤버십 조회 등 기본적인 스토리지 시나리오를 검증합니다.
+// 실제 DB 연결이 필요하므로 DB_URI가 없으면 건너뜁니다.
 TEST(StorageBasic, RoomMessageMembershipHappyPath) {
     const char* db = std::getenv("DB_URI");
     if (!db || !*db) {

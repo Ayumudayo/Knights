@@ -136,6 +136,8 @@ ChatService::ChatService(boost::asio::io_context& io,
 
 // 방별 Strand(직렬화된 실행 컨텍스트)를 반환합니다.
 // 동일한 방에 대한 작업은 동일한 스레드에서 순차적으로 실행됨을 보장합니다.
+// 이는 멀티스레드 환경에서 방 상태(참여자 목록 등)의 동시성 문제를 해결하는 핵심 메커니즘입니다.
+// Mutex를 직접 사용하는 것보다 데드락 위험이 적고 코드가 간결해집니다.
 ChatService::Strand& ChatService::strand_for(const std::string& room) {
     auto it = room_strands_.find(room);
     if (it == room_strands_.end()) {
@@ -181,6 +183,8 @@ std::string ChatService::get_or_create_session_uuid(Session& s) {
 
 // Write-behind 이벤트를 Redis Stream에 발행합니다.
 // 이 이벤트들은 별도의 워커 프로세스에 의해 DB에 비동기적으로 저장됩니다.
+// 즉, 채팅 서버는 DB 쓰기 지연을 기다리지 않고 즉시 응답할 수 있어 반응성이 향상됩니다.
+// (CQRS 패턴의 변형으로 볼 수 있습니다)
 void ChatService::emit_write_behind_event(const std::string& type,
                                            const std::string& session_id,
                                            const std::optional<std::string>& user_id,
@@ -367,6 +371,11 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
 }
 
 // 방 입장 시 현재 상태(방 목록, 유저 목록, 최근 메시지)를 스냅샷으로 전송합니다.
+// 클라이언트는 이 정보를 받아 UI를 초기화합니다.
+// 1. 활성 방 목록
+// 2. 현재 방의 참여자 목록
+// 3. 최근 대화 내역 (Redis 캐시 + DB Fallback)
+// 4. 마지막으로 읽은 메시지 ID (Read Receipt)
 void ChatService::send_snapshot(Session& s, const std::string& current) {
     std::vector<std::uint8_t> body;
     server::wire::v1::StateSnapshot pb; pb.set_current_room(current);

@@ -12,6 +12,7 @@ ThreadManager::~ThreadManager() {
 
 // ThreadManager는 JobQueue를 소비하는 고정 스레드 풀입니다.
 // 각 워커 스레드는 JobQueue::Pop()이 nullptr를 반환할 때까지 반복 실행됩니다.
+// 이를 통해 스레드 생성/삭제 오버헤드를 줄이고 안정적인 작업 처리를 보장합니다.
 void ThreadManager::Start(int num_threads) {
     stopped_.store(false, std::memory_order_relaxed);
     threads_.reserve(num_threads);

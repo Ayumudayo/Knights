@@ -11,6 +11,8 @@ namespace client::app {
 
 class AppState;
 
+// 사용자가 입력창에 입력한 명령어(/login, /join 등)를 파싱하고 처리합니다.
+// 입력된 텍스트가 명령어가 아니면 일반 채팅 메시지로 간주하여 서버로 전송합니다.
 class CommandProcessor {
 public:
     using LogSink = std::function<void(const std::string&)>;

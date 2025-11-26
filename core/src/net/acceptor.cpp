@@ -34,12 +34,16 @@ Acceptor::Acceptor(asio::io_context& io,
 
     // 초기 바인드 단계는 실패 시 다시 복구하기 어렵기 때문에 각 단계를 명시적으로 검증합니다.
     // bind()나 listen() 실패는 포트 충돌 등 치명적인 문제일 가능성이 높습니다.
+    // 1. 소켓 열기
     acceptor_.open(ep.protocol(), ec);
     if (fail("open")) return;
+    // 2. 주소 재사용 옵션 설정 (서버 재시작 시 TIME_WAIT 상태 포트 즉시 사용)
     acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true), ec);
     if (fail("set_option")) return;
+    // 3. 포트 바인딩
     acceptor_.bind(ep, ec);
     if (fail("bind")) return;
+    // 4. 연결 대기열 생성
     acceptor_.listen(asio::socket_base::max_listen_connections, ec);
     if (fail("listen")) return;
 }

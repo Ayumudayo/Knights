@@ -8,6 +8,14 @@
 
 namespace server::core::concurrent {
 
+/**
+ * @brief 제네릭 스레드 안전 큐 (Thread-safe Queue)
+ * 
+ * std::queue를 감싸서 Mutex로 보호하는 래퍼 클래스입니다.
+ * 데이터 경쟁 없이 여러 스레드에서 안전하게 데이터를 넣고 뺄 수 있습니다.
+ * 
+ * @tparam T 큐에 저장할 데이터 타입
+ */
 template <typename T>
 class LockedQueue {
 public:

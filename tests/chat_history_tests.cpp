@@ -108,6 +108,8 @@ private:
     std::unordered_map<std::string, std::deque<std::string>> lists_;
 };
 
+// 채팅 기록 캐시(Redis) 동작을 검증하는 테스트입니다.
+// MockRedisClient를 사용하여 실제 Redis 없이 로직을 테스트합니다.
 class ChatHistoryCacheTest : public ::testing::Test {
 protected:
     boost::asio::io_context io_;
@@ -116,10 +118,12 @@ protected:
     std::unique_ptr<server::app::chat::ChatService> service_;
 
     void SetUp() override {
+        // 테스트 전 ChatService를 초기화하고, 히스토리 설정을 오버라이드합니다.
         service_ = std::make_unique<server::app::chat::ChatService>(io_, job_queue_, nullptr, redis_);
         server::app::chat::ChatServiceHistoryTester::OverrideHistoryConfig(*service_, 3, 16);
     }
 
+    // 테스트용 스냅샷 메시지 생성 헬퍼
     static server::wire::v1::StateSnapshot::SnapshotMessage MakeMessage(std::uint64_t id, const std::string& sender) {
         server::wire::v1::StateSnapshot::SnapshotMessage msg;
         msg.set_id(id);
@@ -130,15 +134,18 @@ protected:
     }
 };
 
+// 캐시에 저장된 모든 메시지가 정상적으로 로드되는지 확인합니다.
 TEST_F(ChatHistoryCacheTest, LoadsAllMessagesFromCache) {
     auto msg1 = MakeMessage(1, "alice");
     auto msg2 = MakeMessage(2, "bob");
     auto msg3 = MakeMessage(3, "carol");
 
+    // 3개의 메시지를 캐시에 저장
     ASSERT_TRUE(server::app::chat::ChatServiceHistoryTester::Cache(*service_, "room-1", msg1));
     ASSERT_TRUE(server::app::chat::ChatServiceHistoryTester::Cache(*service_, "room-1", msg2));
     ASSERT_TRUE(server::app::chat::ChatServiceHistoryTester::Cache(*service_, "room-1", msg3));
 
+    // 캐시에서 로드하여 개수와 마지막 메시지 ID 확인
     std::vector<server::wire::v1::StateSnapshot::SnapshotMessage> loaded;
     ASSERT_TRUE(server::app::chat::ChatServiceHistoryTester::Load(*service_, "room-1", loaded));
     EXPECT_EQ(loaded.size(), 3u);

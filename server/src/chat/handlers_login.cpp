@@ -41,6 +41,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
     auto session_sp = s.shared_from_this();
     // 로그인은 DB/Redis 작업과 write-behind 이벤트가 함께 수행되므로 job_queue로 넘긴다.
     // I/O 바운드 작업이 많으므로 비동기 처리가 필수적입니다.
+    // 메인 I/O 스레드가 블로킹되면 전체 서버의 반응성이 떨어지기 때문입니다.
     job_queue_.Push([this, session_sp, user, token]() {
         const std::string session_id_str = get_or_create_session_uuid(*session_sp);
         std::string tracked_user_uuid;

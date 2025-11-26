@@ -58,6 +58,7 @@ std::pair<std::string, std::uint16_t> parse_listen(std::string_view value, std::
 } // namespace
 
 // LbSession은 단일 gateway 클라이언트와 LB gRPC 스트림 사이의 stateful bridge를 캡슐화한다.
+// GatewayConnection(TCP)과 LoadBalancer(gRPC) 사이의 1:1 매핑을 담당합니다.
 GatewayApp::LbSession::LbSession(GatewayApp& app,
                                  std::string session_id,
                                  std::string client_id,
@@ -157,6 +158,7 @@ void GatewayApp::LbSession::read_loop() {
         switch (response.kind()) {
         case gateway::lb::ROUTE_KIND_SERVER_PAYLOAD: {
             // LB가 backend에서 읽은 바이트를 전달하면 GatewayConnection을 통해 TCP 클라이언트로 재전송한다.
+            // 이는 서버 -> LB -> Gateway -> Client 로 이어지는 응답 경로입니다.
             auto payload = response.payload();
             if (auto connection = connection_.lock()) {
                 std::vector<std::uint8_t> data(payload.begin(), payload.end());

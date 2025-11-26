@@ -40,6 +40,7 @@ void AppState::set_preview_room(std::string room) {
 // -----------------------------------------------------------------------------
 // 서버에서 내려온 방 목록과 잠금 상태를 저장하고 선택 인덱스를 유지한다.
 // preferred_room이 목록에 있으면 해당 방을 선택하고, 없으면 기존 인덱스를 범위 내로 조정한다.
+// 이는 방 목록이 갱신되어도 사용자가 보고 있던 위치를 최대한 유지하기 위함입니다.
 void AppState::update_rooms(std::vector<std::string> rooms,
                             std::vector<bool> locks,
                             const std::string& preferred_room) {
@@ -78,6 +79,7 @@ void AppState::update_users(std::vector<std::string> users) {
 // 로그 추가
 // -----------------------------------------------------------------------------
 // 로그는 일정 개수만 유지하고 auto-scroll 여부에 따라 선택 인덱스를 갱신한다.
+// 사용자가 스크롤을 올려서 이전 로그를 보고 있을 때는 자동 스크롤을 하지 않습니다.
 void AppState::append_log(std::string line) {
     auto sanitized = trim_right_newline(std::move(line));
     std::lock_guard lk(logs_mu_);

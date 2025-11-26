@@ -38,6 +38,7 @@ Registry& Registry::instance() {
     }
 
     // 환경 변수로 레지스트리 주소를 공유하면 모듈 경계를 넘어 같은 인스턴스를 재사용할 수 있다.
+    // 이는 DLL이나 Shared Object로 분리된 플러그인들이 메인 프로세스의 서비스를 참조해야 할 때 유용하다.
     auto pointer_str = pointer_to_string(&singleton);
 #if defined(_WIN32)
     _putenv_s(kRegistryEnvVar, pointer_str.c_str());

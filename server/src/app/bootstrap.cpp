@@ -57,6 +57,13 @@ std::atomic<std::uint64_t> g_subscribe_total{0};
 std::atomic<std::uint64_t> g_self_echo_drop_total{0};
 std::atomic<long long>     g_subscribe_last_lag_ms{0};
 
+// 메인 서버 실행 함수
+// 1. 설정 로드
+// 2. 핵심 컴포넌트(스레드 풀, I/O 컨텍스트) 초기화
+// 3. 의존성 주입 (ServiceRegistry)
+// 4. DB/Redis 연결 설정
+// 5. 서버 인스턴스 등록 (Service Discovery)
+// 6. TCP 리스너 시작
 int run_server(int argc, char** argv) {
     // 1. 핵심 컴포넌트 선언
     core::concurrent::TaskScheduler scheduler;

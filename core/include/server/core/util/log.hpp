@@ -6,6 +6,14 @@
 
 namespace server::core::log {
 
+/**
+ * @brief 로그 레벨 정의
+ * trace: 가장 상세한 로그 (디버깅용)
+ * debug: 개발 중 확인용 정보
+ * info: 일반적인 정보 (시작/종료, 주요 이벤트)
+ * warn: 경고 (잠재적 문제)
+ * error: 에러 (기능 실패)
+ */
 enum class level { trace, debug, info, warn, error };
 
 void set_level(level lv);

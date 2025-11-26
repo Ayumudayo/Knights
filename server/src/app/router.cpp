@@ -9,6 +9,7 @@ namespace server::app {
 // Gateway나 LoadBalancer가 새 Session을 넘겨주면 opcode → handler 매핑을 모두 등록한다.
 // 현재 서버는 ChatService 단일 모듈이 모든 메시지를 처리하므로 dispatcher 테이블만 채우면 된다.
 // ChatService가 대부분의 메시지를 처리하므로 dispatcher는 단순한 라우팅 테이블 역할을 한다.
+// 각 메시지 ID(opcode)에 대해 어떤 함수가 호출되어야 하는지 정의합니다.
 void register_routes(server::core::Dispatcher& dispatcher, server::app::chat::ChatService& chat) {
     using server::core::protocol::MSG_PING;
     using server::core::protocol::MSG_PONG;

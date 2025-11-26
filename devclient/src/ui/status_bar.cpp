@@ -10,6 +10,10 @@ namespace client::ui {
 Element RenderStatusBar(const client::app::AppState& state) {
     const auto size = Terminal::Size();
     const int width = size.dimx;
+    // 터미널 너비에 따라 표시할 정보의 양을 동적으로 조절합니다.
+    // wide(>=110): 모든 정보 및 단축키 안내 표시
+    // mid(>=90): 사용자/방 정보 요약 표시
+    // small(>=70): 최소한의 상태 정보만 표시
     const bool wide = width >= 110;
     const bool mid = width >= 90;
     const bool small = width >= 70;

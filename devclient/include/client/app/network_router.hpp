@@ -14,6 +14,8 @@ namespace client::app {
 
 class AppState;
 
+// 네트워크로부터 수신된 메시지를 적절한 UI 업데이트 로직으로 라우팅합니다.
+// NetClient의 콜백을 등록하여, 서버 메시지(채팅, 방 목록 갱신 등)가 오면 AppState를 변경하고 UI를 갱신합니다.
 class NetworkRouter {
 public:
     using LogSink = std::function<void(const std::string&)>;

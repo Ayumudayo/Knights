@@ -10,6 +10,7 @@ void JobQueue::Push(Job job) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         jobs_.push(std::move(job));
+        // 메트릭 기록: 현재 큐 깊이
         runtime_metrics::record_job_queue_depth(jobs_.size());
     }
     // 대기 중인 워커 스레드 하나를 깨웁니다.

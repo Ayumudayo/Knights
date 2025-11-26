@@ -94,6 +94,20 @@ bool IsUuid(const std::string& s) {
 // -----------------------------------------------------------------------------
 // Write-Back Worker
 // -----------------------------------------------------------------------------
+/**
+ * @brief Write-Behind 패턴을 구현한 워커 클래스
+ * 
+ * Redis Stream에 쌓인 이벤트를 비동기적으로 읽어서 PostgreSQL DB에 저장합니다.
+ * 이 패턴을 사용하면 메인 서버가 DB 쓰기 부하를 직접 감당하지 않아도 되므로
+ * 응답 속도가 빨라지고, 트래픽 폭주 시에도 DB를 보호할 수 있습니다.
+ * 
+ * 주요 흐름:
+ * 1. Redis Stream (`session_events`)에서 Consumer Group을 통해 메시지를 읽습니다.
+ * 2. 읽은 메시지를 내부 버퍼에 모읍니다 (Batching).
+ * 3. 일정 개수(`batch_max_events`)가 모이거나 일정 시간(`batch_delay_ms`)이 지나면 DB에 저장합니다.
+ * 4. 저장 성공 시 Redis에 ACK를 보내 메시지 처리를 완료합니다.
+ * 5. 실패 시 DLQ(Dead Letter Queue)로 보내거나 재시도합니다.
+ */
 class WbWorker {
 public:
     explicit WbWorker(WorkerConfig config) : config_(std::move(config)) {}
@@ -117,6 +131,7 @@ public:
         }
 
         // Consumer Group 생성 (이미 존재하면 무시됨)
+        // Consumer Group은 여러 워커가 메시지를 중복 없이 나눠서 처리하게 해줍니다.
         (void)redis_->xgroup_create_mkstream(config_.stream_key, config_.group);
         info("WB worker consuming stream=" + config_.stream_key + 
              ", group=" + config_.group + ", consumer=" + config_.consumer);
@@ -130,7 +145,7 @@ public:
             // Loop() 내에서 처리하도록 함.
         }
 
-        // 메인 루프
+        // 메인 루프 시작
         Loop();
         return 0;
     }

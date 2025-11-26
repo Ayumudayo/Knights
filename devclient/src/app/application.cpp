@@ -33,7 +33,8 @@ constexpr const char* kEnvPort = "DEVCLIENT_PORT";
 // Application::Impl 클래스
 // -----------------------------------------------------------------------------
 // UI 구성 요소, 명령 처리기, 네트워크 클라이언트를 묶어 운영하는 내부 구현체입니다.
-// Pimpl 관용구를 사용하여 헤더 의존성을 줄입니다.
+// Pimpl(Pointer to Implementation) 관용구를 사용하여 헤더 의존성을 줄이고 컴파일 시간을 단축합니다.
+// 또한 구현 세부 사항을 헤더 파일에서 숨겨 API를 깔끔하게 유지합니다.
 class Application::Impl {
 public:
     Impl(std::string host, unsigned short port, bool allow_env_override);
@@ -108,6 +109,7 @@ int Application::Impl::Run() {
     auto ui = builder_.Build();
     
     // 키보드 이벤트 핸들러 등록
+    // CatchEvent는 UI 루트 컴포넌트에서 처리되지 않은 이벤트를 가로챕니다.
     auto app = CatchEvent(ui.root, [this, input = ui.input](ftxui::Event event) {
         // ESC 또는 Ctrl+C: 종료
         if (event == ftxui::Event::Escape || event == ftxui::Event::CtrlC) {

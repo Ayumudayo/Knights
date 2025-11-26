@@ -39,6 +39,7 @@ void ChatService::on_whisper(Session& s, std::span<const std::uint8_t> payload) 
     auto session_sp = s.shared_from_this();
     // whisper 처리는 DB 조회/타 세션 접근이 필요하므로 job_queue에서 비동기로 처리한다.
     // 동시성 문제를 피하기 위해 메인 로직은 JobQueue Worker 스레드에서 실행됩니다.
+    // 이렇게 하면 I/O 스레드는 즉시 다음 패킷을 받을 준비를 할 수 있습니다 (Non-blocking).
     job_queue_.Push([this, session_sp, target = std::move(target), text = std::move(text)]() {
         dispatch_whisper(session_sp, target, text);
     });
@@ -70,6 +71,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         
         // /refresh는 상태 스냅샷을 강제로 다시 받게 하는 관리 명령이다.
         // 클라이언트 상태가 꼬였을 때 유용합니다.
+        // 예: 네트워크 끊김 후 재접속 시 UI 갱신용
         if (text == "/refresh") {
             handle_refresh(session_sp);
             return;

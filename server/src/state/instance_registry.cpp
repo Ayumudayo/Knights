@@ -55,6 +55,7 @@ namespace detail {
 
 // Redis registry와 통신하기 위해 간단한 JSON 직렬화를 구현한다.
 // 외부 라이브러리 의존성을 줄이기 위해 직접 문자열 파싱/생성을 수행합니다.
+// 성능보다는 이식성과 의존성 최소화에 중점을 둔 구현입니다.
 std::string serialize_json(const InstanceRecord& record) {
     std::ostringstream oss;
     oss << '{';
@@ -181,7 +182,8 @@ private:
 // -----------------------------------------------------------------------------
 // Redis를 백엔드로 사용하는 인스턴스 레지스트리입니다.
 // 각 인스턴스는 고유한 키에 JSON 형태로 저장되며, TTL(Time-To-Live)을 통해
-// 비정상 종료 시 자동으로 목록에서 제거됩니다.
+// 비정상 종료 시 자동으로 목록에서 제거됩니다. (Heartbeat 패턴)
+// 이를 통해 별도의 헬스 체크 로직 없이도 죽은 서버를 감지할 수 있습니다.
 
 RedisInstanceStateBackend::RedisInstanceStateBackend(std::shared_ptr<IRedisClient> client,
                                                      std::string key_prefix,
@@ -232,6 +234,7 @@ bool RedisInstanceStateBackend::touch(const std::string& instance_id, std::uint6
 
 // Redis의 모든 인스턴스 키를 스캔하여 로컬 캐시를 재구성합니다.
 // 게이트웨이 재시작 시 또는 주기적인 동기화에 사용됩니다.
+// SCAN 명령어를 사용하여 대량의 키가 있어도 Redis를 블로킹하지 않고 안전하게 조회합니다.
 bool RedisInstanceStateBackend::reload_cache_from_backend() const {
     if (!client_) {
         return false;

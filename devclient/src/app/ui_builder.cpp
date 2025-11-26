@@ -36,6 +36,7 @@ UiBuilder::UiBuilder(AppState& state,
 // [상단 상태바]
 // [좌측 패널(방/유저)] | [우측 패널(채팅 로그)]
 // [입력창]
+// FTXUI의 Renderer를 사용하여 컴포넌트들을 레이아웃에 배치합니다.
 UiBuilder::UiComponents UiBuilder::Build() {
     // 방 목록 메뉴 설정
     MenuOption rooms_opt;
@@ -128,6 +129,8 @@ UiBuilder::UiComponents UiBuilder::Build() {
 // -----------------------------------------------------------------------------
 // 좌측 패널 (방 목록/사용자 목록)
 // -----------------------------------------------------------------------------
+// 방 목록과 사용자 목록을 수직으로 배치합니다.
+// flex 옵션을 사용하여 남은 공간을 균등하게 차지하도록 합니다.
 Component UiBuilder::BuildLeftPane() {
     // 좌측 패널: 방 목록 + 사용자 목록
     auto left_container = Container::Vertical({rooms_menu_, users_menu_});
@@ -146,6 +149,8 @@ Component UiBuilder::BuildLeftPane() {
 // -----------------------------------------------------------------------------
 // 우측 패널 (채팅 로그)
 // -----------------------------------------------------------------------------
+// 상단에 현재 방 정보를 표시하는 헤더와 하단의 채팅 로그 영역으로 구성됩니다.
+// 터미널 너비에 따라 표시되는 정보의 양을 조절하는 반응형 UI 로직이 포함되어 있습니다.
 Component UiBuilder::BuildRightPane() {
     return Renderer(log_menu_, [this] {
         auto terminal_size = Terminal::Size();

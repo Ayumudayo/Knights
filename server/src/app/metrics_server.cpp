@@ -29,6 +29,9 @@ MetricsServer::~MetricsServer() {
     stop();
 }
 
+// 메트릭 서버 시작
+// 별도의 스레드에서 HTTP 요청을 처리하여 메인 로직에 영향을 주지 않습니다.
+// Prometheus가 주기적으로 /metrics 엔드포인트를 긁어갈 수 있도록 합니다.
 void MetricsServer::start() {
     corelog::info(std::string("Metrics listening on :") + std::to_string(port_));
     do_accept();

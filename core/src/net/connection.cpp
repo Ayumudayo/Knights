@@ -57,6 +57,7 @@ void Connection::async_send(const std::vector<std::uint8_t>& data) {
         if (idle) {
             // 기존 write 작업이 없을 때만 do_write를 시작해 순서를 보장합니다.
             // 만약 이미 전송 중이라면, 전송 완료 핸들러에서 큐를 확인하고 계속 전송할 것입니다.
+            // 이를 통해 한 번에 하나의 비동기 쓰기 작업만 수행되도록 보장합니다.
             self->do_write();
         }
     });

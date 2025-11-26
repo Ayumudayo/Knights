@@ -17,6 +17,7 @@ Hive::io_context& Hive::context() {
 void Hive::run() {
     // work_guard가 살아 있는 동안 io_context::run()은 리턴하지 않고 계속 실행됩니다.
     // 즉, 이 함수를 호출한 스레드는 이벤트 루프가 되어 I/O 작업을 처리합니다.
+    // 여러 스레드에서 이 함수를 호출하면 멀티스레드 I/O 처리가 가능해집니다.
     stopped_.store(false, std::memory_order_relaxed);
     io_.run();
 }

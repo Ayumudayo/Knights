@@ -17,19 +17,13 @@ namespace server::app::chat {
 // 방 퇴장 (Leave) 핸들러
 // -----------------------------------------------------------------------------
 // 사용자가 현재 방에서 나갈 때 호출됩니다.
-// 1. 페이로드 파싱 (선택적 방 이름)
-// 2. 현재 방 확인 및 퇴장 처리
-// 3. 빈 방 정리 (세션이 없으면 방 제거)
-// 4. 로비로 이동 처리
-// 5. 퇴장 알림 및 로비 입장 알림 브로드캐스트
-// 6. Redis Presence 제거 및 Write-behind 이벤트 발행
-
-void ChatService::on_leave(Session& s, std::span<const std::uint8_t> payload) {
-    auto sp = std::span<const std::uint8_t>(payload.data(), payload.size());
-    std::string room;
-    proto::read_lp_utf8(sp, room); // 방 이름은 선택 사항이며 비워두면 현재 방 기준으로 처리한다.
-
+void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_t> payload) {
     auto session_sp = s.shared_from_this();
+    std::string room;
+    if (!payload.empty()) {
+        proto::read_lp_utf8(payload, room);
+    }
+
     // DB, Redis, fanout 처리까지 필요하므로 job_queue에서 비동기로 처리한다.
     job_queue_.Push([this, session_sp, room]() {
         const std::string session_id_str = get_or_create_session_uuid(*session_sp);
