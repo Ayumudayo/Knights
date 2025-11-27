@@ -51,7 +51,17 @@
       "name": "linux",
       "inherits": "linux-base",
       "displayName": "Linux (Ninja)",
-      "description": "Linux configuration using Ninja"
+      "description": "Linux configuration using Ninja (Debug)"
+    },
+    {
+      "name": "linux-release",
+      "inherits": "linux-base",
+      "displayName": "Linux Release (Ninja)",
+      "description": "Linux configuration using Ninja (Release)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "x64-linux"
+      }
     }
   ],
   "buildPresets": [
@@ -75,8 +85,8 @@
     },
     {
       "name": "linux-release",
-      "configurePreset": "linux",
-      "configuration": "RelWithDebInfo",
+      "configurePreset": "linux-release",
+      "configuration": "Release",
       "displayName": "Linux Release"
     }
   ],

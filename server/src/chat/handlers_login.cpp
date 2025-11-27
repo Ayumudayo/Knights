@@ -159,6 +159,10 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                     if (it != state_.user_uuid.end()) uid = it->second;
                 }
                 touch_user_presence(uid);
+                
+                // 로비 입장 처리 (Redis Set에 추가)
+                // on_login에서는 기본적으로 로비에 입장하므로 여기서 동기화해줘야 함
+                redis_->sadd("room:users:lobby", new_user);
             } catch (...) {}
         }
         

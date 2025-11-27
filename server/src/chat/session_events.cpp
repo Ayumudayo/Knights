@@ -82,6 +82,8 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                         redis_->srem(make_presence_key("presence:room:", rid), uid);
                     }
                 }
+                // 화면 표시용 닉네임 목록에서 제거
+                redis_->srem("room:users:" + room_left, name);
             } catch (...) {}
         }
         if (!room_left.empty()) {

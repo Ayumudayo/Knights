@@ -37,7 +37,12 @@ public:
     using OnLoginRes = std::function<void(std::string effective_user, std::uint32_t sid)>;
     using OnBroadcast = std::function<void(std::string room, std::string sender, std::string text, std::uint16_t flags, std::uint32_t sender_sid)>;
     using OnRoomUsers = std::function<void(std::string room, std::vector<std::string> users)>;
-    using OnSnapshot = std::function<void(std::string current, std::vector<std::string> rooms, std::vector<std::string> users, std::vector<bool> locked)>;
+    struct SnapshotMessage {
+        std::string sender;
+        std::string text;
+        std::uint64_t ts_ms;
+    };
+    using OnSnapshot = std::function<void(std::string current, std::vector<std::string> rooms, std::vector<std::string> users, std::vector<bool> locked, std::vector<SnapshotMessage> messages)>;
     using OnWhisper = std::function<void(std::string sender, std::string recipient, std::string text, bool outgoing)>;
     using OnWhisperResult = std::function<void(bool ok, std::string reason)>;
     using OnDisconnected = std::function<void(std::string reason)>;

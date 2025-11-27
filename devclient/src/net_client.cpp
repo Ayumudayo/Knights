@@ -331,8 +331,13 @@ void NetClient::handle_frame(const proto::FrameHeader& hh, std::span<const std::
             for (const auto& u : pb.users()) {
                 users.push_back(u);
             }
+            std::vector<SnapshotMessage> messages;
+            messages.reserve(pb.messages_size());
+            for (const auto& m : pb.messages()) {
+                messages.push_back({m.sender(), m.text(), m.ts_ms()});
+            }
             if (on_snapshot_) {
-                on_snapshot_(pb.current_room(), std::move(rooms), std::move(users), std::move(locked));
+                on_snapshot_(pb.current_room(), std::move(rooms), std::move(users), std::move(locked), std::move(messages));
             }
         }
         return;

@@ -6,7 +6,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "${POSTGRES_PORT}:5432"
+      - "35432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     networks:
@@ -20,7 +20,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "${REDIS_PORT}:6379"
+      - "36379:6379"
     volumes:
       - redis_data:/data
     networks:
@@ -50,8 +50,8 @@ services:
       SERVER_ADVERTISE_PORT: ${SERVER_PORT_1}
       METRICS_PORT: 9090
     ports:
-      - "${SERVER_PORT_1}:${SERVER_PORT_1}"
-      - "9091:9090" # Expose metrics for manual check
+      - "30001:${SERVER_PORT_1}"
+      - "39091:9090" # Expose metrics for manual check
     depends_on:
       postgres:
         condition: service_healthy
@@ -79,8 +79,8 @@ services:
       SERVER_ADVERTISE_PORT: ${SERVER_PORT_2}
       METRICS_PORT: 9090
     ports:
-      - "${SERVER_PORT_2}:${SERVER_PORT_2}"
-      - "9092:9090" # Expose metrics for manual check
+      - "30002:${SERVER_PORT_2}"
+      - "39092:9090" # Expose metrics for manual check
     depends_on:
       postgres:
         condition: service_healthy
@@ -94,14 +94,14 @@ services:
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
-      - "9090:9090"
+      - "39090:9090"
     networks:
       - knights-net
 
   grafana:
     image: grafana/grafana:latest
     ports:
-      - "3000:3000"
+      - "33000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     networks:
@@ -114,7 +114,7 @@ services:
     pull_policy: never
     command: [ "gateway" ]
     ports:
-      - "6000:6000"
+      - "36000:6000"
     environment:
       GATEWAY_LISTEN: "0.0.0.0:6000"
       LB_GRPC_ENDPOINT: "load_balancer:7001"
@@ -131,7 +131,7 @@ services:
     pull_policy: never
     command: [ "load_balancer" ]
     ports:
-      - "7001:7001"
+      - "37001:7001"
     environment:
       LB_GRPC_LISTEN: "0.0.0.0:7001"
       REDIS_URI: "tcp://redis:6379"

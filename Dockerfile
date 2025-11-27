@@ -15,7 +15,7 @@ WORKDIR /app
 COPY . .
 
 # Configure CMake with Linux preset (no vcpkg, uses system packages)
-RUN cmake --preset linux
+RUN cmake --preset linux-release
 
 # Build server components only (devclient excluded - requires ftxui from vcpkg)
 RUN cmake --build --preset linux-release --target \
@@ -59,7 +59,8 @@ COPY --from=builder /app/build-linux/migrations_runner .
 COPY tools/migrations /app/migrations
 
 # Copy and configure entrypoint
+# Copy and configure entrypoint
 COPY scripts/docker_entrypoint.sh /app/entrypoint.sh
-RUN chmod +x /app/entrypoint.sh
+RUN sed -i 's/\r$//' /app/entrypoint.sh && chmod +x /app/entrypoint.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]

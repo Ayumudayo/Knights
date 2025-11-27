@@ -149,8 +149,14 @@ void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t
                         // Redis Set에 사용자 추가 (Presence 관리)
                         if (redis_) {
                             redis_->sadd(make_presence_key("presence:room:", rid), uid);
+                            // 화면 표시용 닉네임 목록 관리 (room:users:<room_name>)
+                            // room_to_join은 이름이므로 바로 사용 가능
+                            redis_->sadd("room:users:" + room_to_join, sender);
                         }
                     }
+                } else if (redis_) {
+                    // 게스트인 경우에도 목록에 표시하기 위해 추가
+                     redis_->sadd("room:users:" + room_to_join, sender);
                 }
             } catch (...) {}
         }

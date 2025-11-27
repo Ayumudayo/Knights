@@ -62,6 +62,20 @@ public:
         try { redis_->srem(key, member); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis SREM failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis SREM failed: unknown"); return false; }
     }
 
+    bool smembers(const std::string& key, std::vector<std::string>& out) override {
+        try {
+            out.clear();
+            redis_->smembers(key, std::back_inserter(out));
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis SMEMBERS failed: ") + e.what());
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis SMEMBERS failed: unknown");
+            return false;
+        }
+    }
+
     bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override {
         try { redis_->setex(key, static_cast<long long>(ttl_sec), value); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis SETEX failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis SETEX failed: unknown"); return false; }
     }
@@ -379,6 +393,7 @@ public:
     bool lpush_trim(const std::string& key, const std::string& value, std::size_t maxlen) override { (void)key; (void)value; (void)maxlen; return true; }
     bool sadd(const std::string& key, const std::string& member) override { (void)key; (void)member; return true; }
     bool srem(const std::string& key, const std::string& member) override { (void)key; (void)member; return true; }
+    bool smembers(const std::string& key, std::vector<std::string>& out) override { (void)key; out.clear(); return true; }
     bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)value; (void)ttl_sec; return true; }
     bool publish(const std::string& channel, const std::string& message) override { (void)channel; (void)message; return true; }
     bool start_psubscribe(const std::string& pattern, std::function<void(const std::string&, const std::string&)> on_message) override { (void)pattern; (void)on_message; return true; }

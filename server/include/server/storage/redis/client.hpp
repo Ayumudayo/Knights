@@ -38,6 +38,9 @@ public:
     // Set: 멤버 제거
     virtual bool srem(const std::string& key, const std::string& member) = 0;
     
+    // Set: 모든 멤버 조회
+    virtual bool smembers(const std::string& key, std::vector<std::string>& out) = 0;
+    
     // 키 삭제
     virtual bool del(const std::string& key) = 0;
     

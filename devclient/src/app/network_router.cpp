@@ -12,6 +12,7 @@
 #include <fstream>
 #include <string>
 #include <utility>
+#include <ctime>
 
 namespace client::app {
 
@@ -110,7 +111,20 @@ void NetworkRouter::Initialize() {
             if (flags & server::core::protocol::FLAG_SELF) {
                 is_me = true;
             }
-            auto prefix = "[" + room + "] " + (is_me ? "me" : sender) + ": ";
+            
+            // 타임스탬프 포맷팅 [HH:MM:SS]
+            std::time_t t = std::time(nullptr);
+            std::tm tm_buf{};
+            #ifdef _WIN32
+                localtime_s(&tm_buf, &t);
+            #else
+                localtime_r(&t, &tm_buf);
+            #endif
+            char time_str[16];
+            std::strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_buf);
+
+            // [HH:MM:SS] sender: message
+            auto prefix = "[" + std::string(time_str) + "] " + (is_me ? "me" : sender) + ": ";
             log_sink_(prefix + text);
 
             // Debug logging to file
@@ -167,12 +181,14 @@ void NetworkRouter::Initialize() {
     net_.set_on_snapshot([this](std::string snap_room,
                                 std::vector<std::string> new_rooms,
                                 std::vector<std::string> new_users,
-                                std::vector<bool> new_locked) {
+                                std::vector<bool> new_locked,
+                                std::vector<NetClient::SnapshotMessage> messages) {
         screen_.Post([this,
                       snap_room = std::move(snap_room),
                       new_rooms = std::move(new_rooms),
                       new_users = std::move(new_users),
-                      new_locked = std::move(new_locked)]() mutable {
+                      new_locked = std::move(new_locked),
+                      messages = std::move(messages)]() mutable {
             const bool room_changed = (snap_room != state_.current_room());
             
             // 방 목록 업데이트
@@ -190,10 +206,45 @@ void NetworkRouter::Initialize() {
             state_.set_preview_room(state_.current_room());
             state_.update_users(std::move(new_users));
             
-            // 방이 바뀌었으면 로그를 초기화하고 자동 스크롤 활성화
-            if (room_changed) {
+            // 방이 바뀌었거나, 강제 새로고침(F5)인 경우 로그를 초기화하고 다시 그린다.
+            // room_changed가 false여도 messages가 비어있지 않으면(서버가 보냈으면) 갱신한다.
+            // 단, 단순 폴링이 아니라 명시적 요청에 의한 것이므로 덮어쓰는 게 맞다.
+            if (room_changed || !messages.empty()) {
                 state_.clear_logs();
                 state_.set_log_auto_scroll(true);
+                
+                // 최근 대화 내역 출력 (과거 -> 최신 순으로 정렬되어 있다고 가정하나, 
+                // 만약 서버가 최신순(DESC)으로 준다면 역순으로 출력해야 함.
+                // 현재 DB 쿼리는 보통 최신 N개를 가져오므로 DESC일 확률이 높음.
+                // 하지만 Redis lrange는 입력 순서(lpush)에 따라 다름.
+                // 일단 타임스탬프 기준으로 정렬하는 것이 가장 안전함.
+                if (!messages.empty()) {
+                    // 타임스탬프 오름차순 정렬 (과거 -> 최신)
+                    std::sort(messages.begin(), messages.end(), 
+                        [](const auto& a, const auto& b) { return a.ts_ms < b.ts_ms; });
+
+                    for (const auto& msg : messages) {
+                        std::string sender_display = msg.sender;
+                        if (sender_display == state_.username()) {
+                            sender_display = "me";
+                        }
+                        
+                        // 타임스탬프 포맷팅 [HH:MM:SS]
+                        std::time_t t = static_cast<std::time_t>(msg.ts_ms / 1000);
+                        std::tm tm_buf{};
+                        #ifdef _WIN32
+                            localtime_s(&tm_buf, &t);
+                        #else
+                            localtime_r(&t, &tm_buf);
+                        #endif
+                        char time_str[16];
+                        std::strftime(time_str, sizeof(time_str), "%H:%M:%S", &tm_buf);
+
+                        // [HH:MM:SS] sender: message
+                        std::string line = "[" + std::string(time_str) + "] " + sender_display + ": " + msg.text;
+                        log_sink_(line);
+                    }
+                }
             }
             
             // 입장 대기 중이던 방에 들어왔는지 확인

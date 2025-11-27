@@ -204,7 +204,14 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             snapshot_msg.set_ts_ms(static_cast<std::uint64_t>(now64));
             if (!cache_recent_message(persisted_room_id, snapshot_msg)) {
                 corelog::warn(std::string("Redis recent history update failed for room_id=") + persisted_room_id);
+            } else {
+                // Debug log
+                // corelog::info("Cached message " + std::to_string(persisted_msg_id) + " to room " + persisted_room_id);
             }
+        } else {
+            if (!redis_) corelog::warn("Redis not available for caching");
+            if (persisted_room_id.empty()) corelog::warn("Room ID not found for caching");
+            if (persisted_msg_id == 0) corelog::warn("Message ID not generated (DB persist failed?)");
         }
 
         // 로컬 세션들에게 메시지 전송

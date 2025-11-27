@@ -6,6 +6,8 @@ shift
 
 case "$CMD" in
   "server")
+    ls -l ./server_app
+    ldd ./server_app
     exec ./server_app "$@"
     ;;
   "worker")
@@ -15,9 +17,13 @@ case "$CMD" in
     exec ./wb_dlq_replayer "$@"
     ;;
   "gateway")
+    ls -l ./gateway_app
+    ldd ./gateway_app
     exec ./gateway_app "$@"
     ;;
   "load_balancer")
+    ls -l ./load_balancer_app
+    ldd ./load_balancer_app
     exec ./load_balancer_app "$@"
     ;;
   "migrate")

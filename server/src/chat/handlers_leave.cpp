@@ -112,7 +112,12 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                     room_uuid = rid;
                     if (!rid.empty()) {
                         redis_->srem(make_presence_key("presence:room:", rid), uid);
+                        // 화면 표시용 닉네임 목록에서 제거
+                        redis_->srem("room:users:" + room_to_leave, sender_name);
                     }
+                } else if (redis_) {
+                     // 게스트인 경우에도 목록에서 제거
+                     redis_->srem("room:users:" + room_to_leave, sender_name);
                 }
             } catch (...) {}
         }

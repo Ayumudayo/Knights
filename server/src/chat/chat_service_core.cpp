@@ -331,26 +331,45 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
         auto itroom = state_.rooms.find(target);
         bool is_locked = state_.room_passwords.count(target) > 0;
         bool is_member = false;
-        std::vector<std::string> collected;
+        
+        // 로컬 세션에서 멤버 여부 확인
         if (itroom != state_.rooms.end()) {
             for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
                 if (auto p = wit->lock()) {
-                    auto itu = state_.user.find(p.get());
-                    std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest");
                     if (p.get() == &s) {
                         is_member = true;
+                        break;
                     }
-                    collected.push_back(std::move(name));
                     ++wit;
                 } else {
                     wit = itroom->second.erase(wit);
                 }
             }
         }
+        
         if (is_locked && !is_member) {
             allow = false;
         } else {
-            names = std::move(collected);
+            // Redis에서 전체 사용자 목록 조회 (분산 환경 지원)
+            if (redis_) {
+                std::vector<std::string> redis_users;
+                if (redis_->smembers("room:users:" + target, redis_users)) {
+                    names = std::move(redis_users);
+                }
+            }
+            // Redis가 없거나 실패한 경우 로컬 상태를 fallback으로 사용
+            if (names.empty() && itroom != state_.rooms.end()) {
+                 for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
+                    if (auto p = wit->lock()) {
+                        auto itu = state_.user.find(p.get());
+                        std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest");
+                        names.push_back(std::move(name));
+                        ++wit;
+                    } else {
+                        wit = itroom->second.erase(wit);
+                    }
+                }
+            }
         }
     }
 
@@ -391,15 +410,31 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         for (auto& name : to_remove) { state_.rooms.erase(name); state_.room_passwords.erase(name); }
     }
     {
-        std::lock_guard<std::mutex> lk(state_.mu);
-        auto itroom = state_.rooms.find(current);
-        if (itroom != state_.rooms.end()) {
-            for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
-                if (auto p = wit->lock()) {
-                    auto itu = state_.user.find(p.get());
-                    std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest");
-                    pb.add_users(name); ++wit;
-                } else { wit = itroom->second.erase(wit); }
+        std::vector<std::string> user_list;
+        bool loaded_from_redis = false;
+        
+        if (redis_) {
+            if (redis_->smembers("room:users:" + current, user_list)) {
+                loaded_from_redis = true;
+            }
+        }
+        
+        if (loaded_from_redis) {
+            for (const auto& name : user_list) {
+                pb.add_users(name);
+            }
+        } else {
+            // Fallback to local state
+            std::lock_guard<std::mutex> lk(state_.mu);
+            auto itroom = state_.rooms.find(current);
+            if (itroom != state_.rooms.end()) {
+                for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
+                    if (auto p = wit->lock()) {
+                        auto itu = state_.user.find(p.get());
+                        std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest");
+                        pb.add_users(name); ++wit;
+                    } else { wit = itroom->second.erase(wit); }
+                }
             }
         }
     }
@@ -746,8 +781,10 @@ bool ChatService::load_recent_messages_from_cache(
         return false;
     }
     std::vector<std::string> ids;
-    const long long start = -static_cast<long long>(history_.recent_limit);
-    if (!redis_->lrange(make_recent_list_key(room_id), start, -1, ids)) {
+    // LPUSH를 사용하므로 리스트의 앞부분(0)이 가장 최신 메시지입니다.
+    // 따라서 최신 N개를 가져오려면 0부터 N-1까지 읽어야 합니다.
+    // (기존 코드는 -limit ~ -1로 읽어서 가장 오래된 메시지를 가져오는 버그가 있었음)
+    if (!redis_->lrange(make_recent_list_key(room_id), 0, static_cast<long long>(history_.recent_limit) - 1, ids)) {
         return false;
     }
     if (ids.empty()) {

@@ -41,7 +41,7 @@ int main(int argc, char** argv) {
     // 개발 편의성을 위해 인자 없이 실행하면 로컬 서버(127.0.0.1:6000)로 접속합니다.
     (void)argc;
     (void)argv;
-    client::app::Application app("127.0.0.1", 6000, true);
+    client::app::Application app("127.0.0.1", 36000, true);
 #endif
     return app.Run();
 }
