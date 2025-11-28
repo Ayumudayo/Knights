@@ -50,6 +50,7 @@ struct NullMessageRepository final : IMessageRepository {
         return {};
     }
     std::uint64_t get_last_id(const std::string&) override { return 0; }
+    void delete_by_room(const std::string&) override {}
 };
 
 struct NullMembershipRepository final : IMembershipRepository {

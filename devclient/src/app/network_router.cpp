@@ -108,6 +108,10 @@ void NetworkRouter::Initialize() {
                 sender_sid == state_.session_id()) {
                 is_me = true;
             }
+            // Fallback: SID가 다르더라도(재접속 등) 이름이 같으면 나로 간주
+            if (!is_me && sender == state_.username()) {
+                is_me = true;
+            }
             if (flags & server::core::protocol::FLAG_SELF) {
                 is_me = true;
             }
@@ -192,14 +196,21 @@ void NetworkRouter::Initialize() {
                                 std::vector<std::string> new_rooms,
                                 std::vector<std::string> new_users,
                                 std::vector<bool> new_locked,
-                                std::vector<NetClient::SnapshotMessage> messages) {
+                                std::vector<NetClient::SnapshotMessage> messages,
+                                std::string your_name) {
         screen_.Post([this,
                       snap_room = std::move(snap_room),
                       new_rooms = std::move(new_rooms),
                       new_users = std::move(new_users),
                       new_locked = std::move(new_locked),
-                      messages = std::move(messages)]() mutable {
+                      messages = std::move(messages),
+                      your_name = std::move(your_name)]() mutable {
             const bool room_changed = (snap_room != state_.current_room());
+            
+            // 서버가 할당해준 내 이름(Guest 등) 업데이트
+            if (!your_name.empty()) {
+                state_.set_username(your_name);
+            }
             
             // 방 목록 업데이트
             if (!new_rooms.empty()) {

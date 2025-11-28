@@ -132,7 +132,11 @@ public:
     
     // 해당 방의 마지막 메시지 ID 조회 (없으면 0)
     virtual std::uint64_t get_last_id(const std::string& room_id) = 0;
+
+    // 방의 모든 메시지 삭제 (방 삭제 시)
+    virtual void delete_by_room(const std::string& room_id) = 0;
 };
+
 
 /**
  * @brief 방 참여 정보(멤버십) 저장소 인터페이스

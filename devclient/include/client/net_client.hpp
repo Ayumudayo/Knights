@@ -42,7 +42,7 @@ public:
         std::string text;
         std::uint64_t ts_ms;
     };
-    using OnSnapshot = std::function<void(std::string current, std::vector<std::string> rooms, std::vector<std::string> users, std::vector<bool> locked, std::vector<SnapshotMessage> messages)>;
+    using OnSnapshot = std::function<void(std::string current, std::vector<std::string> rooms, std::vector<std::string> users, std::vector<bool> locked, std::vector<SnapshotMessage> messages, std::string your_name)>;
     using OnWhisper = std::function<void(std::string sender, std::string recipient, std::string text, bool outgoing)>;
     using OnWhisperResult = std::function<void(bool ok, std::string reason)>;
     using OnRefreshNotify = std::function<void()>;

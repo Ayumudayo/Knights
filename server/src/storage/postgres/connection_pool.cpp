@@ -169,6 +169,10 @@ public:
         return r[0][0].as<std::uint64_t>();
     }
 
+    void delete_by_room(const std::string& room_id) override {
+        w_->exec_params("delete from messages where room_id=$1::uuid", room_id);
+    }
+
 private:
     pqxx::work* w_{};
 };

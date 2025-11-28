@@ -7,9 +7,14 @@
 #include <cstdlib>
 #include <optional>
 #include "server/storage/redis/client.hpp"
+#include "server/core/util/log.hpp"
+#include "server/core/storage/connection_pool.hpp"
+#include "server/core/storage/unit_of_work.hpp"
+#include "server/core/storage/repositories.hpp"
 
 using namespace server::core;
 namespace proto = server::core::protocol;
+namespace corelog = server::core::log;
 
 namespace server::app::chat {
 
@@ -71,9 +76,6 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                     if (set.empty() && room_to_leave != std::string("lobby")) { 
                         state_.rooms.erase(itb); 
                         state_.room_passwords.erase(room_to_leave);
-                        if (redis_) {
-                            redis_->del("room:password:" + room_to_leave);
-                        }
                     }
                 }
             }
@@ -118,17 +120,37 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                         // 화면 표시용 닉네임 목록에서 제거
                         redis_->srem("room:users:" + room_to_leave, sender_name);
                     }
-                     // 게스트인 경우에도 목록에서 제거
-                     redis_->srem("room:users:" + room_to_leave, sender_name);
+                } else {
+                    // uid가 없더라도(게스트 등) room_uuid는 필요할 수 있음
+                    room_uuid = ensure_room_id_ci(room_to_leave);
+                    redis_->srem("room:users:" + room_to_leave, sender_name);
                 }
                 
                 // 방이 비었는지 확인하고 활성 목록에서 제거 (Room List Sync)
                 if (room_to_leave != "lobby") {
                     std::vector<std::string> remaining;
                     redis_->smembers("room:users:" + room_to_leave, remaining);
+                    
+                    // 디버그 로그: 남은 인원 확인
+                    corelog::info("DEBUG: Room " + room_to_leave + " remaining users: " + std::to_string(remaining.size()));
+
                     if (remaining.empty()) {
                         redis_->srem("rooms:active", room_to_leave);
                         redis_->del("room:password:" + room_to_leave);
+                        
+                        // 방이 완전히 비었으므로 DB에서 채팅 내역도 삭제 (Privacy)
+                        if (db_pool_ && !room_uuid.empty()) {
+                            try {
+                                auto uow = db_pool_->make_unit_of_work();
+                                uow->messages().delete_by_room(room_uuid);
+                                uow->commit();
+                                corelog::info("DEBUG: Deleted chat history for empty room: " + room_to_leave + " (UUID: " + room_uuid + ")");
+                            } catch (const std::exception& e) {
+                                corelog::error("DEBUG: Failed to delete chat history: " + std::string(e.what()));
+                            }
+                        } else {
+                            corelog::warn("DEBUG: Skipping chat history deletion. db_pool=" + std::to_string((bool)db_pool_) + ", room_uuid=" + room_uuid);
+                        }
                     }
                 }
                 

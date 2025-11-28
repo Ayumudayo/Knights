@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <sstream>
 #include <utility>
+#include <unordered_set>
 using namespace server::core;
 namespace proto = server::core::protocol;
 namespace corelog = server::core::log;
@@ -620,14 +621,17 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         rid = ensure_room_id_ci(current);
     }
 
+    std::unordered_set<std::uint64_t> added_ids;
     bool loaded_from_cache = false;
     std::size_t cached_messages = 0;
     if (redis_ && !rid.empty()) {
         std::vector<server::wire::v1::StateSnapshot::SnapshotMessage> cached;
         if (load_recent_messages_from_cache(rid, cached)) {
             for (auto& message : cached) {
+                if (added_ids.count(message.id())) continue; // 중복 제거
                 auto* sm = pb.add_messages();
                 *sm = message;
+                added_ids.insert(message.id());
             }
             cached_messages = cached.size();
             loaded_from_cache = (cached_messages >= history_.recent_limit);
@@ -680,6 +684,17 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                 }
 
                 auto msgs = uow->messages().fetch_recent_by_room(rid, since_id, fetch_count);
+                // DB에서 가져온 것 중 이미 캐시에 있는 것은 제외
+                std::vector<server::core::storage::Message> filtered;
+                filtered.reserve(msgs.size());
+                for (const auto& m : msgs) {
+                    if (added_ids.find(m.id) == added_ids.end()) {
+                        server::core::storage::Message m_copy = m;
+                        filtered.push_back(std::move(m_copy));
+                    }
+                }
+                msgs = std::move(filtered);
+
                 if (msgs.size() > limit) {
                     msgs.erase(msgs.begin(), msgs.end() - static_cast<std::ptrdiff_t>(limit));
                 }
@@ -702,6 +717,7 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                     if (redis_) {
                         cache_recent_message(rid, *sm);
                     }
+                    added_ids.insert(m.id);
                 }
             }
         } catch (const std::exception& e) {
@@ -712,6 +728,17 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
     }
     if (!last_seen_loaded) {
         pb.set_last_seen_id(last_seen_value);
+    }
+
+    // 현재 세션의 이름(닉네임)을 클라이언트에게 알려줌 (Guest 식별용)
+    std::string my_name;
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        auto it = state_.user.find(&s);
+        if (it != state_.user.end()) my_name = it->second;
+    }
+    if (!my_name.empty()) {
+        pb.set_your_name(my_name);
     }
 
     {

@@ -2,6 +2,7 @@ syntax = "proto3";
 package server.wire.v1;
 
 // Wire payloads for external TCP protocol bodies.
+// Updated for guest identification.
 
 message LoginRes {
   string effective_user = 1;
@@ -34,6 +35,7 @@ message StateSnapshot {
   }
   repeated SnapshotMessage messages = 4; // recent messages in current_room (ascending)
   uint64 last_seen_id = 5;              // membership.last_seen_msg_id (0 if unknown)
+  string your_name = 6;                 // assigned username (for guest identification)
 }
 
 message RoomUsers {
