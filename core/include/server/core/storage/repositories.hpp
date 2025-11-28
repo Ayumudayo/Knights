@@ -105,6 +105,9 @@ public:
     
     // 새로운 방 생성
     virtual Room create(const std::string& name, bool is_public) = 0;
+
+    // 방 닫기 (비활성화)
+    virtual void close(const std::string& room_id) = 0;
 };
 
 /**

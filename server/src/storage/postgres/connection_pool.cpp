@@ -101,7 +101,7 @@ public:
 
     std::optional<Room> find_by_name_exact_ci(const std::string& name) override {
         auto r = w_->exec_params(
-            "select id::text, name, is_public, is_active, (extract(epoch from created_at)*1000)::bigint from rooms where lower(name)=lower($1) order by created_at asc limit 1",
+            "select id::text, name, is_public, is_active, (extract(epoch from created_at)*1000)::bigint from rooms where lower(name)=lower($1) and is_active=true order by created_at asc limit 1",
             name);
         if (r.empty()) return std::nullopt;
         Room rm{}; rm.id = r[0][0].c_str(); rm.name = r[0][1].c_str(); rm.is_public = r[0][2].as<bool>(); rm.is_active = r[0][3].as<bool>(); rm.created_at_ms = r[0][4].as<std::int64_t>();
@@ -114,6 +114,12 @@ public:
             name, is_public);
         Room rm{}; rm.id = r[0][0].c_str(); rm.name = name; rm.is_public = is_public; rm.is_active = true; rm.created_at_ms = r[0][1].as<std::int64_t>();
         return rm;
+    }
+
+    void close(const std::string& room_id) override {
+        w_->exec_params(
+            "update rooms set is_active=false, closed_at=now() where id=$1::uuid",
+            room_id);
     }
 
 private:

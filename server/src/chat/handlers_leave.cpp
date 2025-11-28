@@ -138,18 +138,26 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                         redis_->srem("rooms:active", room_to_leave);
                         redis_->del("room:password:" + room_to_leave);
                         
-                        // 방이 완전히 비었으므로 DB에서 채팅 내역도 삭제 (Privacy)
+                        // 방이 완전히 비었으므로 방을 비활성화(Close) 처리 (Room Rotation)
+                        // 이렇게 하면 다음에 같은 이름으로 방을 만들어도 새로운 UUID가 발급되어
+                        // 이전 채팅 내역이 보이지 않게 됩니다. (Privacy + Audit Log Preservation)
                         if (db_pool_ && !room_uuid.empty()) {
                             try {
                                 auto uow = db_pool_->make_unit_of_work();
-                                uow->messages().delete_by_room(room_uuid);
+                                uow->rooms().close(room_uuid);
                                 uow->commit();
-                                corelog::info("DEBUG: Deleted chat history for empty room: " + room_to_leave + " (UUID: " + room_uuid + ")");
+                                corelog::info("DEBUG: Closed empty room: " + room_to_leave + " (UUID: " + room_uuid + ")");
+
+                                // 로컬 캐시에서도 제거하여 다음번 방 생성 시 새로운 UUID를 발급받도록 함
+                                {
+                                    std::lock_guard<std::mutex> lk(state_.mu);
+                                    state_.room_ids.erase(room_to_leave);
+                                }
                             } catch (const std::exception& e) {
-                                corelog::error("DEBUG: Failed to delete chat history: " + std::string(e.what()));
+                                corelog::error("DEBUG: Failed to close room: " + std::string(e.what()));
                             }
                         } else {
-                            corelog::warn("DEBUG: Skipping chat history deletion. db_pool=" + std::to_string((bool)db_pool_) + ", room_uuid=" + room_uuid);
+                            corelog::warn("DEBUG: Skipping room close. db_pool=" + std::to_string((bool)db_pool_) + ", room_uuid=" + room_uuid);
                         }
                     }
                 }

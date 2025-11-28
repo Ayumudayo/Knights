@@ -42,6 +42,7 @@ struct NullRoomRepository final : IRoomRepository {
     std::vector<Room> search_by_name_ci(const std::string&, std::size_t) override { return {}; }
     std::optional<Room> find_by_name_exact_ci(const std::string&) override { return std::nullopt; }
     Room create(const std::string&, bool) override { return {}; }
+    void close(const std::string&) override {}
 };
 
 struct NullMessageRepository final : IMessageRepository {
