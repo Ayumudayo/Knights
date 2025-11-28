@@ -112,6 +112,14 @@ void NetworkRouter::Initialize() {
                 is_me = true;
             }
             
+            // Debug logging to file
+            std::ofstream debug_log("client_debug.log", std::ios::app);
+            if (debug_log) {
+                debug_log << "[CHAT_RECV] sender=" << sender << " sender_sid=" << sender_sid 
+                          << " my_sid=" << state_.session_id() << " flags=" << flags 
+                          << " is_me=" << is_me << " text=" << text << std::endl;
+            }
+            
             // 타임스탬프 포맷팅 [HH:MM:SS]
             std::time_t t = std::time(nullptr);
             std::tm tm_buf{};
@@ -126,12 +134,6 @@ void NetworkRouter::Initialize() {
             // [HH:MM:SS] sender: message
             auto prefix = "[" + std::string(time_str) + "] " + (is_me ? "me" : sender) + ": ";
             log_sink_(prefix + text);
-
-            // Debug logging to file
-            std::ofstream debug_log("client_debug.log", std::ios::app);
-            if (debug_log) {
-                debug_log << prefix << text << std::endl;
-            }
 
             request_refresh_();
         });
@@ -162,6 +164,14 @@ void NetworkRouter::Initialize() {
         screen_.Post([this, reason = std::move(reason)]() mutable {
             log_sink_("[warn] 귓속말 전송 실패: " + reason);
             request_refresh_();
+        });
+    });
+
+    // 서버로부터 상태 갱신 알림이 오면 자동으로 스냅샷을 요청한다.
+    net_.set_on_refresh_notify([this]() {
+        screen_.Post([this]() {
+            log_sink_("[AUTO-REFRESH] 서버 상태 변경 감지 -> 자동 새로고침 요청"); 
+            net_.send_refresh(state_.current_room());
         });
     });
 

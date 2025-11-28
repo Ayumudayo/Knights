@@ -293,20 +293,83 @@ std::string ChatService::ensure_unique_or_error(Session& s, const std::string& d
 void ChatService::send_rooms_list(Session& s) {
     std::vector<std::uint8_t> body;
     std::string msg = "rooms:";
+    
+    // 1. Redis 데이터 미리 조회 (Lock 없이 수행)
+    struct RoomInfo {
+        std::string name;
+        std::size_t count;
+        bool is_locked;
+    };
+    std::vector<RoomInfo> redis_rooms;
+    bool redis_available = false;
+
+    if (redis_) {
+        redis_available = true;
+        std::vector<std::string> active_rooms;
+        redis_->smembers("rooms:active", active_rooms);
+        corelog::info("DEBUG: send_rooms_list loaded " + std::to_string(active_rooms.size()) + " rooms from Redis");
+
+        bool lobby_found = false;
+        for (const auto& r : active_rooms) {
+            if (r == "lobby") lobby_found = true;
+            
+            std::vector<std::string> users;
+            redis_->smembers("room:users:" + r, users);
+            
+            bool locked = false;
+            auto pw = redis_->get("room:password:" + r);
+            if (pw.has_value()) locked = true;
+            
+            redis_rooms.push_back({r, users.size(), locked});
+        }
+        
+        if (!lobby_found) {
+            std::vector<std::string> users;
+            redis_->smembers("room:users:lobby", users);
+            redis_rooms.push_back({"lobby", users.size(), false});
+        }
+    }
+
     {
+        // 2. 로컬 상태 처리 (Lock 필요)
         std::lock_guard<std::mutex> lk(state_.mu);
+        
+        // 로컬 방 정리
         std::vector<std::string> to_remove;
         for (auto it = state_.rooms.begin(); it != state_.rooms.end(); ++it) {
             std::size_t alive = 0;
             for (auto wit = it->second.begin(); wit != it->second.end(); ) { if (auto p = wit->lock()) { ++alive; ++wit; } else { wit = it->second.erase(wit); } }
             if (alive == 0 && it->first != std::string("lobby")) { to_remove.push_back(it->first); continue; }
-            std::string display_name = it->first;
-            if (state_.room_passwords.count(it->first)) {
-                display_name = "🔒" + display_name;
-            }
-            msg += " " + display_name + "(" + std::to_string(alive) + ")";
         }
         for (auto& name : to_remove) { state_.rooms.erase(name); state_.room_passwords.erase(name); }
+
+        if (redis_available) {
+            // Redis 데이터 기반으로 메시지 구성
+            for (auto& info : redis_rooms) {
+                std::string display_name = info.name;
+                bool is_locked = info.is_locked;
+                
+                // Redis에 잠금 정보가 없어도 로컬에 있을 수 있음
+                if (!is_locked && state_.room_passwords.count(info.name)) {
+                    is_locked = true;
+                }
+
+                if (is_locked) {
+                    display_name = "🔒" + display_name;
+                }
+                msg += " " + display_name + "(" + std::to_string(info.count) + ")";
+            }
+        } else {
+            // Fallback to local state
+            for (auto it = state_.rooms.begin(); it != state_.rooms.end(); ++it) {
+                std::size_t alive = it->second.size();
+                std::string display_name = it->first;
+                if (state_.room_passwords.count(it->first)) {
+                    display_name = "🔒" + display_name;
+                }
+                msg += " " + display_name + "(" + std::to_string(alive) + ")";
+            }
+        }
     }
     server::wire::v1::ChatBroadcast pb; pb.set_room("(system)"); pb.set_sender("(system)"); pb.set_text(msg); pb.set_sender_sid(0);
     {
@@ -319,6 +382,46 @@ void ChatService::send_rooms_list(Session& s) {
         body.assign(bytes.begin(), bytes.end());
     }
     s.async_send(proto::MSG_CHAT_BROADCAST, body, 0);
+}
+
+// 해당 방의 로컬 세션에게만 상태 갱신 알림을 전송합니다.
+void ChatService::broadcast_refresh_local(const std::string& room) {
+    std::vector<std::uint8_t> empty_body;
+    std::vector<std::shared_ptr<Session>> targets;
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        auto it = state_.rooms.find(room);
+        if (it != state_.rooms.end()) {
+            collect_room_sessions(it->second, targets);
+        }
+    }
+    
+    for (auto& s : targets) {
+        s->async_send(proto::MSG_REFRESH_NOTIFY, empty_body, 0);
+    }
+}
+
+// 해당 방의 모든 유저에게 상태 갱신 알림을 전송합니다.
+// 로컬 전송 + Redis Pub/Sub 전파
+void ChatService::broadcast_refresh(const std::string& room) {
+    // 1. 로컬 세션에게 전송
+    broadcast_refresh_local(room);
+
+    // 2. Redis Pub/Sub으로 다른 서버에 전파
+    if (redis_) {
+        try {
+            if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
+                // fanout:refresh:<room> 채널 사용
+                std::string channel = presence_.prefix + std::string("fanout:refresh:") + room;
+                // Payload는 gwid만 있으면 됨 (self-echo 방지용)
+                std::string message = "gw=" + gateway_id_;
+                redis_->publish(channel, std::move(message));
+                corelog::info("DEBUG: Published refresh notify for room: " + room + " to channel: " + channel);
+            }
+        } catch (...) {}
+    } else {
+        corelog::warn("DEBUG: Redis not available in broadcast_refresh");
+    }
 }
 
 // 특정 방의 사용자 목록을 클라이언트에게 전송합니다.
@@ -398,17 +501,80 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
 void ChatService::send_snapshot(Session& s, const std::string& current) {
     std::vector<std::uint8_t> body;
     server::wire::v1::StateSnapshot pb; pb.set_current_room(current);
+    
+    // 1. Redis 데이터 미리 조회 (Lock 없이 수행)
+    struct RoomInfo {
+        std::string name;
+        std::size_t count;
+        bool is_locked;
+    };
+    std::vector<RoomInfo> redis_rooms;
+    bool redis_available = false;
+
+    if (redis_) {
+        redis_available = true;
+        std::vector<std::string> active_rooms;
+        redis_->smembers("rooms:active", active_rooms);
+        std::string room_list_str;
+        for (const auto& r : active_rooms) room_list_str += r + ", ";
+        corelog::info("DEBUG: send_snapshot loaded " + std::to_string(active_rooms.size()) + " rooms from Redis: " + room_list_str);
+
+        bool lobby_found = false;
+        for (const auto& r : active_rooms) {
+            if (r == "lobby") lobby_found = true;
+            
+            std::vector<std::string> users;
+            redis_->smembers("room:users:" + r, users);
+            
+            bool locked = false;
+            auto pw = redis_->get("room:password:" + r);
+            if (pw.has_value()) locked = true;
+            
+            redis_rooms.push_back({r, users.size(), locked});
+        }
+        
+        if (!lobby_found) {
+            std::vector<std::string> users;
+            redis_->smembers("room:users:lobby", users);
+            redis_rooms.push_back({"lobby", users.size(), false});
+        }
+    }
+
     {
+        // 2. 로컬 상태 처리 (Lock 필요)
         std::lock_guard<std::mutex> lk(state_.mu);
+        
+        // 로컬 방 정리
         std::vector<std::string> to_remove;
-        // 활성 방 목록 구성
         for (auto it = state_.rooms.begin(); it != state_.rooms.end(); ++it) {
             std::uint32_t alive = 0; for (auto wit = it->second.begin(); wit != it->second.end(); ) { if (auto p = wit->lock()) { ++alive; ++wit; } else { wit = it->second.erase(wit); } }
             if (alive == 0 && it->first != std::string("lobby")) { to_remove.push_back(it->first); continue; }
-            auto* ri = pb.add_rooms(); ri->set_name(it->first); ri->set_members(alive); ri->set_locked(state_.room_passwords.count(it->first) > 0);
         }
         for (auto& name : to_remove) { state_.rooms.erase(name); state_.room_passwords.erase(name); }
+
+        if (redis_available) {
+            // Redis 데이터 기반으로 메시지 구성
+            for (auto& info : redis_rooms) {
+                auto* ri = pb.add_rooms(); 
+                ri->set_name(info.name); 
+                ri->set_members(info.count);
+                
+                bool locked = info.is_locked;
+                if (!locked && state_.room_passwords.count(info.name)) {
+                    locked = true;
+                }
+                ri->set_locked(locked);
+            }
+        } else {
+            // Fallback to local state
+            for (auto it = state_.rooms.begin(); it != state_.rooms.end(); ++it) {
+                std::size_t alive = it->second.size();
+                auto* ri = pb.add_rooms(); ri->set_name(it->first); ri->set_members(alive); ri->set_locked(state_.room_passwords.count(it->first) > 0);
+            }
+        }
     }
+
+    // 3. 현재 방 유저 목록 조회 (Redis 우선, Fallback 로컬)
     {
         std::vector<std::string> user_list;
         bool loaded_from_redis = false;
@@ -420,10 +586,12 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         }
         
         if (loaded_from_redis) {
+            corelog::info("DEBUG: Loaded " + std::to_string(user_list.size()) + " users from Redis for room " + current);
             for (const auto& name : user_list) {
                 pb.add_users(name);
             }
         } else {
+            corelog::info("DEBUG: Falling back to local state for room " + current);
             // Fallback to local state
             std::lock_guard<std::mutex> lk(state_.mu);
             auto itroom = state_.rooms.find(current);

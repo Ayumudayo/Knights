@@ -292,6 +292,7 @@ void ChatService::handle_refresh(std::shared_ptr<Session> session_sp) {
         auto itcr = state_.cur_room.find(session_sp.get());
         current = (itcr != state_.cur_room.end()) ? itcr->second : std::string("lobby");
     }
+    corelog::info("DEBUG: handle_refresh called for user in room: " + current);
     // 현재 방의 상태 스냅샷 전송
     send_snapshot(*session_sp, current);
 
@@ -344,6 +345,7 @@ void ChatService::on_room_users_request(Session& s, std::span<const std::uint8_t
 
 void ChatService::on_refresh_request(Session& s, std::span<const std::uint8_t>) {
     auto session_sp = s.shared_from_this();
+    corelog::info("DEBUG: on_refresh_request received from session " + session_sp->session_id());
     job_queue_.Push([this, session_sp]() {
         handle_refresh(session_sp);
     });

@@ -156,16 +156,21 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                 {
                     std::lock_guard<std::mutex> lk(state_.mu);
                     auto it = state_.user_uuid.find(session_sp.get());
-                    if (it != state_.user_uuid.end()) uid = it->second;
+                    if (it != state_.user_uuid.end()) {
+                        uid = it->second;
+                    }
                 }
                 touch_user_presence(uid);
                 
                 // 로비 입장 처리 (Redis Set에 추가)
-                // on_login에서는 기본적으로 로비에 입장하므로 여기서 동기화해줘야 함
                 redis_->sadd("room:users:lobby", new_user);
+                
+                // 로비에 있는 다른 유저들에게 갱신 알림 전송
+                broadcast_refresh("lobby");
+                corelog::info("DEBUG: on_login called broadcast_refresh('lobby') for user " + new_user);
             } catch (...) {}
         }
-        
+
         // Write-behind 이벤트 발행
         // 로그인 이벤트를 스트림에 기록하여 추후 분석이나 알림 등에 활용합니다.
         std::optional<std::string> uid_opt;

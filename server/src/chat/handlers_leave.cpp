@@ -70,7 +70,10 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                     // 방이 비었으면 방 정보와 비밀번호 삭제 (로비 제외)
                     if (set.empty() && room_to_leave != std::string("lobby")) { 
                         state_.rooms.erase(itb); 
-                        state_.room_passwords.erase(room_to_leave); 
+                        state_.room_passwords.erase(room_to_leave);
+                        if (redis_) {
+                            redis_->del("room:password:" + room_to_leave);
+                        }
                     }
                 }
             }
@@ -115,10 +118,22 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                         // 화면 표시용 닉네임 목록에서 제거
                         redis_->srem("room:users:" + room_to_leave, sender_name);
                     }
-                } else if (redis_) {
                      // 게스트인 경우에도 목록에서 제거
                      redis_->srem("room:users:" + room_to_leave, sender_name);
                 }
+                
+                // 방이 비었는지 확인하고 활성 목록에서 제거 (Room List Sync)
+                if (room_to_leave != "lobby") {
+                    std::vector<std::string> remaining;
+                    redis_->smembers("room:users:" + room_to_leave, remaining);
+                    if (remaining.empty()) {
+                        redis_->srem("rooms:active", room_to_leave);
+                        redis_->del("room:password:" + room_to_leave);
+                    }
+                }
+                
+                // 로비로 재입장하므로 Redis lobby에도 추가
+                redis_->sadd("room:users:lobby", sender_name);
             } catch (...) {}
         }
 
@@ -134,19 +149,26 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                 collect_room_sessions(set, t2);
             }
         }
+        
         server::wire::v1::ChatBroadcast pb2;
         pb2.set_room("lobby");
         pb2.set_sender("(system)");
         pb2.set_text(sender_name + " 님이 입장했습니다");
         pb2.set_sender_sid(0);
-        auto now64_2 = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        pb2.set_ts_ms(static_cast<std::uint64_t>(now64_2));
         {
-            std::string bytes2; pb2.SerializeToString(&bytes2);
-            body2.assign(bytes2.begin(), bytes2.end());
+            auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+            pb2.set_ts_ms(static_cast<std::uint64_t>(now64));
         }
+        std::string bytes2; pb2.SerializeToString(&bytes2);
+        body2.assign(bytes2.begin(), bytes2.end());
         for (auto& t : t2) t->async_send(proto::MSG_CHAT_BROADCAST, body2, 0);
+
+        // 로비와 해당 방에 있는 다른 유저들에게 새로고침 알림 전송
+        broadcast_refresh("lobby");
+        if (!room_to_leave.empty()) {
+            broadcast_refresh(room_to_leave);
+        }
 
         // Write-behind 이벤트 발행
         if (!room_to_leave.empty()) {
@@ -157,7 +179,11 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
             std::optional<std::string> room_id_opt;
             if (!room_uuid.empty()) {
                 room_id_opt = room_uuid;
+            } else {
+                 auto rid = ensure_room_id_ci(room_to_leave);
+                 if (!rid.empty()) room_id_opt = rid;
             }
+            
             std::vector<std::pair<std::string, std::string>> wb_fields;
             wb_fields.emplace_back("room", room_to_leave);
             wb_fields.emplace_back("user_name", sender_name);

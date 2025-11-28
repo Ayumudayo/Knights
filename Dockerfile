@@ -15,6 +15,8 @@ WORKDIR /app
 COPY . .
 
 # Configure CMake with Linux preset (no vcpkg, uses system packages)
+ENV VCPKG_DISABLE_METRICS=1
+RUN apt-get update && apt-get install -y ninja-build && rm -rf /var/lib/apt/lists/*
 RUN cmake --preset linux-release
 
 # Build server components only (devclient excluded - requires ftxui from vcpkg)

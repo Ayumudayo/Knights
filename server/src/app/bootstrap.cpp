@@ -303,42 +303,43 @@ int run_server(int argc, char** argv) {
 
         // 10. Redis Pub/Sub 구독 (분산 채팅용)
         if (redis && config.use_redis_pubsub) {
-            std::string pattern = config.redis_channel_prefix + std::string("fanout:room:*");
+            // 통합 패턴 구독 (RedisClientImpl이 단일 구독만 지원하므로)
+            std::string pattern_all = config.redis_channel_prefix + std::string("fanout:*");
             std::string gwid = config.gateway_id;
             
-            redis->start_psubscribe(pattern, [&chat, gwid](const std::string& channel, const std::string& message){
+            redis->start_psubscribe(pattern_all, [&chat, gwid, prefix = config.redis_channel_prefix](const std::string& channel, const std::string& message){
+                // 1. Self-Echo 방지
                 if (message.rfind("gw=", 0) == 0) {
-                    auto nl = message.find('\n'); if (nl == std::string::npos) return;
-                    std::string from = message.substr(3, nl - 3);
-                    if (from == gwid) { // Self-Echo 방지
-                        auto d = ++g_self_echo_drop_total;
-                        corelog::info(std::string("metric=self_echo_drop_total value=") + std::to_string(d));
-                        return;
+                    auto nl = message.find('\n'); 
+                    std::string from;
+                    if (nl != std::string::npos) from = message.substr(3, nl - 3);
+                    else from = message.substr(3);
+                    if (from == gwid) {
+                         // g_self_echo_drop_total++; 
+                         return; 
                     }
-                    std::string payload = message.substr(nl + 1);
-                    std::string room = channel; auto pos = room.rfind(':'); if (pos != std::string::npos) room = room.substr(pos + 1);
-                    std::vector<std::uint8_t> body(payload.begin(), payload.end());
-                    
-                    // 구독 지연 시간 측정
-                    try {
-                        server::wire::v1::ChatBroadcast pb;
-                        if (pb.ParseFromArray(payload.data(), static_cast<int>(payload.size()))) {
-                            auto now_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                std::chrono::system_clock::now().time_since_epoch()).count();
-                            if (pb.ts_ms() > 0 && now_ms >= static_cast<long long>(pb.ts_ms())) {
-                                auto lag = static_cast<long long>(now_ms - static_cast<long long>(pb.ts_ms()));
-                                g_subscribe_last_lag_ms.store(lag, std::memory_order_relaxed);
-                                corelog::info(std::string("metric=subscribe_lag_ms value=") + std::to_string(lag) + " room=" + room);
-                            }
-                        }
-                    } catch (...) {}
-                    
-                    chat.broadcast_room(room, body, nullptr);
-                    auto n = ++g_subscribe_total;
-                    corelog::info(std::string("metric=subscribe_total value=") + std::to_string(n) + " room=" + room);
+
+                    // 2. 채널 분기 처리
+                    // channel: prefix + "fanout:room:<room>" OR prefix + "fanout:refresh:<room>"
+                    if (channel.find(prefix + "fanout:refresh:") == 0) {
+                        // Refresh Notification
+                        std::string room = channel.substr((prefix + "fanout:refresh:").size());
+                        chat.broadcast_refresh_local(room);
+                        corelog::info("DEBUG: Received refresh notify for room: " + room + " from " + from);
+                    } 
+                    else if (channel.find(prefix + "fanout:room:") == 0) {
+                        // Chat Broadcast
+                        if (nl == std::string::npos) return; // 채팅은 payload 필수
+                        std::string payload = message.substr(nl + 1);
+                        std::string room = channel.substr((prefix + "fanout:room:").size());
+                        std::vector<std::uint8_t> body(payload.begin(), payload.end());
+                        chat.broadcast_room(room, body, nullptr);
+                        g_subscribe_total++;
+                    }
                 }
             });
-            corelog::info(std::string("Subscribed Redis pattern: ") + pattern);
+
+            corelog::info(std::string("Subscribed Redis pattern: ") + pattern_all);
         }
 
         // 11. Metrics Server 시작

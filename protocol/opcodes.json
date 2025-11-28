@@ -90,6 +90,11 @@
       "name": "MSG_REFRESH_REQ",
       "id": "0x0204",
       "desc": "현재 방 스냅샷 요청"
+    },
+    {
+      "name": "MSG_REFRESH_NOTIFY",
+      "id": "0x0205",
+      "desc": "상태 변경 알림 (클라이언트가 REFRESH_REQ를 보내도록 유도)"
     }
   ]
 }

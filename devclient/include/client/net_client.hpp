@@ -45,6 +45,7 @@ public:
     using OnSnapshot = std::function<void(std::string current, std::vector<std::string> rooms, std::vector<std::string> users, std::vector<bool> locked, std::vector<SnapshotMessage> messages)>;
     using OnWhisper = std::function<void(std::string sender, std::string recipient, std::string text, bool outgoing)>;
     using OnWhisperResult = std::function<void(bool ok, std::string reason)>;
+    using OnRefreshNotify = std::function<void()>;
     using OnDisconnected = std::function<void(std::string reason)>;
 
     NetClient();
@@ -59,6 +60,7 @@ public:
     void set_on_snapshot(OnSnapshot f) { on_snapshot_ = std::move(f); }
     void set_on_whisper(OnWhisper f) { on_whisper_ = std::move(f); }
     void set_on_whisper_result(OnWhisperResult f) { on_whisper_result_ = std::move(f); }
+    void set_on_refresh_notify(OnRefreshNotify f) { on_refresh_notify_ = std::move(f); }
     void set_on_disconnected(OnDisconnected f) { on_disconnected_ = std::move(f); }
 
     /**
@@ -128,6 +130,7 @@ private:
     OnSnapshot on_snapshot_;
     OnWhisper on_whisper_;
     OnWhisperResult on_whisper_result_;
+    OnRefreshNotify on_refresh_notify_;
     OnDisconnected on_disconnected_;
 };
 

@@ -377,6 +377,12 @@ void NetClient::handle_frame(const proto::FrameHeader& hh, std::span<const std::
         if (on_hello_) on_hello_(caps);
         return;
     }
+
+    // 상태 갱신 알림 처리
+    if (hh.msg_id == proto::MSG_REFRESH_NOTIFY) {
+        if (on_refresh_notify_) on_refresh_notify_();
+        return;
+    }
 }
 
 // -----------------------------------------------------------------------------

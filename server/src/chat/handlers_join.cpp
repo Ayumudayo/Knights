@@ -46,8 +46,23 @@ void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t
         if (room_to_join.empty()) room_to_join = "lobby";
         corelog::info(std::string("JOIN_ROOM: ") + room_to_join);
 
+        // 1. Redis에서 비밀번호 미리 조회 (Lock 없이 수행)
+        std::string redis_password_value;
+        bool redis_password_found = false;
+        if (redis_) {
+            auto pw = redis_->get("room:password:" + room_to_join);
+            if (pw.has_value()) {
+                redis_password_value = pw.value();
+                redis_password_found = true;
+            }
+        }
+
         std::vector<std::shared_ptr<Session>> targets;
         std::vector<std::uint8_t> body;
+        
+        bool should_set_redis_password = false;
+        std::string new_hashed_password;
+
         {
             std::lock_guard<std::mutex> lk(state_.mu);
             // 인증된 세션인지 확인
@@ -57,18 +72,33 @@ void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t
             }
             
             // 비밀번호 검증 로직
-            bool room_exists = state_.rooms.find(room_to_join) != state_.rooms.end();
-            auto pass_it = state_.room_passwords.find(room_to_join);
-            if (pass_it != state_.room_passwords.end()) {
+            std::string expected_password;
+            
+            // Redis 조회 결과 반영
+            if (redis_password_found) {
+                expected_password = redis_password_value;
+                state_.room_passwords[room_to_join] = expected_password; // 로컬 캐시 갱신
+            }
+            
+            // Redis에 없으면 로컬 확인
+            if (expected_password.empty()) {
+                auto pass_it = state_.room_passwords.find(room_to_join);
+                if (pass_it != state_.room_passwords.end()) {
+                    expected_password = pass_it->second;
+                }
+            }
+
+            if (!expected_password.empty()) {
                 // 이미 비밀번호가 설정된 방인 경우 검증
-                const std::string& expected = pass_it->second;
-                if (provided_password.empty() || hash_room_password(provided_password) != expected) {
+                if (provided_password.empty() || hash_room_password(provided_password) != expected_password) {
                     session_sp->send_error(proto::errc::FORBIDDEN, "room locked");
                     return;
                 }
             } else if (!provided_password.empty() && room_to_join != "lobby") {
                 // 새 방이거나 비밀번호가 없는 방에 비밀번호를 설정하며 입장하는 경우
-                state_.room_passwords[room_to_join] = hash_room_password(provided_password);
+                new_hashed_password = hash_room_password(provided_password);
+                state_.room_passwords[room_to_join] = new_hashed_password;
+                should_set_redis_password = true;
             }
 
             // 기존에 참여 중인 방이 있으면 그 방에서 먼저 제거한다.
@@ -121,10 +151,16 @@ void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t
                 collect_room_sessions(it->second, targets);
             }
         }
+        
+        // Redis 비밀번호 설정 (Lock 해제 후 수행)
+        if (should_set_redis_password && redis_) {
+            redis_->setex("room:password:" + room_to_join, new_hashed_password, 86400); // 24시간 TTL
+        }
+
         // 로컬 세션들에게 입장 알림 전송
         for (auto& t : targets) t->async_send(proto::MSG_CHAT_BROADCAST, body, 0);
 
-        // DB upsert와 Redis presence를 동시에 갱신한다.
+        // DB upsert (멤버십 기록)
         if (db_pool_) {
             try {
                 std::string uid;
@@ -146,19 +182,40 @@ void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t
                             uow->memberships().update_last_seen(uid, rid, last_id);
                         }
                         uow->commit();
-                        // Redis Set에 사용자 추가 (Presence 관리)
-                        if (redis_) {
-                            redis_->sadd(make_presence_key("presence:room:", rid), uid);
-                            // 화면 표시용 닉네임 목록 관리 (room:users:<room_name>)
-                            // room_to_join은 이름이므로 바로 사용 가능
-                            redis_->sadd("room:users:" + room_to_join, sender);
-                        }
                     }
-                } else if (redis_) {
-                    // 게스트인 경우에도 목록에 표시하기 위해 추가
-                     redis_->sadd("room:users:" + room_to_join, sender);
                 }
             } catch (...) {}
+        }
+
+        // Redis Presence 및 User List 갱신 (DB와 독립적으로 수행)
+        if (redis_) {
+            try {
+                // 1. 이전 방에서 제거 (방 이동 시)
+                if (!previous_room.empty() && previous_room != room_to_join) {
+                    redis_->srem("room:users:" + previous_room, sender);
+                }
+
+                // 2. 새 방에 추가
+                redis_->sadd("room:users:" + room_to_join, sender);
+                corelog::info("DEBUG: Added user " + sender + " to Redis room:users:" + room_to_join);
+
+                // 2.1 활성 방 목록에 추가 (Room List Sync)
+                if (room_to_join != "lobby") {
+                    redis_->sadd("rooms:active", room_to_join);
+                    corelog::info("DEBUG: Added room " + room_to_join + " to Redis rooms:active");
+                }
+
+                // 3. Presence 갱신 (logged-in user only)
+                if (!user_uuid.empty() && !joined_room_id.empty()) {
+                    redis_->sadd(make_presence_key("presence:room:", joined_room_id), user_uuid);
+                }
+            } catch (const std::exception& e) {
+                corelog::error("DEBUG: Redis update failed in on_join: " + std::string(e.what()));
+            } catch (...) {
+                corelog::error("DEBUG: Redis update failed in on_join: unknown error");
+            }
+        } else {
+            corelog::warn("DEBUG: Redis not available in on_join");
         }
         
         // Write-behind 이벤트 발행
@@ -180,6 +237,10 @@ void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t
 
         // 새로운 방 상태를 즉시 고객에게 전달해 /refresh 없이도 UI를 갱신한다.
         send_snapshot(*session_sp, room_to_join);
+        
+        // 로비와 해당 방에 있는 다른 유저들에게 새로고침 알림 전송
+        broadcast_refresh("lobby");
+        broadcast_refresh(room_to_join);
     });
 }
 

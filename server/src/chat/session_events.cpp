@@ -84,6 +84,21 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                 }
                 // 화면 표시용 닉네임 목록에서 제거
                 redis_->srem("room:users:" + room_left, name);
+                
+                // 연결 끊김 전에 로비로 이동한다고 간주 (다른 사용자들에게 로비 표시)
+                // 실제로는 곧 완전히 끊어지지만, 정리 과정에서 일시적으로 lobby에 추가
+                if (room_left != "lobby") {
+                    redis_->sadd("room:users:lobby", name);
+                }
+                
+                // 방이 비었는지 확인하고 활성 목록에서 제거 (Room List Sync)
+                if (room_left != "lobby") {
+                    std::vector<std::string> remaining;
+                    redis_->smembers("room:users:" + room_left, remaining);
+                    if (remaining.empty()) {
+                        redis_->srem("rooms:active", room_left);
+                    }
+                }
             } catch (...) {}
         }
         if (!room_left.empty()) {
@@ -100,6 +115,9 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
             wb_fields.emplace_back("user_name", name);
             // session_close 이벤트를 stream에 남겨 재처리/감사에 활용한다.
             emit_write_behind_event("session_close", session_id_str, uid_opt, room_id_opt, std::move(wb_fields));
+            
+            // 해당 방의 다른 유저들에게 갱신 알림
+            broadcast_refresh(room_left);
         }
     });
 }

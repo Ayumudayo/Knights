@@ -136,6 +136,18 @@ public:
      */
     void broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, server::core::Session* self = nullptr);
 
+    /**
+     * @brief 해당 방의 모든 유저에게 상태 갱신 알림(MSG_REFRESH_NOTIFY)을 전송합니다.
+     * 로컬 세션에게 전송하고, Redis를 통해 다른 서버에도 전파합니다.
+     */
+    void broadcast_refresh(const std::string& room);
+
+    /**
+     * @brief 해당 방의 로컬 세션에게만 상태 갱신 알림을 전송합니다.
+     * Redis Subscriber에서 호출하거나, broadcast_refresh 내부에서 사용됩니다.
+     */
+    void broadcast_refresh_local(const std::string& room);
+
 private:
     using Session = server::core::Session;
     using WeakSession = std::weak_ptr<Session>;
