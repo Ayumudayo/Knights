@@ -89,33 +89,49 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                     if (it != state_.user_uuid.end()) uid = it->second;
                 }
                 if (uid.empty()) {
-                    auto uow = db_pool_->make_unit_of_work();
-                    auto u = uow->users().create_guest(new_user);
-                    uid = u.id;
-                    uow->commit();
-                    std::lock_guard<std::mutex> lk(state_.mu);
-                    state_.user_uuid[session_sp.get()] = uid;
+                    try {
+                        // 1. 먼저 이름으로 기존 사용자 검색
+                        {
+                            auto uow_find = db_pool_->make_unit_of_work();
+                            auto existing = uow_find->users().find_by_name_ci(new_user, 1);
+                            if (!existing.empty()) {
+                                uid = existing[0].id;
+                            }
+                        }
+                        
+                        // 2. 없으면 생성 시도
+                        if (uid.empty()) {
+                            auto uow_create = db_pool_->make_unit_of_work();
+                            try {
+                                auto u = uow_create->users().create_guest(new_user);
+                                uid = u.id;
+                                uow_create->commit();
+                            } catch (...) {
+                                // 3. 생성 실패(동시성/중복 등) 시 다시 검색
+                                auto uow_retry = db_pool_->make_unit_of_work();
+                                auto existing = uow_retry->users().find_by_name_ci(new_user, 1);
+                                if (!existing.empty()) {
+                                    uid = existing[0].id;
+                                }
+                            }
+                        }
+                    } catch (const std::exception& e) {
+                        corelog::warn(std::string("user get/create failed: ") + e.what());
+                    }
+
+                    if (!uid.empty()) {
+                        std::lock_guard<std::mutex> lk(state_.mu);
+                        state_.user_uuid[session_sp.get()] = uid;
+                    } else {
+                        corelog::error("Failed to obtain UID for user: " + new_user);
+                    }
                 }
                 // write-behind 이벤트용 user_uuid를 저장한다.
                 if (!uid.empty()) { tracked_user_uuid = uid; }
                 
                 // 게스트라면 닉네임을 UUID 앞 8자로 정규화한다.
                 // 고유한 닉네임을 보장하기 위함입니다.
-                if (guest_mode && !uid.empty()) {
-                    std::string uuid8 = uid;
-                    uuid8.erase(std::remove(uuid8.begin(), uuid8.end(), '-'), uuid8.end());
-                    if (uuid8.size() > 8) uuid8.resize(8);
-                    std::lock_guard<std::mutex> lk(state_.mu);
-                    auto itname = state_.user.find(session_sp.get());
-                    std::string prev = (itname != state_.user.end()) ? itname->second : std::string();
-                    if (!prev.empty() && prev != uuid8) {
-                        auto itset = state_.by_user.find(prev);
-                        if (itset != state_.by_user.end()) itset->second.erase(session_sp);
-                    }
-                    state_.user[session_sp.get()] = uuid8;
-                    state_.by_user[uuid8].insert(session_sp);
-                    new_user = uuid8;
-                }
+                // Guest name normalization removed to ensure DB consistency.
 
                 // users 테이블에 마지막 로그인 IP와 시각을 기록한다.
                 {
@@ -141,6 +157,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         }
         
         // 로그인 응답 전송
+        corelog::info("LOGIN: Sending effective_user=" + new_user + " uid=" + tracked_user_uuid + " to client");
         server::wire::v1::LoginRes pb;
         pb.set_effective_user(new_user);
         pb.set_session_id(session_sp->session_id());

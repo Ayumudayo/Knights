@@ -184,6 +184,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                         auto it = state_.user_uuid.find(session_sp.get());
                         if (it != state_.user_uuid.end()) uid_opt = it->second;
                     }
+                    corelog::info("CHAT: saving message sender=" + sender + " uid=" + (uid_opt ? *uid_opt : "(none)"));
                     auto uow = db_pool_->make_unit_of_work();
                     auto msg = uow->messages().create(persisted_room_id, current_room, uid_opt, text);
                     persisted_msg_id = msg.id;
