@@ -306,12 +306,12 @@ void ChatService::send_rooms_list(Session& s) {
 
     if (redis_) {
         redis_available = true;
-        std::vector<std::string> active_rooms;
-        redis_->smembers("rooms:active", active_rooms);
-        corelog::info("DEBUG: send_rooms_list loaded " + std::to_string(active_rooms.size()) + " rooms from Redis");
-
+        std::vector<std::string> redis_rooms_list;
+        redis_->smembers("rooms:active", redis_rooms_list);
+        
         bool lobby_found = false;
-        for (const auto& r : active_rooms) {
+            
+        for (const auto& r : redis_rooms_list) {
             if (r == "lobby") lobby_found = true;
             
             std::vector<std::string> users;
@@ -417,11 +417,8 @@ void ChatService::broadcast_refresh(const std::string& room) {
                 // Payload는 gwid만 있으면 됨 (self-echo 방지용)
                 std::string message = "gw=" + gateway_id_;
                 redis_->publish(channel, std::move(message));
-                corelog::info("DEBUG: Published refresh notify for room: " + room + " to channel: " + channel);
             }
         } catch (...) {}
-    } else {
-        corelog::warn("DEBUG: Redis not available in broadcast_refresh");
     }
 }
 
@@ -518,8 +515,6 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         redis_->smembers("rooms:active", active_rooms);
         std::string room_list_str;
         for (const auto& r : active_rooms) room_list_str += r + ", ";
-        corelog::info("DEBUG: send_snapshot loaded " + std::to_string(active_rooms.size()) + " rooms from Redis: " + room_list_str);
-
         bool lobby_found = false;
         for (const auto& r : active_rooms) {
             if (r == "lobby") lobby_found = true;
@@ -587,12 +582,10 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         }
         
         if (loaded_from_redis) {
-            corelog::info("DEBUG: Loaded " + std::to_string(user_list.size()) + " users from Redis for room " + current);
             for (const auto& name : user_list) {
                 pb.add_users(name);
             }
         } else {
-            corelog::info("DEBUG: Falling back to local state for room " + current);
             // Fallback to local state
             std::lock_guard<std::mutex> lk(state_.mu);
             auto itroom = state_.rooms.find(current);

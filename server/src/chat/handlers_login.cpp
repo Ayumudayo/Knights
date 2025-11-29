@@ -90,7 +90,8 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                 }
                 if (uid.empty()) {
                     try {
-                        // 1. 먼저 이름으로 기존 사용자 검색
+                        // 1. 먼저 이름으로 기존 사용자가 있는지 검색합니다.
+                        // 이미 존재하는 사용자라면 새로 만들지 않고 ID를 재사용합니다.
                         {
                             auto uow_find = db_pool_->make_unit_of_work();
                             auto existing = uow_find->users().find_by_name_ci(new_user, 1);
@@ -99,7 +100,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                             }
                         }
                         
-                        // 2. 없으면 생성 시도
+                        // 2. 기존 사용자가 없다면 새로 생성을 시도합니다.
                         if (uid.empty()) {
                             auto uow_create = db_pool_->make_unit_of_work();
                             try {
@@ -107,7 +108,8 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                                 uid = u.id;
                                 uow_create->commit();
                             } catch (...) {
-                                // 3. 생성 실패(동시성/중복 등) 시 다시 검색
+                                // 3. 생성에 실패했다면(동시성 문제로 그 사이 누군가 만들었을 수 있음),
+                                // 다시 한 번 검색해서 ID를 가져옵니다.
                                 auto uow_retry = db_pool_->make_unit_of_work();
                                 auto existing = uow_retry->users().find_by_name_ci(new_user, 1);
                                 if (!existing.empty()) {
@@ -157,7 +159,6 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         }
         
         // 로그인 응답 전송
-        corelog::info("LOGIN: Sending effective_user=" + new_user + " uid=" + tracked_user_uuid + " to client");
         server::wire::v1::LoginRes pb;
         pb.set_effective_user(new_user);
         pb.set_session_id(session_sp->session_id());
@@ -184,7 +185,6 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                 
                 // 로비에 있는 다른 유저들에게 갱신 알림 전송
                 broadcast_refresh("lobby");
-                corelog::info("DEBUG: on_login called broadcast_refresh('lobby') for user " + new_user);
             } catch (...) {}
         }
 

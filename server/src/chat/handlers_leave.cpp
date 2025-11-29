@@ -132,7 +132,6 @@ void ChatService::on_leave(server::core::Session& s, std::span<const std::uint8_
                     redis_->smembers("room:users:" + room_to_leave, remaining);
                     
                     // 디버그 로그: 남은 인원 확인
-                    corelog::info("DEBUG: Room " + room_to_leave + " remaining users: " + std::to_string(remaining.size()));
 
                     if (remaining.empty()) {
                         redis_->srem("rooms:active", room_to_leave);

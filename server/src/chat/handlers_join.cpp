@@ -197,12 +197,10 @@ void ChatService::on_join(server::core::Session& s, std::span<const std::uint8_t
 
                 // 2. 새 방에 추가
                 redis_->sadd("room:users:" + room_to_join, sender);
-                corelog::info("DEBUG: Added user " + sender + " to Redis room:users:" + room_to_join);
 
                 // 2.1 활성 방 목록에 추가 (Room List Sync)
                 if (room_to_join != "lobby") {
                     redis_->sadd("rooms:active", room_to_join);
-                    corelog::info("DEBUG: Added room " + room_to_join + " to Redis rooms:active");
                 }
 
                 // 3. Presence 갱신 (logged-in user only)
