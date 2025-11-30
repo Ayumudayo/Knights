@@ -79,3 +79,26 @@ target_link_libraries(core_general_tests PRIVATE
     server_core
 )
 gtest_discover_tests(core_general_tests)
+
+add_executable(server_general_tests
+    server/test_server_chat.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/chat_service_core.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_login.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_join.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_leave.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_chat.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_ping.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/session_events.cpp
+)
+target_include_directories(server_general_tests PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+    ${CMAKE_SOURCE_DIR}/server/include
+    ${CMAKE_SOURCE_DIR}/server
+)
+target_link_libraries(server_general_tests PRIVATE
+    GTest::gtest_main
+    server_core
+    server_storage_redis
+    wire_proto
+)
+gtest_discover_tests(server_general_tests)
