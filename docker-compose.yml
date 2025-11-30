@@ -92,7 +92,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./docker/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
       - "39090:9090"
     networks:

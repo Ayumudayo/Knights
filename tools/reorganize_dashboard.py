@@ -4,7 +4,6 @@ import os
 DASHBOARD_PATH = r"e:\Repos\MyRepos\Knights\docker\observability\grafana\dashboards\server-metrics.json"
 
 # Define the logical grouping of panels by their Title
-# Panels not listed here will be added to an "Others" section at the bottom
 SECTIONS = {
     "Overview": [
         "Active Sessions",
@@ -89,6 +88,55 @@ def create_panel(title, expr, y_pos, id_val):
         "type": "timeseries"
     }
 
+def create_stat_panel(title, expr, id_val):
+    return {
+        "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+        },
+        "gridPos": {
+            "h": 8,
+            "w": 6, # Smaller width for stats
+            "x": 0,
+            "y": 0
+        },
+        "id": id_val,
+        "targets": [
+            {
+                "expr": expr,
+                "legendFormat": "{{instance}}",
+                "refId": "A"
+            }
+        ],
+        "title": title,
+        "type": "stat",
+        "options": {
+            "reduceOptions": {
+                "values": False,
+                "calcs": ["lastNotNull"],
+                "fields": ""
+            },
+            "orientation": "auto",
+            "textMode": "auto",
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto"
+        }
+    }
+
+def update_to_stat(panels_map, title, expr):
+    if title in panels_map:
+        old_panel = panels_map[title]
+        new_panel = create_stat_panel(title, expr, old_panel['id'])
+        # Preserve gridPos if possible, but width might change
+        new_panel['gridPos'] = old_panel['gridPos']
+        new_panel['gridPos']['w'] = 6 # Force width to 6 for stats
+        panels_map[title] = new_panel
+    else:
+        # Create new if not exists (should have been created by inject step if missing)
+        # Use a random ID if not found (unsafe but rare here)
+        panels_map[title] = create_stat_panel(title, expr, hash(title) % 10000 + 5000)
+
 def reorganize():
     with open(DASHBOARD_PATH, 'r', encoding='utf-8') as f:
         dashboard = json.load(f)
@@ -110,13 +158,17 @@ def reorganize():
     if "LB Active Backends" not in panels_by_title:
         panels_by_title["LB Active Backends"] = create_panel("LB Active Backends", "lb_backends_active", 0, 2003)
     if "LB Idle Close Total" not in panels_by_title:
-        # Reuse existing panel if it exists under old name or create new
-        if "LB Idle Close Rate" in panels_by_title:
-             panels_by_title["LB Idle Close Total"] = panels_by_title.pop("LB Idle Close Rate")
-             panels_by_title["LB Idle Close Total"]["title"] = "LB Idle Close Total"
-             panels_by_title["LB Idle Close Total"]["targets"][0]["expr"] = "lb_backend_idle_close_total"
-        else:
-             panels_by_title["LB Idle Close Total"] = create_panel("LB Idle Close Total", "lb_backend_idle_close_total", 0, 2004)
+        panels_by_title["LB Idle Close Total"] = create_panel("LB Idle Close Total", "lb_backend_idle_close_total", 0, 2004)
+
+    # Force update specific panels to be Stat panels with correct queries
+    update_to_stat(panels_by_title, "Active Sessions", "chat_session_active")
+    update_to_stat(panels_by_title, "Accepted Connections", "chat_accept_total")
+    update_to_stat(panels_by_title, "Total Subscribes", "chat_subscribe_total")
+    update_to_stat(panels_by_title, "Dispatch Avg Latency", "chat_dispatch_latency_avg_ms")
+    update_to_stat(panels_by_title, "Gateway Active Sessions", "gateway_sessions_active")
+    update_to_stat(panels_by_title, "Gateway Total Connections", "gateway_connections_total")
+    update_to_stat(panels_by_title, "LB Active Backends", "lb_backends_active")
+    update_to_stat(panels_by_title, "LB Idle Close Total", "lb_backend_idle_close_total")
 
     current_y = 0
     
@@ -134,7 +186,6 @@ def reorganize():
                 section_panels.append(panels_by_title.pop(title))
         
         # Layout logic: 2 panels per row (width 12) or 4 small stats (width 6)
-        # For simplicity, we'll keep original widths but just flow them
         current_x = 0
         row_height = 8 # Standard height
         
@@ -152,6 +203,12 @@ def reorganize():
                 'x': current_x,
                 'y': current_y
             }
+
+            # Enforce readable legend format
+            if 'targets' in panel:
+                for target in panel['targets']:
+                    if 'legendFormat' not in target or not target['legendFormat']:
+                        target['legendFormat'] = '{{instance}}'
             
             new_panels.append(panel)
             current_x += w
@@ -182,6 +239,12 @@ def reorganize():
                 'x': current_x,
                 'y': current_y
             }
+
+            # Enforce readable legend format
+            if 'targets' in panel:
+                for target in panel['targets']:
+                    if 'legendFormat' not in target or not target['legendFormat']:
+                        target['legendFormat'] = '{{instance}}'
             
             new_panels.append(panel)
             current_x += w

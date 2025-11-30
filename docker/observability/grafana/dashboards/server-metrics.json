@@ -44,29 +44,6 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "red",
-                "value": 1
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
-      },
       "gridPos": {
         "h": 8,
         "w": 6,
@@ -74,61 +51,34 @@
         "y": 1
       },
       "id": 1,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.4.3",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_session_active{instance=~\"$instance\"}",
-          "legendFormat": "",
-          "range": true,
+          "expr": "chat_session_active",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
       "title": "Active Sessions",
-      "type": "stat"
+      "type": "stat",
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 100
-              }
-            ]
-          },
-          "unit": "short"
-        },
-        "overrides": []
       },
       "gridPos": {
         "h": 8,
@@ -137,89 +87,65 @@
         "y": 1
       },
       "id": 2,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "pluginVersion": "10.4.3",
       "targets": [
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_accept_total{instance=~\"$instance\"}",
-          "legendFormat": "",
-          "range": true,
+          "expr": "chat_accept_total",
+          "legendFormat": "{{instance}}",
           "refId": "A"
         }
       ],
       "title": "Accepted Connections",
-      "type": "stat"
+      "type": "stat",
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
-      "id": 9,
-      "type": "stat",
-      "title": "Total Subscribes",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "pluginVersion": "10.4.3",
       "gridPos": {
         "h": 8,
         "w": 6,
         "x": 12,
         "y": 1
       },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
+      "id": 9,
+      "targets": [
+        {
+          "expr": "chat_subscribe_total",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Total Subscribes",
+      "type": "stat",
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
         "reduceOptions": {
+          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
-          "values": false
+          "fields": ""
         },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_subscribe_total",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "collapsed": false,
@@ -306,74 +232,40 @@
       "type": "timeseries"
     },
     {
-      "id": 6,
-      "type": "stat",
-      "title": "Dispatch Avg Latency",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "pluginVersion": "10.4.3",
       "gridPos": {
         "h": 8,
         "w": 6,
         "x": 12,
         "y": 10
       },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 5
-              },
-              {
-                "color": "red",
-                "value": 20
-              }
-            ]
-          },
-          "unit": "ms"
-        },
-        "overrides": []
-      },
+      "id": 6,
+      "targets": [
+        {
+          "expr": "chat_dispatch_latency_avg_ms",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Dispatch Avg Latency",
+      "type": "stat",
       "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
         "reduceOptions": {
+          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "fields": "",
-          "values": false
+          "fields": ""
         },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_dispatch_avg_latency_ms",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "id": 15,
@@ -422,7 +314,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_dispatch_latency_count",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -475,7 +367,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_dispatch_latency_sum_ms",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -545,7 +437,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_subscribe_last_lag_ms",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -991,7 +883,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_dispatch_opcode_total",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "instant": true,
           "range": false,
           "refId": "A"
@@ -1242,7 +1134,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_self_echo_drop_total",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1295,7 +1187,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_session_timeout_total",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1348,7 +1240,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_heartbeat_timeout_total",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1401,7 +1293,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_send_queue_drop_total",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
@@ -1431,7 +1323,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 6,
         "x": 0,
         "y": 85
       },
@@ -1444,7 +1336,21 @@
         }
       ],
       "title": "Gateway Active Sessions",
-      "type": "timeseries"
+      "type": "stat",
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "datasource": {
@@ -1453,8 +1359,8 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
+        "w": 6,
+        "x": 6,
         "y": 85
       },
       "id": 2002,
@@ -1466,7 +1372,21 @@
         }
       ],
       "title": "Gateway Total Connections",
-      "type": "timeseries"
+      "type": "stat",
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "collapsed": false,
@@ -1492,7 +1412,7 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
+        "w": 6,
         "x": 0,
         "y": 94
       },
@@ -1505,64 +1425,57 @@
         }
       ],
       "title": "LB Active Backends",
-      "type": "timeseries"
+      "type": "stat",
+      "options": {
+        "reduceOptions": {
+          "values": false,
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": ""
+        },
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
-      "id": 24,
-      "type": "timeseries",
-      "title": "LB Idle Close Total",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "pluginVersion": "10.4.3",
       "gridPos": {
         "h": 8,
-        "w": 24,
-        "x": 0,
-        "y": 102
+        "w": 6,
+        "x": 6,
+        "y": 94
       },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short"
-        },
-        "overrides": []
-      },
+      "id": 24,
+      "targets": [
+        {
+          "expr": "lb_backend_idle_close_total",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "LB Idle Close Total",
+      "type": "stat",
       "options": {
-        "legend": {
+        "reduceOptions": {
+          "values": false,
           "calcs": [
             "lastNotNull"
           ],
-          "displayMode": "list",
-          "placement": "bottom"
+          "fields": ""
         },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "lb_backend_idle_close_total",
-          "legendFormat": "close rate (5m)",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "lb_backend_idle_close_total",
-          "legendFormat": "cumulative",
-          "range": true,
-          "refId": "B"
-        }
-      ]
+        "orientation": "auto",
+        "textMode": "auto",
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto"
+      }
     },
     {
       "collapsed": false,
@@ -1574,9 +1487,9 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 110
+        "y": 102
       },
-      "id": 1110,
+      "id": 1102,
       "panels": [],
       "title": "Others",
       "type": "row"
@@ -1594,7 +1507,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 111
+        "y": 103
       },
       "fieldConfig": {
         "defaults": {
@@ -1628,7 +1541,7 @@
             "uid": "prometheus"
           },
           "expr": "chat_dispatch_total",
-          "legendFormat": "",
+          "legendFormat": "{{instance}}",
           "range": true,
           "refId": "A"
         }
