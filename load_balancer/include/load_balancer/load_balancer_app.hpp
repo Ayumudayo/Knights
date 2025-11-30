@@ -23,6 +23,7 @@
 #include "load_balancer/backend_refresher.hpp"
 #include "server/core/net/hive.hpp"
 #include "server/state/instance_registry.hpp"
+#include "server/core/metrics/http_server.hpp"
 
 namespace load_balancer {
 
@@ -84,6 +85,9 @@ private:
     std::unique_ptr<BackendRefresher> backend_refresher_;
     
     std::atomic<std::uint64_t> backend_idle_close_total_{0};
+    
+    std::unique_ptr<server::core::metrics::MetricsHttpServer> metrics_server_;
+    std::uint16_t metrics_port_{7002};
 };
 
 } // namespace load_balancer

@@ -15,6 +15,7 @@
 #include "gateway_lb.grpc.pb.h"
 #include "server/core/net/hive.hpp"
 #include "server/core/net/listener.hpp"
+#include "server/core/metrics/http_server.hpp"
 
 namespace gateway {
 
@@ -91,6 +92,8 @@ private:
     std::unordered_map<std::string, SessionState> sessions_;
     std::shared_ptr<gateway::lb::LoadBalancerService::Stub> lb_stub_;
     std::atomic<std::uint64_t> session_counter_{0};
+    std::unique_ptr<server::core::metrics::MetricsHttpServer> metrics_server_;
+    std::uint16_t metrics_port_{6001};
 };
 
 } // namespace gateway

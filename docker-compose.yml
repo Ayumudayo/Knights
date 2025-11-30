@@ -104,6 +104,9 @@ services:
       - "33000:3000"
     environment:
       - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards
     networks:
       - knights-net
 
@@ -115,10 +118,12 @@ services:
     command: [ "gateway" ]
     ports:
       - "36000:6000"
+      - "36001:6001"
     environment:
       GATEWAY_LISTEN: "0.0.0.0:6000"
       LB_GRPC_ENDPOINT: "load_balancer:7001"
       GATEWAY_ID: "gw1"
+      METRICS_PORT: "6001"
     depends_on:
       - load_balancer
     networks:
@@ -132,11 +137,13 @@ services:
     command: [ "load_balancer" ]
     ports:
       - "37001:7001"
+      - "37002:7002"
     environment:
       LB_GRPC_LISTEN: "0.0.0.0:7001"
       REDIS_URI: "tcp://redis:6379"
       LB_DYNAMIC_BACKENDS: "1"
       LB_BACKEND_REGISTRY_PREFIX: "gateway/instances/"
+      METRICS_PORT: "7002"
     depends_on:
       redis:
         condition: service_healthy

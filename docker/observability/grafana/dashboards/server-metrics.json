@@ -23,6 +23,23 @@
   "liveNow": false,
   "panels": [
     {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1000,
+      "panels": [],
+      "title": "Overview",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -54,7 +71,7 @@
         "h": 8,
         "w": 6,
         "x": 0,
-        "y": 0
+        "y": 1
       },
       "id": 1,
       "options": {
@@ -79,7 +96,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "chat_session_active",
+          "expr": "chat_session_active{instance=~\"$instance\"}",
           "legendFormat": "",
           "range": true,
           "refId": "A"
@@ -117,7 +134,7 @@
         "h": 8,
         "w": 6,
         "x": 6,
-        "y": 0
+        "y": 1
       },
       "id": 2,
       "options": {
@@ -142,7 +159,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "chat_accept_total",
+          "expr": "chat_accept_total{instance=~\"$instance\"}",
           "legendFormat": "",
           "range": true,
           "refId": "A"
@@ -152,9 +169,9 @@
       "type": "stat"
     },
     {
-      "id": 5,
+      "id": 9,
       "type": "stat",
-      "title": "Subscribe Lag (ms)",
+      "title": "Total Subscribes",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -164,32 +181,15 @@
         "h": 8,
         "w": 6,
         "x": 12,
-        "y": 0
+        "y": 1
       },
       "fieldConfig": {
         "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
           "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 100
-              },
-              {
-                "color": "red",
-                "value": 500
-              }
-            ]
-          },
-          "unit": "ms"
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
         },
         "overrides": []
       },
@@ -214,12 +214,96 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "chat_subscribe_last_lag_ms",
+          "expr": "chat_subscribe_total",
           "legendFormat": "",
           "range": true,
           "refId": "A"
         }
       ]
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 1009,
+      "panels": [],
+      "title": "Performance",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 10
+      },
+      "id": 3,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "10.4.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_dispatch_last_latency_ms",
+          "legendFormat": "last",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_dispatch_avg_latency_ms",
+          "legendFormat": "avg",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_dispatch_max_latency_ms",
+          "legendFormat": "max",
+          "range": true,
+          "refId": "C"
+        }
+      ],
+      "title": "Dispatch Latency (ms)",
+      "type": "timeseries"
     },
     {
       "id": 6,
@@ -233,8 +317,8 @@
       "gridPos": {
         "h": 8,
         "w": 6,
-        "x": 18,
-        "y": 0
+        "x": 12,
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
@@ -292,561 +376,6 @@
       ]
     },
     {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "ms"
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 8
-      },
-      "id": 3,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "pluginVersion": "10.4.3",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_dispatch_last_latency_ms",
-          "legendFormat": "last",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_dispatch_avg_latency_ms",
-          "legendFormat": "avg",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_dispatch_max_latency_ms",
-          "legendFormat": "max",
-          "range": true,
-          "refId": "C"
-        }
-      ],
-      "title": "Dispatch Latency (ms)",
-      "type": "timeseries"
-    },
-    {
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short"
-        }
-      },
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 8
-      },
-      "id": 4,
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "pluginVersion": "10.4.3",
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_dispatch_exception_total[5m])",
-          "legendFormat": "exceptions/second",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_dispatch_unknown_total[5m])",
-          "legendFormat": "unknown id/second",
-          "range": true,
-          "refId": "B"
-        }
-      ],
-      "title": "Dispatch Exceptions",
-      "type": "timeseries"
-    },
-    {
-      "id": 7,
-      "type": "timeseries",
-      "title": "Frame Throughput (/s)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 16
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "ops/s"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_frame_total[1m])",
-          "legendFormat": "ok/sec",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_frame_error_total[1m])",
-          "legendFormat": "error/sec",
-          "range": true,
-          "refId": "B"
-        }
-      ]
-    },
-    {
-      "id": 8,
-      "type": "timeseries",
-      "title": "Session Churn (/s)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 16
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "ops/s"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_session_started_total[5m])",
-          "legendFormat": "start/sec",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_session_stopped_total[5m])",
-          "legendFormat": "stop/sec",
-          "range": true,
-          "refId": "B"
-        }
-      ]
-    },
-    {
-      "id": 9,
-      "type": "stat",
-      "title": "Total Subscribes",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 0,
-        "y": 24
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_subscribe_total",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 10,
-      "type": "stat",
-      "title": "Self Echo Drops Total",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 24
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_self_echo_drop_total",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 11,
-      "type": "stat",
-      "title": "Session Timeouts Total",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 12,
-        "y": 24
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_session_timeout_total",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 12,
-      "type": "stat",
-      "title": "Heartbeat Timeouts Total",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 18,
-        "y": 24
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_heartbeat_timeout_total",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 13,
-      "type": "stat",
-      "title": "Send Queue Drops Total",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 0,
-        "y": 32
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_send_queue_drop_total",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
-      "id": 14,
-      "type": "stat",
-      "title": "Dispatch Calls Total",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 6,
-        "x": 6,
-        "y": 32
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "short",
-          "color": {
-            "mode": "palette-classic"
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "value",
-        "graphMode": "none",
-        "justifyMode": "center",
-        "orientation": "horizontal",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "text": {},
-        "textMode": "auto"
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_dispatch_total",
-          "legendFormat": "",
-          "range": true,
-          "refId": "A"
-        }
-      ]
-    },
-    {
       "id": 15,
       "type": "stat",
       "title": "Dispatch Latency Count",
@@ -858,8 +387,8 @@
       "gridPos": {
         "h": 8,
         "w": 6,
-        "x": 12,
-        "y": 32
+        "x": 18,
+        "y": 10
       },
       "fieldConfig": {
         "defaults": {
@@ -911,8 +440,8 @@
       "gridPos": {
         "h": 8,
         "w": 6,
-        "x": 18,
-        "y": 32
+        "x": 0,
+        "y": 18
       },
       "fieldConfig": {
         "defaults": {
@@ -953,9 +482,9 @@
       ]
     },
     {
-      "id": 17,
-      "type": "timeseries",
-      "title": "Timeouts & Drops (/s)",
+      "id": 5,
+      "type": "stat",
+      "title": "Subscribe Lag (ms)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -963,28 +492,51 @@
       "pluginVersion": "10.4.3",
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 40
+        "w": 6,
+        "x": 6,
+        "y": 18
       },
       "fieldConfig": {
         "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
           "mappings": [],
-          "unit": "ops/s"
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 100
+              },
+              {
+                "color": "red",
+                "value": 500
+              }
+            ]
+          },
+          "unit": "ms"
         },
         "overrides": []
       },
       "options": {
-        "legend": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
           "calcs": [
             "lastNotNull"
           ],
-          "displayMode": "list",
-          "placement": "bottom"
+          "fields": "",
+          "values": false
         },
-        "tooltip": {
-          "mode": "single"
-        }
+        "text": {},
+        "textMode": "auto"
       },
       "targets": [
         {
@@ -992,37 +544,17 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(chat_session_timeout_total[5m])",
-          "legendFormat": "session timeout",
+          "expr": "chat_subscribe_last_lag_ms",
+          "legendFormat": "",
           "range": true,
           "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_heartbeat_timeout_total[5m])",
-          "legendFormat": "heartbeat timeout",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_send_queue_drop_total[5m])",
-          "legendFormat": "send queue drop",
-          "range": true,
-          "refId": "C"
         }
       ]
     },
     {
-      "id": 18,
+      "id": 7,
       "type": "timeseries",
-      "title": "Dispatch Throughput (/s)",
+      "title": "Frame Throughput (/s)",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1032,7 +564,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 40
+        "y": 18
       },
       "fieldConfig": {
         "defaults": {
@@ -1059,8 +591,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(chat_dispatch_total[5m])",
-          "legendFormat": "total",
+          "expr": "rate(chat_frame_total{instance=~\"$instance\"}[1m])",
+          "legendFormat": "ok/sec",
           "range": true,
           "refId": "A"
         },
@@ -1069,75 +601,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "rate(chat_dispatch_exception_total[5m])",
-          "legendFormat": "exception",
-          "range": true,
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "rate(chat_dispatch_unknown_total[5m])",
-          "legendFormat": "unknown",
-          "range": true,
-          "refId": "C"
-        }
-      ]
-    },
-    {
-      "id": 19,
-      "type": "timeseries",
-      "title": "Frame Payload Size (bytes)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "pluginVersion": "10.4.3",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 0,
-        "y": 48
-      },
-      "fieldConfig": {
-        "defaults": {
-          "mappings": [],
-          "unit": "bytes"
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "single"
-        }
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_frame_payload_avg_bytes",
-          "legendFormat": "avg",
-          "range": true,
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "chat_frame_payload_max_bytes",
-          "legendFormat": "max",
+          "expr": "rate(chat_frame_error_total{instance=~\"$instance\"}[1m])",
+          "legendFormat": "error/sec",
           "range": true,
           "refId": "B"
         }
@@ -1155,8 +620,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 48
+        "x": 0,
+        "y": 26
       },
       "fieldConfig": {
         "defaults": {
@@ -1226,6 +691,147 @@
       ]
     },
     {
+      "id": 19,
+      "type": "timeseries",
+      "title": "Frame Payload Size (bytes)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 26
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_frame_payload_avg_bytes",
+          "legendFormat": "avg",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_frame_payload_max_bytes",
+          "legendFormat": "max",
+          "range": true,
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Dispatch Throughput (/s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 34
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "ops/s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_dispatch_total[5m])",
+          "legendFormat": "total",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_dispatch_exception_total[5m])",
+          "legendFormat": "exception",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_dispatch_unknown_total[5m])",
+          "legendFormat": "unknown",
+          "range": true,
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 42
+      },
+      "id": 1042,
+      "panels": [],
+      "title": "Internals",
+      "type": "row"
+    },
+    {
       "id": 21,
       "type": "timeseries",
       "title": "Job Queue Depth",
@@ -1238,7 +844,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 56
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {
@@ -1295,7 +901,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 56
+        "y": 43
       },
       "fieldConfig": {
         "defaults": {
@@ -1362,7 +968,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 64
+        "y": 51
       },
       "fieldConfig": {
         "defaults": {
@@ -1393,9 +999,518 @@
       ]
     },
     {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Session Churn (/s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 59
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "ops/s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_session_started_total[5m])",
+          "legendFormat": "start/sec",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_session_stopped_total[5m])",
+          "legendFormat": "stop/sec",
+          "range": true,
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 67
+      },
+      "id": 1067,
+      "panels": [],
+      "title": "Errors",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "short"
+        }
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 68
+      },
+      "id": 4,
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "pluginVersion": "10.4.3",
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_dispatch_exception_total[5m])",
+          "legendFormat": "exceptions/second",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_dispatch_unknown_total[5m])",
+          "legendFormat": "unknown id/second",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Dispatch Exceptions",
+      "type": "timeseries"
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Timeouts & Drops (/s)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 68
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "ops/s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "single"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_session_timeout_total[5m])",
+          "legendFormat": "session timeout",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_heartbeat_timeout_total[5m])",
+          "legendFormat": "heartbeat timeout",
+          "range": true,
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "rate(chat_send_queue_drop_total[5m])",
+          "legendFormat": "send queue drop",
+          "range": true,
+          "refId": "C"
+        }
+      ]
+    },
+    {
+      "id": 10,
+      "type": "stat",
+      "title": "Self Echo Drops Total",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_self_echo_drop_total",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 11,
+      "type": "stat",
+      "title": "Session Timeouts Total",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 6,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_session_timeout_total",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 12,
+      "type": "stat",
+      "title": "Heartbeat Timeouts Total",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 12,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_heartbeat_timeout_total",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "type": "stat",
+      "title": "Send Queue Drops Total",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 18,
+        "y": 76
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_send_queue_drop_total",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 84
+      },
+      "id": 1084,
+      "panels": [],
+      "title": "Gateway",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 85
+      },
+      "id": 2001,
+      "targets": [
+        {
+          "expr": "gateway_sessions_active",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway Active Sessions",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 85
+      },
+      "id": 2002,
+      "targets": [
+        {
+          "expr": "gateway_connections_total",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "Gateway Total Connections",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 93
+      },
+      "id": 1093,
+      "panels": [],
+      "title": "Load Balancer",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 94
+      },
+      "id": 2003,
+      "targets": [
+        {
+          "expr": "lb_backends_active",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "title": "LB Active Backends",
+      "type": "timeseries"
+    },
+    {
       "id": 24,
       "type": "timeseries",
-      "title": "LB Idle Close Rate",
+      "title": "LB Idle Close Total",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -1405,7 +1520,7 @@
         "h": 8,
         "w": 24,
         "x": 0,
-        "y": 72
+        "y": 102
       },
       "fieldConfig": {
         "defaults": {
@@ -1432,7 +1547,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(increase(lb_backend_idle_close_total[5m]))",
+          "expr": "lb_backend_idle_close_total",
           "legendFormat": "close rate (5m)",
           "range": true,
           "refId": "A"
@@ -1448,6 +1563,76 @@
           "refId": "B"
         }
       ]
+    },
+    {
+      "collapsed": false,
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 110
+      },
+      "id": 1110,
+      "panels": [],
+      "title": "Others",
+      "type": "row"
+    },
+    {
+      "id": 14,
+      "type": "stat",
+      "title": "Dispatch Calls Total",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "pluginVersion": "10.4.3",
+      "gridPos": {
+        "h": 8,
+        "w": 6,
+        "x": 0,
+        "y": 111
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "short",
+          "color": {
+            "mode": "palette-classic"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "center",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "text": {},
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "chat_dispatch_total",
+          "legendFormat": "",
+          "range": true,
+          "refId": "A"
+        }
+      ]
     }
   ],
   "refresh": "10s",
@@ -1457,7 +1642,35 @@
     "chat-server"
   ],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "All",
+          "value": "$__all"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+        },
+        "definition": "label_values(chat_session_active, instance)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Instance",
+        "multi": true,
+        "name": "instance",
+        "options": [],
+        "query": {
+          "query": "label_values(chat_session_active, instance)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
   },
   "time": {
     "from": "now-15m",

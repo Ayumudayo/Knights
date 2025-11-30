@@ -71,6 +71,20 @@ namespace load_balancer {
         }
 
         configure();
+
+        if (const char* port_env = std::getenv("METRICS_PORT")) {
+            metrics_port_ = static_cast<std::uint16_t>(std::stoi(port_env));
+        }
+
+        metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(metrics_port_, [this]() {
+            std::ostringstream stream;
+            stream << "# TYPE lb_backends_active gauge\n";
+            stream << "lb_backends_active " << backend_registry_.size() << "\n";
+            stream << "# TYPE lb_backend_idle_close_total counter\n";
+            stream << "lb_backend_idle_close_total " << backend_idle_close_total_.load() << "\n";
+            return stream.str();
+        });
+        metrics_server_->start();
     }
 
     LoadBalancerApp::~LoadBalancerApp() {
@@ -97,6 +111,9 @@ namespace load_balancer {
         heartbeat_timer_.cancel();
         if (backend_refresher_) {
             backend_refresher_->stop();
+        }
+        if (metrics_server_) {
+            metrics_server_->stop();
         }
         stop_grpc_server();
         if (hive_) {

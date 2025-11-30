@@ -195,6 +195,23 @@ GatewayApp::GatewayApp()
     , authenticator_(std::make_shared<auth::NoopAuthenticator>()) {
     configure_gateway();
     configure_load_balancer();
+
+    if (const char* port_env = std::getenv("METRICS_PORT")) {
+        metrics_port_ = static_cast<std::uint16_t>(std::stoi(port_env));
+    }
+
+    metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(metrics_port_, [this]() {
+        std::ostringstream stream;
+        stream << "# TYPE gateway_sessions_active gauge\n";
+        {
+            std::lock_guard<std::mutex> lock(session_mutex_);
+            stream << "gateway_sessions_active " << sessions_.size() << "\n";
+        }
+        stream << "# TYPE gateway_connections_total counter\n";
+        stream << "gateway_connections_total " << session_counter_.load() << "\n";
+        return stream.str();
+    });
+    metrics_server_->start();
 }
 
 GatewayApp::~GatewayApp() {
@@ -215,6 +232,9 @@ void GatewayApp::stop() {
     // stop()은 listener와 모든 LbSession을 차례로 중단해 dangling gRPC stream을 방지한다.
     if (listener_) {
         listener_->stop();
+    }
+    if (metrics_server_) {
+        metrics_server_->stop();
     }
 
     {

@@ -7,6 +7,7 @@ add_library(server_core
     src/net/listener.cpp
     src/util/log.cpp
     src/metrics/metrics.cpp
+    src/metrics/http_server.cpp
     src/runtime_metrics.cpp
     src/concurrent/job_queue.cpp
     src/concurrent/thread_manager.cpp
