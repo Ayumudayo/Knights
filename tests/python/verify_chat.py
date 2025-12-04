@@ -4,12 +4,14 @@ import os
 import sys
 
 # Path to the executable
-exe_path = os.path.join("build-windows", "devclient", "Debug", "dev_chat_cli.exe")
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.abspath(os.path.join(script_dir, "..", ".."))
+exe_path = os.path.join(project_root, "build-windows", "devclient", "Debug", "dev_chat_cli.exe")
 
 if not os.path.exists(exe_path):
     print(f"Error: Executable not found at {exe_path}")
     # Try looking in other common locations
-    exe_path = os.path.join("build-windows", "Debug", "dev_chat_cli.exe")
+    exe_path = os.path.join(project_root, "build-windows", "Debug", "dev_chat_cli.exe")
     if not os.path.exists(exe_path):
         print(f"Error: Executable not found at {exe_path} either.")
         sys.exit(1)
