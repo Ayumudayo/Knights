@@ -23,8 +23,10 @@ set(IMGUI_SOURCES
 # Executable Definition
 # ---------------------------------------------------------------------------
 add_executable(client_gui WIN32
-    src/main_entry.cpp
+    src/main.cpp
     src/net_client.cpp
+    src/client_app.cpp
+    src/gui_manager.cpp
     ${IMGUI_SOURCES}
 )
 
