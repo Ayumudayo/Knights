@@ -139,7 +139,8 @@ void Session::do_read_header() {
             if (ec) {
                 runtime_metrics::record_frame_error();
                 log::debug(std::string("Failed to read header: ") + ec.message());
-                // 헤더 읽기 실패는 프로토콜 위반이거나 연결 끊김이므로 세션을 종료합니다.
+                // 헤더 읽기 실패는 프로토콜 위반이거나 연결 끊김(EOF)이므로 세션을 종료합니다.
+                // 4바이트 헤더조차 읽지 못했다면 더 이상 진행할 수 없습니다.
                 stop();
                 return;
             }
@@ -246,16 +247,23 @@ void Session::do_write() {
 }
 
 void Session::send_hello() {
+    // HELLO 메시지 구성
+    // proto_major(2바이트): 주 프로토콜 버전 (호환성 체크용)
+    // proto_minor(2바이트): 부 버전 (헤더 구조 v1.1 등)
+    // capabilities(2바이트): 클라이언트 기능 지원 여부 (예: SENDER_SID)
+    // heartbeat(2바이트): 서버가 요구하는 heartbeat 간격 (1/10초 단위)
+    // epoch_high32(4바이트): 64비트 Timestamp 구성을 위한 상위 32비트 (Epoch)
     std::vector<std::uint8_t> payload_vec;
     payload_vec.resize(12);
-    server::core::protocol::write_be16(1, payload_vec.data()); // proto_major (주 프로토콜 버전)
-    server::core::protocol::write_be16(1, payload_vec.data() + 2); // proto_minor (헤더 v1.1)
-    // capabilities: 클라이언트에게 sender_sid 지원 여부를 알려준다.
+    server::core::protocol::write_be16(1, payload_vec.data()); // proto_major
+    server::core::protocol::write_be16(1, payload_vec.data() + 2); // proto_minor
+    
     std::uint16_t caps = static_cast<std::uint16_t>(server::core::protocol::CAP_COMPRESS_SUPP | server::core::protocol::CAP_SENDER_SID);
     server::core::protocol::write_be16(caps, payload_vec.data() + 4);
+    
     unsigned hb = options_ ? options_->heartbeat_interval_ms / 10 : 0;
     server::core::protocol::write_be16(static_cast<std::uint16_t>(hb), payload_vec.data() + 6);
-    // epoch_high32: 클라이언트가 64비트 UTC 타임스탬프를 복원할 수 있도록 상위 32비트를 보낸다.
+    
     auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::uint32_t epoch_high32 = static_cast<std::uint32_t>((static_cast<std::uint64_t>(now64) >> 32) & 0xFFFFFFFFu);
