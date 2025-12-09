@@ -216,7 +216,9 @@ void ChatService::emit_write_behind_event(const std::string& type,
             fields.emplace_back(std::move(kv));
         }
     }
-    // XADD 명령을 사용하여 스트림에 추가
+    // XADD 명령을 사용하여 스트림에 추가합니다.
+    // PUBLISH(Pub/Sub)와 달리 스트림은 데이터가 영구적으로 저장되며(설정에 따라),
+    // 컨슈머 그룹을 통해 안정적인 처리가 가능합니다. (At-least-once Delivery)
     if (!redis_->xadd(write_behind_.stream_key, fields, nullptr, write_behind_.maxlen, write_behind_.approximate)) {
         corelog::warn(std::string("write-behind XADD failed: type=") + type);
     }
@@ -373,6 +375,9 @@ void ChatService::send_rooms_list(Session& s) {
             }
         }
     }
+    // ChatBroadcast 메시지를 수동으로 직렬화합니다.
+    // 편의 함수 대신 수동 직렬화를 사용하는 이유는,
+    // (system) sender와 현재 타임스탬프(ts_ms)를 정확히 설정하기 위함입니다.
     server::wire::v1::ChatBroadcast pb; pb.set_room("(system)"); pb.set_sender("(system)"); pb.set_text(msg); pb.set_sender_sid(0);
     {
         auto now64 = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -661,21 +666,25 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                 auto last_id = uow->messages().get_last_id(rid);
                 std::uint64_t since_id = 0;
                 // 마지막으로 읽은 메시지(last_seen)를 기준으로 가져올 범위를 계산합니다.
-                if (last_id > 0) {
-                    if (last_seen_value == 0) {
-                        since_id = (last_id > limit) ? (last_id - limit) : 0;
-                    } else if (last_seen_value >= last_id) {
-                        since_id = (last_id > limit) ? (last_id - limit) : 0;
-                    } else {
-                        std::uint64_t context = static_cast<std::uint64_t>(limit) * static_cast<std::uint64_t>(fetch_factor);
-                        if (last_id > context) {
-                            std::uint64_t cut = last_id - context;
-                            since_id = (last_seen_value > cut) ? last_seen_value : cut;
+                    if (last_id > 0) {
+                        // last_seen_value(마지막으로 읽은 메시지)를 기준으로 Fetch 범위를 결정합니다.
+                        // 1. last_seen이 없으면(0) 최신 N개를 가져옵니다.
+                        // 2. last_seen이 너무 오래되어 Gap이 크면, 중간을 건너뛰고 최신 메시지 위주로 가져옵니다.
+                        // 3. 정상적인 경우 last_seen 직후부터 가져옵니다.
+                        if (last_seen_value == 0) {
+                            since_id = (last_id > limit) ? (last_id - limit) : 0;
+                        } else if (last_seen_value >= last_id) {
+                            since_id = (last_id > limit) ? (last_id - limit) : 0;
                         } else {
-                            since_id = last_seen_value;
+                            std::uint64_t context = static_cast<std::uint64_t>(limit) * static_cast<std::uint64_t>(fetch_factor);
+                            if (last_id > context) {
+                                std::uint64_t cut = last_id - context;
+                                since_id = (last_seen_value > cut) ? last_seen_value : cut;
+                            } else {
+                                since_id = last_seen_value;
+                            }
                         }
                     }
-                }
 
                 auto msgs = uow->messages().fetch_recent_by_room(rid, since_id, fetch_count);
                 // DB에서 가져온 것 중 이미 캐시에 있는 것은 제외

@@ -236,7 +236,9 @@ void NetClient::drain_send_queue() {
 // -----------------------------------------------------------------------------
 // 수신 프레임 처리
 // -----------------------------------------------------------------------------
-// 수신된 메시지의 ID(Opcode)에 따라 적절한 처리를 수행합니다.
+// 수신된 프레임 처리 (Dispatcher)
+// 서버로부터 받은 메시지 ID(Opcode)를 확인하여 알맞은 핸들러 로직을 수행합니다.
+// 별도의 디스패처 클래스 없이 if-else 구조로 단순하게 구현되어 있습니다.
 void NetClient::handle_frame(const proto::FrameHeader& hh, std::span<const std::uint8_t> in) {
     if (hh.msg_id == proto::MSG_PING) {
         // 서버에서 PING이 오면 PONG으로 즉시 응답 (RTT 측정 및 연결 확인용)
@@ -438,6 +440,7 @@ void NetClient::send_leave(const std::string& room) {
     enqueue_frame(game_proto::MSG_LEAVE_ROOM, 0, std::move(p));
 }
 
+// 채팅 전송 (Length-Prefixed UTF8 직렬화 사용)
 void NetClient::send_chat(const std::string& room, const std::string& text) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, room);

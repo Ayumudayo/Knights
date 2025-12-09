@@ -271,7 +271,8 @@ GatewayApp::BackendSessionPtr GatewayApp::create_backend_session(const std::stri
         return nullptr;
     }
 
-    // Unique session ID could utilize a better generator, but this suffices for now
+    // 고유 세션 ID 생성
+    // 더 나은 생성기를 사용할 수 있지만, 현재는 원자적 카운터로 충분합니다.
     static std::atomic<std::uint64_t> counter{0};
     std::string session_id = gateway_id_ + "-" + std::to_string(++counter);
 
@@ -282,14 +283,14 @@ GatewayApp::BackendSessionPtr GatewayApp::create_backend_session(const std::stri
 
     // Binding session if authenticated
     if (session_directory_ && !client_id.empty() && client_id != "anonymous") {
-        // Find backend ID by host/port
-        // Note: Ideally, instance_id should be returned by select_best_server, but for now we look it up or rely on host/port consistency.
-        // To be simpler, we will just use host:port as ID for binding in this lightweight implementation if needed, 
-        // OR we can fix select_best_server to return InstanceRecord.
-        // Let's refine select_best_server to do binding internally or here.
+        // 호스트/포트로 백엔드 ID를 찾습니다.
+        // 참고: 이상적으로는 select_best_server가 InstanceRecord를 반환해야 하지만, 
+        // 현재는 호스트:포트 일관성에 의존하거나 조회합니다.
+        // 더 간단하게 구현하기 위해 필요하다면 호스트:포트를 ID로 사용할 수 있습니다.
+        // 추후 select_best_server가 InstanceRecord를 반환하도록 개선할 예정입니다.
         
-        // Actually, ensuring binding after successful connect is better.
-        // But we need the Instance ID.
+        // 사실, 연결 성공 후 바인딩을 보장하는 것이 더 좋습니다.
+        // 하지만 Instance ID가 필요합니다.
     }
 
     {
@@ -321,22 +322,23 @@ std::optional<std::pair<std::string, std::uint16_t>> GatewayApp::select_best_ser
     auto instances = backend_registry_->list_instances();
     if (instances.empty()) return std::nullopt;
 
-    // 1. Session Stickiness
+    // 1. 세션 스티키니스 (Session Stickiness)
+    // 클라이언트가 이전에 연결했던 백엔드가 있다면 해당 서버로 다시 연결을 시도합니다.
     if (session_directory_ && !client_id.empty() && client_id != "anonymous") {
         if (auto backend_id = session_directory_->find_backend(client_id)) {
             auto it = std::find_if(instances.begin(), instances.end(), [&](const auto& rec) {
                 return rec.instance_id == *backend_id;
             });
             if (it != instances.end()) {
-                 // Found active sticky backend
+                 // 활성 상태인 스티키 백엔드를 찾았습니다.
                  return std::make_pair(it->host, it->port);
             }
-            // Backend is gone, release binding
+            // 백엔드가 사라졌거나 비활성화되었으므로 바인딩을 해제합니다.
             session_directory_->release_backend(client_id, *backend_id);
         }
     }
 
-    // 2. Select new backend (Least Connections)
+    // 2. 새로운 백엔드 선택 (최소 연결 수, Least Connections)
     std::vector<server::state::InstanceRecord> candidates;
     std::copy_if(instances.begin(), instances.end(), std::back_inserter(candidates), [](const auto& rec) {
         return !rec.host.empty() && rec.port > 0;
@@ -344,17 +346,18 @@ std::optional<std::pair<std::string, std::uint16_t>> GatewayApp::select_best_ser
 
     if (candidates.empty()) return std::nullopt;
 
-    // Sort by active_sessions ascending
+    // 활성 세션 수(active_sessions)를 기준으로 오름차순 정렬
     std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
         return a.active_sessions < b.active_sessions;
     });
 
-    // Pick the one with least connections. 
-    // If there are multiple with the same lowest count, we could pick randomly among them to avoid thundering herd,
-    // but strict least connections is fine for now.
+    // 가장 부하가 적은 서버를 선택합니다.
+    // 만약 최소 연결 수를 가진 서버가 여러 대라면 랜덤하게 선택하여 편중(thundering herd)을 막을 수 있지만,
+    // 현재는 단순하게 가장 첫 번째 서버를 선택합니다.
     const auto& selected = candidates.front();
 
-    // 3. Bind new backend
+    // 3. 새로운 백엔드 바인딩 (세션 고정)
+    // 다음에 이 클라이언트가 다시 접속하면 동일한 서버로 연결되도록 기록합니다.
     if (session_directory_ && !client_id.empty() && client_id != "anonymous") {
         session_directory_->refresh_backend(client_id, selected.instance_id);
     }
