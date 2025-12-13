@@ -11,7 +11,7 @@
 namespace server::core::protocol {
 
 // ==============================================================================
-// 프로토콜 프레임 정의
+// 프로토콜 패킷 정의
 // 
 // 모든 메시지는 [헤더(14바이트)] + [바디(가변 길이)] 형태로 전송됩니다.
 // 네트워크 전송 시 바이트 순서는 Big-Endian (Network Byte Order)을 따릅니다.
@@ -23,7 +23,7 @@ inline constexpr std::size_t k_header_bytes = 14;
 /**
  * @brief 메시지 헤더 구조체
  */
-struct FrameHeader {
+struct PacketHeader {
     std::uint16_t length{0};      // 바디 길이 (헤더 제외)
     std::uint16_t msg_id{0};      // 메시지 타입 ID (Opcode)
     std::uint16_t flags{0};       // 플래그 (예: 압축 여부, 암호화 여부 등)
@@ -62,7 +62,7 @@ inline void write_be32(std::uint32_t v, std::uint8_t* out) {
 }
 
 // 헤더 구조체를 바이트 배열로 직렬화 (Serialize)
-inline void encode_header(const FrameHeader& h, std::uint8_t* out14) {
+inline void encode_header(const PacketHeader& h, std::uint8_t* out14) {
     write_be16(h.length, out14 + 0);
     write_be16(h.msg_id, out14 + 2);
     write_be16(h.flags, out14 + 4);
@@ -71,7 +71,7 @@ inline void encode_header(const FrameHeader& h, std::uint8_t* out14) {
 }
 
 // 바이트 배열을 헤더 구조체로 역직렬화 (Deserialize)
-inline void decode_header(const std::uint8_t* in14, FrameHeader& h) {
+inline void decode_header(const std::uint8_t* in14, PacketHeader& h) {
     h.length = read_be16(in14 + 0);
     h.msg_id = read_be16(in14 + 2);
     h.flags = read_be16(in14 + 4);

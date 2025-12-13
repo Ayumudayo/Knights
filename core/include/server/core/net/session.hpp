@@ -10,7 +10,7 @@
 #include <vector>
 
 #include "server/core/memory/memory_pool.hpp"
-#include "server/core/protocol/frame.hpp"
+#include "server/core/protocol/packet.hpp"
 
 namespace server::core {
 
@@ -21,7 +21,7 @@ class BufferManager;
 struct SessionOptions;
 struct SharedState;
 
-using PacketHeader = server::core::protocol::FrameHeader;
+using PacketHeader = server::core::protocol::PacketHeader;
 
 class Session : public std::enable_shared_from_this<Session> {
 public:
@@ -37,12 +37,12 @@ public:
     // 세션 종료 직전에 한 번 호출할 콜백을 등록한다.
     void set_on_close(std::function<void(std::shared_ptr<Session>)> cb) { on_close_ = std::move(cb); }
 
-    // MSG_ERR 프레임을 만들어 전송한다.
+    // MSG_ERR 패킷을 만들어 전송한다.
     void send_error(std::uint16_t code, const std::string& msg);
 
-    // 이미 직렬화된 프레임을 전송 큐에 추가한다.
-    void async_send(BufferManager::PooledBuffer data, size_t frame_size);
-    // msg_id 와 payload 를 받아 Frame 으로 직렬화한 뒤 전송한다.
+    // 이미 직렬화된 패킷을 전송 큐에 추가한다.
+    void async_send(BufferManager::PooledBuffer data, size_t packet_size);
+    // msg_id 와 payload 를 받아 Packet 으로 직렬화한 뒤 전송한다.
     void async_send(std::uint16_t msg_id, const std::vector<std::uint8_t>& payload, std::uint16_t flags = 0);
 
     std::uint32_t session_id() const { return session_id_; }
@@ -51,7 +51,7 @@ private:
     void do_read_header();
     void do_read_body(std::size_t body_len);
     void do_write();
-    std::pair<BufferManager::PooledBuffer, size_t> make_frame(std::uint16_t msg_id,
+    std::pair<BufferManager::PooledBuffer, size_t> make_packet(std::uint16_t msg_id,
                                                               std::uint16_t flags,
                                                               const std::vector<std::uint8_t>& payload,
                                                               std::uint32_t seq,

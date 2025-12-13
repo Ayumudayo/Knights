@@ -71,18 +71,18 @@ void Session::stop() {
     }
 }
 
-void Session::async_send(BufferManager::PooledBuffer data, size_t frame_size) {
-    asio::dispatch(strand_, [self = shared_from_this(), data = std::move(data), frame_size]() mutable {
+void Session::async_send(BufferManager::PooledBuffer data, size_t packet_size) {
+    asio::dispatch(strand_, [self = shared_from_this(), data = std::move(data), packet_size]() mutable {
         if (self->stopped_) return;
-        if (self->options_ && self->options_->send_queue_max > 0 && self->queued_bytes_ + frame_size > self->options_->send_queue_max) {
+        if (self->options_ && self->options_->send_queue_max > 0 && self->queued_bytes_ + packet_size > self->options_->send_queue_max) {
             runtime_metrics::record_send_queue_drop();
             log::warn("Send queue limit exceeded; stopping session");
             self->stop();
             return;
         }
         bool kick_write = self->send_queue_.empty();
-        self->queued_bytes_ += frame_size;
-        self->send_queue_.push({std::move(data), frame_size});
+        self->queued_bytes_ += packet_size;
+        self->send_queue_.push({std::move(data), packet_size});
         if (kick_write) {
             self->do_write();
         }
@@ -94,20 +94,20 @@ void Session::async_send(std::uint16_t msg_id, const std::vector<std::uint8_t>& 
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
     
-    auto [buffer, frame_size] = make_frame(msg_id, flags, payload, tx_seq_++, now32);
+    auto [buffer, packet_size] = make_packet(msg_id, flags, payload, tx_seq_++, now32);
     if (buffer) {
-        async_send(std::move(buffer), frame_size);
+        async_send(std::move(buffer), packet_size);
     }
 }
 
-std::pair<BufferManager::PooledBuffer, size_t> Session::make_frame(std::uint16_t msg_id,
+std::pair<BufferManager::PooledBuffer, size_t> Session::make_packet(std::uint16_t msg_id,
                                               std::uint16_t flags,
                                               const std::vector<std::uint8_t>& payload,
                                               std::uint32_t seq,
                                               std::uint32_t utc_ts_ms32) {
-    size_t frame_size = server::core::protocol::k_header_bytes + payload.size();
-    if (frame_size > buffer_manager_.GetBlockSize()) {
-        log::error("Outgoing frame exceeds memory pool block size.");
+    size_t packet_size = server::core::protocol::k_header_bytes + payload.size();
+    if (packet_size > buffer_manager_.GetBlockSize()) {
+        log::error("Outgoing packet exceeds memory pool block size.");
         return {nullptr, 0};
     }
 
@@ -117,19 +117,19 @@ std::pair<BufferManager::PooledBuffer, size_t> Session::make_frame(std::uint16_t
         return {nullptr, 0};
     }
 
-    server::core::protocol::FrameHeader h{static_cast<std::uint16_t>(payload.size()), msg_id, flags, seq, utc_ts_ms32};
+    server::core::protocol::PacketHeader h{static_cast<std::uint16_t>(payload.size()), msg_id, flags, seq, utc_ts_ms32};
     server::core::protocol::encode_header(h, reinterpret_cast<std::uint8_t*>(buffer.get()));
     if (!payload.empty()) { 
         std::memcpy(reinterpret_cast<std::uint8_t*>(buffer.get()) + server::core::protocol::k_header_bytes, payload.data(), payload.size()); 
     }
-    return {std::move(buffer), frame_size};
+    return {std::move(buffer), packet_size};
 }
 
 void Session::do_read_header() {
     auto self = shared_from_this();
     read_buf_ = buffer_manager_.Acquire();
     if (!read_buf_) {
-        runtime_metrics::record_frame_error();
+        runtime_metrics::record_packet_error();
         log::error("Failed to acquire read buffer.");
         stop();
         return;
@@ -137,7 +137,7 @@ void Session::do_read_header() {
     asio::async_read(socket_, asio::buffer(read_buf_.get(), server::core::protocol::k_header_bytes),
         asio::bind_executor(strand_, [this, self](const error_code& ec, std::size_t n) {
             if (ec) {
-                runtime_metrics::record_frame_error();
+                runtime_metrics::record_packet_error();
                 log::debug(std::string("Failed to read header: ") + ec.message());
                 // 헤더 읽기 실패는 프로토콜 위반이거나 연결 끊김(EOF)이므로 세션을 종료합니다.
                 // 4바이트 헤더조차 읽지 못했다면 더 이상 진행할 수 없습니다.
@@ -145,14 +145,14 @@ void Session::do_read_header() {
                 return;
             }
             if (n != server::core::protocol::k_header_bytes) {
-                runtime_metrics::record_frame_error();
+                runtime_metrics::record_packet_error();
                 log::warn("Header size mismatch");
                 stop();
                 return;
             }
             server::core::protocol::decode_header(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_);
             if (options_ && options_->recv_max_payload > 0 && header_.length > options_->recv_max_payload) {
-                runtime_metrics::record_frame_error();
+                runtime_metrics::record_packet_error();
                 send_error(server::core::protocol::errc::LENGTH_LIMIT_EXCEEDED, "payload too large");
                 stop();
                 return;
@@ -166,8 +166,8 @@ void Session::do_read_body(std::size_t body_len) {
     auto self = shared_from_this();
     if (body_len == 0) {
         // payload가 비어 있으면 빈 span을 그대로 전달한다.
-        runtime_metrics::record_frame_payload(0);
-        runtime_metrics::record_frame_ok();
+        runtime_metrics::record_packet_payload(0);
+        runtime_metrics::record_packet_ok();
         auto start = std::chrono::steady_clock::now();
         bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>{});
         runtime_metrics::record_dispatch_opcode(header_.msg_id);
@@ -180,14 +180,14 @@ void Session::do_read_body(std::size_t body_len) {
         return;
     }
     if (body_len > buffer_manager_.GetBlockSize()) {
-        runtime_metrics::record_frame_error();
+        runtime_metrics::record_packet_error();
         log::error("Body is larger than memory pool block size.");
         stop();
         return;
     }
     read_buf_ = buffer_manager_.Acquire();
     if (!read_buf_) {
-        runtime_metrics::record_frame_error();
+        runtime_metrics::record_packet_error();
         log::error("Failed to acquire body buffer.");
         stop();
         return;
@@ -195,21 +195,21 @@ void Session::do_read_body(std::size_t body_len) {
     asio::async_read(socket_, asio::buffer(read_buf_.get(), body_len),
         asio::bind_executor(strand_, [this, self](const error_code& ec, std::size_t n) {
             if (ec) {
-                runtime_metrics::record_frame_error();
+                runtime_metrics::record_packet_error();
                 log::debug(std::string("Failed to read body: ") + ec.message());
                 stop();
                 return;
             }
             if (n != header_.length) {
-                runtime_metrics::record_frame_error();
+                runtime_metrics::record_packet_error();
                 log::warn("Body size mismatch");
                 stop();
                 return;
             }
             // 본문까지 읽었으니 읽기 타임아웃을 재설정한다.
             arm_read_timeout();
-            runtime_metrics::record_frame_payload(header_.length);
-            runtime_metrics::record_frame_ok();
+            runtime_metrics::record_packet_payload(header_.length);
+            runtime_metrics::record_packet_ok();
             auto start = std::chrono::steady_clock::now();
             bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_.length));
             runtime_metrics::record_dispatch_opcode(header_.msg_id);
@@ -228,16 +228,16 @@ void Session::do_write() {
     }
     auto self = shared_from_this();
     auto& front_pair = send_queue_.front();
-    const auto frame_size = front_pair.second;
-    asio::async_write(socket_, asio::buffer(front_pair.first.get(), frame_size),
-        asio::bind_executor(strand_, [this, self, frame_size](const error_code& ec, std::size_t /*n*/) {
+    const auto packet_size = front_pair.second;
+    asio::async_write(socket_, asio::buffer(front_pair.first.get(), packet_size),
+        asio::bind_executor(strand_, [this, self, packet_size](const error_code& ec, std::size_t /*n*/) {
             if (ec) {
                 log::debug(std::string("Write failed: ") + ec.message());
                 stop();
                 return;
             }
-            if (self->queued_bytes_ >= frame_size) {
-                self->queued_bytes_ -= frame_size;
+            if (self->queued_bytes_ >= packet_size) {
+                self->queued_bytes_ -= packet_size;
             } else {
                 self->queued_bytes_ = 0;
             }
@@ -270,9 +270,9 @@ void Session::send_hello() {
     server::core::protocol::write_be32(epoch_high32, payload_vec.data() + 8);
     std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
 
-    auto [buffer, frame_size] = make_frame(0x0001 /*MSG_HELLO*/, 0, payload_vec, tx_seq_++, now32);
+    auto [buffer, packet_size] = make_packet(0x0001 /*MSG_HELLO*/, 0, payload_vec, tx_seq_++, now32);
     if (buffer) {
-        async_send(std::move(buffer), frame_size);
+        async_send(std::move(buffer), packet_size);
     }
 }
 
@@ -287,9 +287,9 @@ void Session::send_error(std::uint16_t code, const std::string& msg) {
         std::chrono::system_clock::now().time_since_epoch()).count();
     std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
     
-    auto [buffer, frame_size] = make_frame(0x0004 /*MSG_ERR*/, 0, payload_vec, tx_seq_++, now32);
+    auto [buffer, packet_size] = make_packet(0x0004 /*MSG_ERR*/, 0, payload_vec, tx_seq_++, now32);
     if (buffer) {
-        async_send(std::move(buffer), frame_size);
+        async_send(std::move(buffer), packet_size);
     }
 }
 
@@ -328,7 +328,7 @@ void Session::arm_heartbeat() {
                 std::chrono::system_clock::now().time_since_epoch()).count();
             std::uint32_t now32 = static_cast<std::uint32_t>(now64 & 0xFFFFFFFFu);
             
-            auto [buffer, frame_size] = make_frame(0x0002 /*MSG_PING*/, 0, {}, tx_seq_++, now32);
+            auto [buffer, frame_size] = make_packet(0x0002 /*MSG_PING*/, 0, {}, tx_seq_++, now32);
             if (buffer) {
                 async_send(std::move(buffer), frame_size);
             }

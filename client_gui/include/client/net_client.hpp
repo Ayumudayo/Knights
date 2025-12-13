@@ -11,7 +11,7 @@
 
 #include <boost/asio.hpp>
 
-#include "server/core/protocol/frame.hpp"
+#include "server/core/protocol/packet.hpp"
 
 /**
  * @brief 네트워크 클라이언트 클래스
@@ -21,7 +21,7 @@
  * 
  * 주요 기능:
  * - 비동기 연결 및 재연결 관리
- * - 패킷 직렬화/역직렬화 (Protobuf + FrameHeader)
+ * - 패킷 직렬화/역직렬화 (Protobuf + PacketHeader)
  * - 수신된 메시지를 UI 레이어로 전달 (콜백 호출)
  * - 백그라운드 스레드에서 I/O 처리
  */
@@ -99,9 +99,9 @@ private:
     using WorkGuard = boost::asio::executor_work_guard<boost::asio::io_context::executor_type>;
 
     void start_read_header();
-    void start_read_body(const server::core::protocol::FrameHeader& header);
-    void handle_frame(const server::core::protocol::FrameHeader& header, std::span<const std::uint8_t> body);
-    void enqueue_frame(std::uint16_t msg_id, std::uint16_t flags, std::vector<std::uint8_t> payload = {});
+    void start_read_body(const server::core::protocol::PacketHeader& header);
+    void handle_packet(const server::core::protocol::PacketHeader& header, std::span<const std::uint8_t> body);
+    void enqueue_packet(std::uint16_t msg_id, std::uint16_t flags, std::vector<std::uint8_t> payload = {});
     void drain_send_queue();
     void schedule_ping();
     void handle_disconnect(const boost::system::error_code& ec, const char* context);
