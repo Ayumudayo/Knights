@@ -1,6 +1,6 @@
 #include "client/net_client.hpp"
 
-#include "server/core/protocol/frame.hpp"
+#include "server/core/protocol/packet.hpp"
 #include "server/core/protocol/system_opcodes.hpp"
 #include "server/protocol/game_opcodes.hpp"
 #include "server/core/protocol/protocol_flags.hpp"
@@ -115,7 +115,7 @@ void NetClient::start_read_header() {
                     handle_disconnect(ec, "async_read(header)");
                     return;
                 }
-                proto::FrameHeader header{};
+                proto::PacketHeader header{};
                 proto::decode_header(read_header_.data(), header);
                 
                 // 헤더에 명시된 길이만큼 본문 버퍼 할당
@@ -128,10 +128,10 @@ void NetClient::start_read_header() {
 // 본문 읽기 시작
 // -----------------------------------------------------------------------------
 // 헤더에서 파싱한 길이만큼 본문 데이터를 비동기로 읽습니다.
-void NetClient::start_read_body(const proto::FrameHeader& header) {
+void NetClient::start_read_body(const proto::PacketHeader& header) {
     if (read_body_.empty()) {
         // 페이로드가 없는 메시지(예: PING)는 바로 처리하고 다음 헤더 읽기로 넘어갑니다.
-        handle_frame(header, std::span<const std::uint8_t>{});
+        handle_packet(header, std::span<const std::uint8_t>{});
         start_read_header();
         return;
     }
@@ -147,7 +147,7 @@ void NetClient::start_read_body(const proto::FrameHeader& header) {
                     return;
                 }
                 // 메시지 처리 핸들러 호출
-                handle_frame(header, std::span<const std::uint8_t>(read_body_.data(), read_body_.size()));
+                handle_packet(header, std::span<const std::uint8_t>(read_body_.data(), read_body_.size()));
                 // 다음 메시지 헤더 읽기 시작
                 start_read_header();
             }));
@@ -167,7 +167,7 @@ void NetClient::schedule_ping() {
             if (ec || !running_.load()) {
                 return;
             }
-            enqueue_frame(proto::MSG_PING, 0);
+            enqueue_packet(proto::MSG_PING, 0);
             schedule_ping(); // 다음 핑 예약
         }));
 }
@@ -178,13 +178,13 @@ void NetClient::schedule_ping() {
 // 메시지를 직렬화하여 전송 큐에 추가하고, 전송 중이 아니라면 전송을 시작합니다.
 // strand를 사용하여 스레드 안전성을 보장합니다.
 // 즉, 여러 스레드에서 동시에 send를 호출해도 큐에 순서대로 쌓이고 하나씩 전송됩니다.
-void NetClient::enqueue_frame(std::uint16_t msg_id, std::uint16_t flags, std::vector<std::uint8_t> payload) {
+void NetClient::enqueue_packet(std::uint16_t msg_id, std::uint16_t flags, std::vector<std::uint8_t> payload) {
     asio::post(strand_, [this, msg_id, flags, payload = std::move(payload)]() mutable {
         if (!connected_.load()) {
             return;
         }
 
-        proto::FrameHeader header{};
+        proto::PacketHeader header{};
         header.length = static_cast<std::uint16_t>(payload.size());
         header.msg_id = msg_id;
         header.flags = flags;
@@ -233,15 +233,15 @@ void NetClient::drain_send_queue() {
 }
 
 // -----------------------------------------------------------------------------
-// 수신 프레임 처리
+// 수신 패킷 처리
 // -----------------------------------------------------------------------------
-// 수신된 프레임 처리 (Dispatcher)
+// 수신된 패킷 처리 (Dispatcher)
 // 서버로부터 받은 메시지 ID(Opcode)를 확인하여 알맞은 핸들러 로직을 수행합니다.
 // 별도의 디스패처 클래스 없이 if-else 구조로 단순하게 구현되어 있습니다.
-void NetClient::handle_frame(const proto::FrameHeader& hh, std::span<const std::uint8_t> in) {
+void NetClient::handle_packet(const proto::PacketHeader& hh, std::span<const std::uint8_t> in) {
     if (hh.msg_id == proto::MSG_PING) {
         // 서버에서 PING이 오면 PONG으로 즉시 응답 (RTT 측정 및 연결 확인용)
-        enqueue_frame(proto::MSG_PONG, 0);
+        enqueue_packet(proto::MSG_PONG, 0);
         return;
     }
 
@@ -423,20 +423,20 @@ void NetClient::send_login(const std::string& user, const std::string& token) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, user);
     proto::write_lp_utf8(p, token);
-    enqueue_frame(game_proto::MSG_LOGIN_REQ, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_LOGIN_REQ, 0, std::move(p));
 }
 
 void NetClient::send_join(const std::string& room, const std::string& password) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, room);
     proto::write_lp_utf8(p, password);
-    enqueue_frame(game_proto::MSG_JOIN_ROOM, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_JOIN_ROOM, 0, std::move(p));
 }
 
 void NetClient::send_leave(const std::string& room) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, room);
-    enqueue_frame(game_proto::MSG_LEAVE_ROOM, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_LEAVE_ROOM, 0, std::move(p));
 }
 
 // 채팅 전송 (Length-Prefixed UTF8 직렬화 사용)
@@ -444,30 +444,30 @@ void NetClient::send_chat(const std::string& room, const std::string& text) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, room);
     proto::write_lp_utf8(p, text);
-    enqueue_frame(game_proto::MSG_CHAT_SEND, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_CHAT_SEND, 0, std::move(p));
 }
 
 void NetClient::send_refresh(const std::string& current_room) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, current_room);
-    enqueue_frame(game_proto::MSG_REFRESH_REQ, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_REFRESH_REQ, 0, std::move(p));
 }
 
 void NetClient::send_who(const std::string& room) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, room);
-    enqueue_frame(game_proto::MSG_ROOM_USERS_REQ, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_ROOM_USERS_REQ, 0, std::move(p));
 }
 
 void NetClient::send_rooms(const std::string& current_room) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, current_room);
-    enqueue_frame(game_proto::MSG_ROOMS_REQ, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_ROOMS_REQ, 0, std::move(p));
 }
 
 void NetClient::send_whisper(const std::string& user, const std::string& text) {
     std::vector<std::uint8_t> p;
     proto::write_lp_utf8(p, user);
     proto::write_lp_utf8(p, text);
-    enqueue_frame(game_proto::MSG_WHISPER_REQ, 0, std::move(p));
+    enqueue_packet(game_proto::MSG_WHISPER_REQ, 0, std::move(p));
 }

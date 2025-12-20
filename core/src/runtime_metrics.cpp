@@ -13,17 +13,18 @@ namespace {
 // 런타임에서 빠르게 꺼내 쓸 수 있도록 모든 카운터를 단일 구조체의 원자 타입으로 모아둔다.
 struct RuntimeCounters {
     std::atomic<std::uint64_t> accept_total{0};
+
     std::atomic<std::uint64_t> session_started_total{0};
     std::atomic<std::uint64_t> session_stopped_total{0};
     std::atomic<std::uint64_t> session_active{0};
     std::atomic<std::uint64_t> session_timeout_total{0};
     std::atomic<std::uint64_t> heartbeat_timeout_total{0};
     std::atomic<std::uint64_t> send_queue_drop_total{0};
-    std::atomic<std::uint64_t> frame_total{0};
-    std::atomic<std::uint64_t> frame_error_total{0};
-    std::atomic<std::uint64_t> frame_payload_sum_bytes{0};
-    std::atomic<std::uint64_t> frame_payload_count{0};
-    std::atomic<std::uint64_t> frame_payload_max_bytes{0};
+    std::atomic<std::uint64_t> packet_total{0};
+    std::atomic<std::uint64_t> packet_error_total{0};
+    std::atomic<std::uint64_t> packet_payload_sum_bytes{0};
+    std::atomic<std::uint64_t> packet_payload_count{0};
+    std::atomic<std::uint64_t> packet_payload_max_bytes{0};
     std::atomic<std::uint64_t> dispatch_total{0};
     std::atomic<std::uint64_t> dispatch_unknown_total{0};
     std::atomic<std::uint64_t> dispatch_exception_total{0};
@@ -77,18 +78,18 @@ void record_send_queue_drop() {
     counters().send_queue_drop_total.fetch_add(1, std::memory_order_relaxed);
 }
 
-void record_frame_ok() {
-    counters().frame_total.fetch_add(1, std::memory_order_relaxed);
+void record_packet_ok() {
+    counters().packet_total.fetch_add(1, std::memory_order_relaxed);
 }
 
-void record_frame_error() {
-    counters().frame_error_total.fetch_add(1, std::memory_order_relaxed);
+void record_packet_error() {
+    counters().packet_error_total.fetch_add(1, std::memory_order_relaxed);
 }
 
-void record_frame_payload(std::size_t bytes) {
-    counters().frame_payload_sum_bytes.fetch_add(static_cast<std::uint64_t>(bytes), std::memory_order_relaxed);
-    counters().frame_payload_count.fetch_add(1, std::memory_order_relaxed);
-    auto& max_ref = counters().frame_payload_max_bytes;
+void record_packet_payload(std::size_t bytes) {
+    counters().packet_payload_sum_bytes.fetch_add(static_cast<std::uint64_t>(bytes), std::memory_order_relaxed);
+    counters().packet_payload_count.fetch_add(1, std::memory_order_relaxed);
+    auto& max_ref = counters().packet_payload_max_bytes;
     std::uint64_t current = max_ref.load(std::memory_order_relaxed);
     const std::uint64_t value = static_cast<std::uint64_t>(bytes);
     // frame payload 최대치는 순서가 없으므로 CAS loop로 경합을 줄인다.
@@ -194,11 +195,11 @@ Snapshot snapshot() {
     snap.session_timeout_total = c.session_timeout_total.load(std::memory_order_relaxed);
     snap.heartbeat_timeout_total = c.heartbeat_timeout_total.load(std::memory_order_relaxed);
     snap.send_queue_drop_total = c.send_queue_drop_total.load(std::memory_order_relaxed);
-    snap.frame_total = c.frame_total.load(std::memory_order_relaxed);
-    snap.frame_error_total = c.frame_error_total.load(std::memory_order_relaxed);
-    snap.frame_payload_sum_bytes = c.frame_payload_sum_bytes.load(std::memory_order_relaxed);
-    snap.frame_payload_count = c.frame_payload_count.load(std::memory_order_relaxed);
-    snap.frame_payload_max_bytes = c.frame_payload_max_bytes.load(std::memory_order_relaxed);
+    snap.packet_total = c.packet_total.load(std::memory_order_relaxed);
+    snap.packet_error_total = c.packet_error_total.load(std::memory_order_relaxed);
+    snap.packet_payload_sum_bytes = c.packet_payload_sum_bytes.load(std::memory_order_relaxed);
+    snap.packet_payload_count = c.packet_payload_count.load(std::memory_order_relaxed);
+    snap.packet_payload_max_bytes = c.packet_payload_max_bytes.load(std::memory_order_relaxed);
     snap.dispatch_total = c.dispatch_total.load(std::memory_order_relaxed);
     snap.dispatch_unknown_total = c.dispatch_unknown_total.load(std::memory_order_relaxed);
     snap.dispatch_exception_total = c.dispatch_exception_total.load(std::memory_order_relaxed);
