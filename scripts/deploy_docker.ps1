@@ -8,6 +8,7 @@ param (
     [switch]$Stack = $false,
     [switch]$Infra = $false,
     [switch]$Observability = $false,
+    [switch]$Legacy = $false,
     [string]$ProjectName = "",
     [switch]$NoBase = $false
 )
@@ -38,6 +39,7 @@ function Resolve-ComposeTarget {
     if ($Stack) { $modeCount++ }
     if ($Infra) { $modeCount++ }
     if ($Observability) { $modeCount++ }
+    if ($Legacy) { $modeCount++ }
 
     $explicitCompose = $false
     if ($ComposeFile -and $ComposeFile.Trim() -ne "") {
@@ -46,7 +48,7 @@ function Resolve-ComposeTarget {
     }
 
     if ($modeCount -gt 1) {
-        Write-Error "Compose target is ambiguous. Use only one of: -ComposeFile, -Stack, -Infra, -Observability"
+        Write-Error "Compose target is ambiguous. Use only one of: -ComposeFile, -Stack, -Infra, -Observability, -Legacy"
     }
 
     if (-not $explicitCompose) {
@@ -56,8 +58,11 @@ function Resolve-ComposeTarget {
             $ComposeFile = "docker/infra/docker-compose.yml"
         } elseif ($Observability) {
             $ComposeFile = "docker/observability/docker-compose.yml"
-        } else {
+        } elseif ($Legacy) {
             $ComposeFile = "docker-compose.yml"
+        } else {
+            # Default: canonical stack compose.
+            $ComposeFile = "docker/stack/docker-compose.yml"
         }
     }
 
