@@ -6,7 +6,7 @@
 
 #include "gateway/gateway_app.hpp"
 #include "server/core/util/log.hpp"
-#include "server/core/protocol/frame.hpp"
+#include "server/core/protocol/packet.hpp"
 #include "server/protocol/game_opcodes.hpp"
 
 namespace gateway {
@@ -115,7 +115,7 @@ void GatewayConnection::on_read(const std::uint8_t* data, std::size_t length) {
         // 게이트웨이는 패킷 내용을 엿보기만 하고 구조를 변경하지 않습니다.
         bool is_login_frame = false;
         if (length >= server::core::protocol::k_header_bytes) {
-            server::core::protocol::FrameHeader header{};
+            server::core::protocol::PacketHeader header{};
             server::core::protocol::decode_header(data, header);
             if (header.msg_id == game_proto::MSG_LOGIN_REQ) {
                 is_login_frame = true;

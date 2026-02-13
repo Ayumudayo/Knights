@@ -1,6 +1,6 @@
 #include "server/chat/chat_service.hpp"
 #include "server/protocol/game_opcodes.hpp"
-#include "server/core/protocol/frame.hpp"
+#include "server/core/protocol/packet.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/service_registry.hpp"
