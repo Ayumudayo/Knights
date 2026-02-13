@@ -19,7 +19,7 @@ param(
   [string]$VcpkgTriplet = "",
   [switch]$ReleasePackage,
   [string]$ReleaseOutput = "artifacts",
-  [string[]]$ReleaseTargets = @('server_app','gateway_app','load_balancer_app','dev_chat_cli','wb_worker'),
+  [string[]]$ReleaseTargets = @('server_app','gateway_app','dev_chat_cli','wb_worker'),
   [switch]$ReleaseZip,
   [int]$MaxJobs = 0
 )
