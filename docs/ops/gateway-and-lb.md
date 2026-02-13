@@ -34,7 +34,7 @@ Client --TCP--> HAProxy --TCP--> Gateway --TCP--> server_app
 ### 2.3 운영 팁
 - Pub/Sub self-echo: `GATEWAY_ID` 를 payload 에 포함해 자신이 보낸 메시지를 무시
 - Gateway가 backend를 선택할 때는 Redis Instance Registry의 `active_sessions`(least-connections)와 SessionDirectory sticky를 함께 사용한다.
-- Instance Registry prefix는 server_app과 gateway_app이 동일해야 한다. (현재 gateway_app은 `server:registry:`를 사용하므로 server_app에 `SERVER_REGISTRY_PREFIX=server:registry:` 권장)
+- Instance Registry prefix는 server_app과 gateway_app이 동일해야 한다.
 
 ## 3. HAProxy 세부
 HAProxy는 TCP 레벨에서만 Gateway로 분산한다. (애플리케이션 opcode는 Gateway/Server가 처리)

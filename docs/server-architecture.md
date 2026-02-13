@@ -47,7 +47,7 @@ Knights는 고성능 실시간 채팅을 위한 분산 스택을 지향한다.
 
 ## 5. 구성 요소 간 책임
 - **HAProxy**: 외부 TCP 로드밸런서. 여러 `gateway_app` 인스턴스로 연결을 분산하며, 애플리케이션 프로토콜(opcode)은 해석하지 않는다.
-- **Gateway**: `GATEWAY_LISTEN`, `GATEWAY_ID`, `REDIS_URI`로 리스너/식별자/Redis 연결을 구성한다. Redis Instance Registry + `active_sessions` 기반으로 backend를 선택(Least Connections)하고, `SessionDirectory`로 sticky routing을 수행한다. (현재 구현은 backend registry prefix를 `server:registry:`로 사용)
+- **Gateway**: `GATEWAY_LISTEN`, `GATEWAY_ID`, `REDIS_URI`로 리스너/식별자/Redis 연결을 구성한다. Redis Instance Registry + `active_sessions` 기반으로 backend를 선택(Least Connections)하고, `SessionDirectory`로 sticky routing을 수행한다.
 - **Server**: `PORT`, `SERVER_ADVERTISE_HOST/PORT`, `SERVER_REGISTRY_PREFIX/TTL`, `SERVER_HEARTBEAT_INTERVAL`로 Instance Registry에 자신을 등록/갱신한다.
 - **Persistence**: PostgreSQL은 SoR, Redis는 캐시/팬아웃/스트림 레이어. 자세한 전략은 `docs/db/redis-strategy.md` 참고.
 

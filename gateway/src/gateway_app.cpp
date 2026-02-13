@@ -29,9 +29,12 @@ namespace {
 constexpr const char* kEnvGatewayListen = "GATEWAY_LISTEN";
 constexpr const char* kEnvGatewayId = "GATEWAY_ID";
 constexpr const char* kEnvRedisUri = "REDIS_URI";
+constexpr const char* kEnvServerRegistryPrefix = "SERVER_REGISTRY_PREFIX";
+constexpr const char* kEnvServerRegistryTtl = "SERVER_REGISTRY_TTL";
 constexpr const char* kDefaultGatewayListen = "0.0.0.0:6000";
 constexpr const char* kDefaultGatewayId = "gateway-default";
 constexpr const char* kDefaultRedisUri = "tcp://127.0.0.1:6379";
+constexpr const char* kDefaultServerRegistryPrefix = "gateway/instances/";
 
 std::pair<std::string, std::uint16_t> parse_listen(std::string_view value, std::uint16_t fallback_port) {
     if (value.empty()) {
@@ -392,18 +395,35 @@ void GatewayApp::configure_infrastructure() {
         redis_client_ = server::storage::redis::make_redis_client(redis_uri_, opts);
         
         if (redis_client_) {
-             auto state_client = server::state::make_redis_state_client(redis_client_);
-             backend_registry_ = std::make_unique<server::state::RedisInstanceStateBackend>(
-                 state_client,
-                 "server:registry:", 
-                 std::chrono::seconds(30)
-             );
-             
-             session_directory_ = std::make_unique<SessionDirectory>(
-                 redis_client_,
-                 "gateway/session/",
-                 std::chrono::seconds(600) // 10 minutes session stickiness
-             );
+             std::string registry_prefix = kDefaultServerRegistryPrefix;
+             if (const char* v = std::getenv(kEnvServerRegistryPrefix); v && *v) {
+                 registry_prefix = v;
+             }
+
+             std::chrono::seconds registry_ttl{30};
+             if (const char* v = std::getenv(kEnvServerRegistryTtl); v && *v) {
+                 try {
+                     auto parsed = std::stoul(v);
+                     if (parsed > 0) {
+                         registry_ttl = std::chrono::seconds{static_cast<long long>(parsed)};
+                     }
+                 } catch (...) {
+                     server::core::log::warn("GatewayApp invalid SERVER_REGISTRY_TTL; using default");
+                 }
+             }
+
+              auto state_client = server::state::make_redis_state_client(redis_client_);
+              backend_registry_ = std::make_unique<server::state::RedisInstanceStateBackend>(
+                  state_client,
+                  std::move(registry_prefix),
+                  registry_ttl
+              );
+              
+              session_directory_ = std::make_unique<SessionDirectory>(
+                  redis_client_,
+                  "gateway/session/",
+                  std::chrono::seconds(600) // 10 minutes session stickiness
+              );
 
              server::core::log::info("GatewayApp connected to Redis at " + redis_uri_);
         } else {

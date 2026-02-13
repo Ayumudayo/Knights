@@ -26,7 +26,7 @@ class GatewayConnection;
 
 // Gateway 애플리케이션의 메인 클래스입니다.
 // TCP 리스너를 구동하여 클라이언트 연결을 수락하고,
-// 각 연결에 대해 로드 밸런서(LB)와의 gRPC 세션을 관리합니다.
+// Redis Instance Registry를 바탕으로 backend(server_app)를 선택해 TCP 브리지를 구성합니다.
 class GatewayApp {
 public:
     // 서버와의 TCP 연결 세션을 관리하는 내부 클래스입니다.
