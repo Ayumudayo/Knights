@@ -10,17 +10,16 @@
 |  | `chat_session_active` | Gauge | 현재 연결 수 |
 |  | `chat_job_queue_depth` | Gauge | JobQueue 길이 |
 | Pub/Sub | `chat_subscribe_total`, `chat_subscribe_last_lag_ms` | Counter/Gauge | Redis Stream lag |
-| Load Balancer | `lb_backend_idle_close_total` | Counter(log) | backend 유휴 종료 횟수 |
 | Write-behind | `wb_pending`, `wb_flush_*` | Gauge/Log | Redis Stream backlog, flush latency |
 | DLQ | `wb_dlq_replay_*` | Counter | DLQ 처리 상태 |
 
 ### Prometheus 스크랩
 - 서버 `/metrics`: `server_app`, `wb_worker`
-- 로그 기반: `metric=lb_backend_idle_close_total`, `metric=wb_dlq_replay*` 는 Loki/logfmt exporter로 파싱 → Prometheus `lb_backend_idle_close_total` 계열로 변환
+- 로그 기반: `metric=wb_dlq_replay*` 는 Loki/logfmt exporter로 파싱
 - Recording Rule 예시:
 ```yaml
-- record: job:lb_idle_close_5m
-  expr: sum(increase(lb_backend_idle_close_total[5m]))
+- record: job:wb_backlog_5m
+  expr: max_over_time(wb_pending[5m])
 ```
 
 ## 2. Grafana 대시보드
@@ -30,7 +29,7 @@
   - Panel 3: Job Queue Depth
   - Panel 4: Memory Pool Usage
   - Panel 5: Opcode Table
-  - Panel 6: **LB Idle Close Rate** (A=5분 증가분, B=누적)
+  - Panel 6: Write-behind Backlog (5분 max)
 - 대시보드 버전을 Git으로 관리하고, 변경 시 `version` 필드를 증가시킨다.
 
 ## 3. 로그 형식
@@ -39,12 +38,11 @@
 ```
 - 필수 필드: `ts`, `level`, `logger`, `metric`
 - 선택 필드: `room`, `session_id`, `gateway_id`, `action`
-- logfmt exporter 예시: `metric=lb_backend_idle_close_total value=1 backend=server-1` → Prometheus `lb_backend_idle_close_total{backend="server-1"}`
+- logfmt exporter 예시: `metric=wb_flush wb_commit_ms=120 wb_batch_size=50` → Prometheus 지표로 변환(로그 파서 규칙에 따라 라벨/타입 정의)
 
 ## 4. Alerting 전략
 | 이름 | PromQL | 조건 | Runbook |
 | --- | --- | --- | --- |
-| LB Idle Spike | `sum(increase(lb_backend_idle_close_total[5m]))` | > 5 | `docs/ops/fallback-and-alerts.md` |
 | Redis Pub/Sub Lag | `chat_subscribe_last_lag_ms{quantile="0.95"}` | > 200ms | 같은 문서 |
 | WB Backlog | `wb_pending` | > 500 | DLQ 가이드 |
 | Dispatch Errors | `sum(rate(chat_dispatch_exception_total[1m]))` | > 1 | runbook |

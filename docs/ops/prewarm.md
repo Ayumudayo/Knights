@@ -1,12 +1,12 @@
 # Pre-warm 절차 (상세)
 
-새로운 서버/게이트웨이/로드밸런서 인스턴스를 투입할 때, 실제 트래픽을 받기 전에 미리 워밍업하는 절차를 정의한다.
+새로운 서버/게이트웨이 인스턴스를 투입할 때, 실제 트래픽을 받기 전에 미리 워밍업하는 절차를 정의한다. (Edge Load Balancer(예: HAProxy)는 설정 반영 및 헬스체크 중심)
 
 ## 1. 체크리스트
 | 항목 | 내용 |
 | --- | --- |
 | 이미지 | 최신 태그인지, 취약점 스캔 완료인지 확인 |
-| 구성 | `.env.server`, `.env.gateway`, `.env.lb` 각자 유효성 검사 |
+| 구성 | `.env.server`, `.env.gateway` 유효성 검사 + HAProxy 설정 파일 검증 |
 | 데이터 | Schema migration 선적용 (`migrations_runner migrate`) |
 | 모니터링 | `/metrics`, 로그 파이프라인 연결 상태 확인 |
 
@@ -14,9 +14,8 @@
 1. **베이스 Pod 기동** – Deployment replica=1, readinessProbe 비활성화 상태로 시작
 2. **캐시 로딩**
    - `server_app --prewarm` → 최근 스냅샷 + Redis 키 생성
-   - `load_balancer_app --prewarm` (TODO) → Consistent Hash 링과 Sticky Cache warm-up
 3. **헬스체크** – `/healthz`, `/metrics` 확인, `chat_session_active`=0 로그 확인
-4. **프록시 연결 테스트** – Gateway ↔ Load Balancer ↔ server_app 로 테스트 클라이언트 연결
+4. **연결 테스트** – HAProxy ↔ Gateway ↔ server_app 로 테스트 클라이언트 연결
 5. **readinessProbe 활성화** – Helm values 또는 `kubectl patch` 로 readiness 를 다시 true
 6. **HPA/Service 합류** – 스케일 아웃 시 기존 replica 의 1/3 간격으로 순차 배포
 

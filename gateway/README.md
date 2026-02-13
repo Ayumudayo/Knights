@@ -1,6 +1,9 @@
 # gateway_app
 
-`gateway/` 는 TCP 클라이언트 연결을 수용하고 Load Balancer와 gRPC 스트림을 맺는 프런트 엔드입니다. 인증, 세션 생성, heartbeat, Pub/Sub self-echo 방지 등을 담당합니다.
+`gateway/` 는 TCP 클라이언트 연결을 수용하는 프런트 엔드(Edge Gateway)입니다.
+
+운영 환경에서는 보통 **외부 TCP(L4) 로드밸런서(예: HAProxy)** 뒤에 여러 `gateway_app` 인스턴스를 두고 수평 확장합니다.
+`gateway_app`은 Redis Instance Registry를 조회해 backend(`server_app`)를 선택하고, 1:1 TCP 브리지를 구성합니다(Sticky + Least Connections).
 
 ## 구성
 ```
@@ -16,10 +19,10 @@ gateway/
 ```
 
 ## 특징
-- Boost.Asio Hive 위에서 다수의 TCP 세션을 처리하며, 각 세션은 Load Balancer `Stream` RPC 와 1:1 매칭됩니다.
+- Boost.Asio Hive 위에서 다수의 TCP 세션을 처리합니다.
+- 각 클라이언트 세션은 backend(`server_app`) 연결(`BackendSession`)과 1:1로 매칭되어 payload를 중계합니다.
 - 인증은 `auth::IAuthenticator` 를 구현해 확장할 수 있습니다 (`ALLOW_ANONYMOUS`, `AUTH_PROVIDER`, `AUTH_ENDPOINT`).
-- Redis Presence 및 Pub/Sub self-echo를 막기 위해 `GATEWAY_ID` 를 로그에 남기고 heartbeat 시 Presence TTL을 갱신합니다.
-- gRPC 스트림이 끊기면 `LB_RETRY_DELAY_MS` 간격으로 재연결을 시도하며, 3회 이상 실패 시 클라이언트에 `SESSION_MOVED` 알림을 전송하도록 설계되어 있습니다.
+- Redis SessionDirectory(`gateway/session/<client_id>`)로 sticky routing을 수행하고, Redis Instance Registry의 `active_sessions`를 기준으로 least-connections 방식으로 backend를 선택합니다.
 
 ### Auth 확장 예시
 ```cpp
@@ -40,8 +43,8 @@ class TokenAuthenticator : public gateway::auth::IAuthenticator {
 | --- | --- | --- |
 | `GATEWAY_LISTEN` | TCP 수신 주소:포트 | `0.0.0.0:6000` |
 | `GATEWAY_ID` | 인스턴스 식별자 (Presence, 로그) | `gateway-default` |
-| `LB_GRPC_ENDPOINT` | Load Balancer gRPC 주소 | `127.0.0.1:7001` |
-| `LB_RETRY_DELAY_MS` | LB 재연결 대기시간 | `3000` |
+| `REDIS_URI` | Redis URI (Instance Registry/SessionDirectory) | `tcp://127.0.0.1:6379` |
+| `METRICS_PORT` | `/metrics` HTTP 포트 | `6001` |
 
 자세한 옵션은 `docs/configuration.md` 와 `docs/ops/gateway-and-lb.md` 를 참고하세요.
 
@@ -50,6 +53,7 @@ class TokenAuthenticator : public gateway::auth::IAuthenticator {
 cmake --build build-msvc --target gateway_app
 .\build-msvc\gateway\Debug\gateway_app.exe
 ```
-Load Balancer가 먼저 올라 있어야 하며, `.env.gateway` 에 gRPC 엔드포인트를 정확히 설정해야 합니다.
 
+멀티 인스턴스로 운영할 경우 외부 TCP 로드밸런서(예: HAProxy)에서 여러 `gateway_app`으로 분산시킵니다.
+예시는 `docs/ops/gateway-and-lb.md` 를 참고하세요.
 

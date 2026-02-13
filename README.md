@@ -11,12 +11,16 @@
 
 -   **High Performance**: Lock-free 알고리즘과 비동기 I/O를 적극 활용하여 처리량을 극대화합니다.
 -   **Reliability**: 메시지 유실 없는 시스템을 위해 Write-Behind 패턴과 Dead Letter Queue(DLQ)를 구현했습니다.
--   **Scalability**: Gateway, Load Balancer, Server로 역할을 분리하여 수평 확장이 용이합니다.
+-   **Scalability**: (외부) TCP 로드밸런서(예: HAProxy) + Gateway + Server로 역할을 분리하여 수평 확장이 용이합니다.
 -   **Observability**: 모든 컴포넌트는 Prometheus 메트릭을 노출하여 실시간 모니터링이 가능합니다.
 
 ## 🏗️ 아키텍처 (Architecture)
 
 시스템은 크게 4가지 주요 컴포넌트로 구성됩니다.
+
+0.  **Edge Load Balancer (예: HAProxy)**:
+    -   외부 TCP(L4) 로드밸런서로, 다수의 `gateway_app` 인스턴스로 클라이언트 연결을 분산합니다.
+    -   애플리케이션 프로토콜(opcode)은 해석하지 않습니다.
 
 1.  **Gateway (`gateway/`)**:
     -   클라이언트의 TCP 연결을 수용하는 진입점입니다.
@@ -59,6 +63,7 @@ flowchart TB
 
     subgraph AccessLayer ["ACCESS LAYER"]
         direction TB
+        EdgeLB["Edge LB\n(HAProxy, TCP)"]:::component
         Gateway["Gateway Server\n(Session & Routing)"]:::gateway
     end
 
@@ -88,7 +93,8 @@ flowchart TB
     %% ------------------------------
 
     %% 1. Connection
-    ClientApp ===|"1. TCP Connect"| Gateway
+    ClientApp ===|"1. TCP Connect"| EdgeLB
+    EdgeLB ===|"1. TCP Forward"| Gateway
 
     %% 2. Routing (Least Connections)
     Gateway ===|"2. Route (Least Conn)"| S1

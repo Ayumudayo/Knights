@@ -10,7 +10,7 @@
 | 외부 서비스 | Redis 6+, PostgreSQL 13+ | Amazon ElastiCache, Amazon RDS |
 | 필수 Secrets | `DB_URI`, `REDIS_URI`, `JWT_SECRET` | AWS Secrets Manager 또는 KMS |
 
-`.env` 예시는 `docs/configuration.md` 를 참고한다. 환경별로 `.env.server`, `.env.gateway`, `.env.lb` 를 분리해 ConfigMap/Secret 에 주입하는 것을 권장한다.
+`.env` 예시는 `docs/configuration.md` 를 참고한다. 환경별로 `.env.server`, `.env.gateway` 를 분리해 ConfigMap/Secret 에 주입하는 것을 권장한다. (HAProxy는 별도 설정 파일로 관리)
 
 ## 2. Dev 환경 (Docker Compose)
 ### 2.1 실행 방법
@@ -21,7 +21,7 @@ scripts/run_all.ps1 -Config Debug -WithClient
 # WSL/Linux
 bash scripts/run_all.sh -c Debug -b build-linux -p 5000
 ```
-위 스크립트는 Postgres 컨테이너를 올린 뒤 `server_app`, `load_balancer_app`, `gateway_app`, `dev_chat_cli` 까지 한 번에 기동한다. Redis는 기본적으로 외부 인스턴스를 바라보므로, 로컬 Redis 를 쓰고 싶다면 `.env` 에 `REDIS_URI=redis://redis:6379` 를 지정하고 compose 파일에 redis 서비스를 추가한다.
+위 스크립트는 `server_app`, `wb_worker`(그리고 옵션으로 `dev_chat_cli`)를 빌드/기동한다. `gateway_app` 및 HAProxy는 별도 프로세스로 실행한다. Redis는 기본적으로 외부 인스턴스를 바라보므로, 로컬 Redis 를 쓰고 싶다면 `.env` 에 `REDIS_URI=redis://redis:6379` 를 지정하고 compose 파일에 redis 서비스를 추가한다.
 
 ### 2.2 Compose 파일 핵심
 - `depends_on.condition=service_healthy` 로 Postgres 준비 여부를 보장
@@ -44,21 +44,21 @@ bash scripts/run_all.sh -c Debug -b build-linux -p 5000
 helm upgrade --install server-app charts/server-app -f values/prod.yaml \
   --set env.DB_URI=secret://knights/db_uri \
   --set env.REDIS_URI=secret://knights/redis_uri
-helm upgrade --install load-balancer charts/load-balancer -f values/prod.yaml
 helm upgrade --install gateway charts/gateway -f values/prod.yaml
 ```
-각 차트에는 Deployment(+HPA), Service, ConfigMap(.env), Secret(DB/Redis), ServiceMonitor(/metrics), PodDisruptionBudget가 포함돼야 한다.
+각 차트에는 Deployment(+HPA), Service, ConfigMap(환경 변수), Secret(DB/Redis), ServiceMonitor(/metrics), PodDisruptionBudget가 포함돼야 한다.
+
+Edge Load Balancer는 클러스터 외부(예: HAProxy, AWS NLB)에서 `gateway` Service로 TCP 트래픽을 분산한다.
 
 ### 3.3 배포 검증 순서
 1. `kubectl rollout status deploy/server-app`
 2. `kubectl port-forward svc/server-metrics 9090:9090` 후 `/metrics` 확인
 3. devclient 혹은 e2e 테스트로 `/login` → `/join lobby` → `/chat` 시나리오 수행
-4. Grafana 대시보드에서 Active Sessions, LB Idle Close Rate, wb_pending 을 5분간 모니터링
+4. Grafana 대시보드에서 Active Sessions, write-behind 지표 등을 5분간 모니터링
 
 ### 3.4 롤백
 ```bash
 helm rollback server-app <REV>
-helm rollback load-balancer <REV>
 helm rollback gateway <REV>
 ```
 롤백 후에도 `/metrics` 와 runbook 체크리스트를 반드시 수행한다.

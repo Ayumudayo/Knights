@@ -4,13 +4,12 @@
 1. `.env` / Secrets 확인 (`DB_URI`, `REDIS_URI`, `METRICS_PORT`, `JWT_SECRET`)
 2. `migrations_runner status` → pending 없음 확인
 3. `/metrics` 200 OK (`curl http://svc:9090/metrics`)
-4. Grafana "Active Sessions" 정상, `lb_backend_idle_close_total` 증가 없음
+4. Grafana "Active Sessions" 정상, write-behind backlog/에러 지표 이상 없음
 5. Alertmanager silence 설정 여부 확인 (배포 중엔 silence ON, 완료 후 OFF)
 
 ## 2. 알람 대응 매트릭스
 | 알람 | 증상 | 조치 순서 |
 | --- | --- | --- |
-| LB Idle Spike | `sum(increase(lb_backend_idle_close_total[5m])) > 5` | (1) backend pod CPU 확인 (2) Redis latency (3) `LB_BACKEND_IDLE_TIMEOUT` 조정 |
 | Redis Lag | `chat_subscribe_last_lag_ms p95 > 200ms` | (1) Redis INFO latency (2) Pub/Sub 사용량 (3) 게이트웨이 로그 |
 | Write-behind backlog | `wb_pending > 500` | (1) DB 세션 확인 (2) `wb_worker` 로그 (3) DLQ 상태 |
 | Dispatch Exception | `chat_dispatch_exception_total` 급증 | (1) server_app 로그 (2) 최근 배포 롤백 |
@@ -19,7 +18,7 @@
 ### 3.1 Redis 장애
 1. `redis-cli -h <endpoint> PING`
 2. 실패 시 ElastiCache 상태/보안그룹 확인
-3. 임시 조치: `LB_REDIS_URI` 비우고 Load Balancer 재배포 → sticky off
+3. 임시 조치: HAProxy에서 일부 Gateway를 drain(백엔드 제외)하거나 트래픽을 제한하고, Redis 복구를 우선 수행
 4. 복구 후 Redis TTL 상태 확인, stale sticky 제거
 
 ### 3.2 PostgreSQL 장애
@@ -28,10 +27,10 @@
 3. `WRITE_BEHIND_ENABLED=0` 로 서버 재배포 → 메모리 snapshot 모드
 4. DB 복구 후 write-behind 재개, DLQ 모니터링
 
-### 3.3 Gateway-LB 연결 문제
-1. Gateway pod 로그 `metric=gateway_lb_reconnect_total` (TODO) 확인
-2. gRPC endpoint/Secret 값이 최신인지 확인
-3. 필요 시 Gateway와 LB 를 순서대로 재시작 (LB → Gateway)
+### 3.3 HAProxy↔Gateway 연결 문제
+1. HAProxy 백엔드 상태(다운/체크 실패) 확인
+2. Gateway pod 로그 확인 (listen 실패, Redis 연결 실패 등)
+3. 필요 시 Gateway를 순차 재시작(HAProxy 백엔드에서 제외 → 재기동 → 복귀)
 
 ## 4. Smoke 테스트 절차
 1. devclient 실행 → `/login runbook` → `/join lobby` → `/chat runbook-check`

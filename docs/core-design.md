@@ -1,6 +1,6 @@
 # Core Design Notes
 
-`server_core`는 Knights 공용 런타임으로, 네트워크 I/O·동시성·저장소·운영 유틸리티를 묶은 C++20 라이브러리다. Gateway, Load Balancer, server_app 모두가 이 모듈을 링크해 동일한 패턴(Hive, ServiceRegistry, metrics 등)을 재사용한다.
+`server_core`는 Knights 공용 런타임으로, 네트워크 I/O·동시성·저장소·운영 유틸리티를 묶은 C++20 라이브러리다. `gateway_app`, `server_app`이 이 모듈을 링크해 동일한 패턴(Hive, ServiceRegistry, metrics 등)을 재사용한다. (HAProxy는 외부 인프라 컴포넌트로, 본 리포의 core를 링크하지 않는다.)
 
 ## 1. 설계 목표
 - **모듈화**: 채팅 서버뿐 아니라 향후 서비스가 동일한 기반을 공유할 수 있도록 core/net·core/concurrent·core/storage 계층을 명확히 분리한다.
@@ -10,9 +10,9 @@
 
 ## 2. 주요 모듈
 ### 2.1 네트워크(`core::net`)
-- `Hive`/`Acceptor`/`Session` 조합은 Gateway·Load Balancer·server_app에서 공통 사용한다.
+- `Hive`/`Acceptor`/`Session` 조합은 `server_app` 중심으로 사용한다.
 - Wire codec과 dispatcher는 opcode 라우팅을 표준화해 신규 메시지를 추가할 때 서비스 코드가 최소화된다.
-- Gateway/LB와 Server가 같은 구현을 사용하므로, 연결 처리/백프레셔 정책을 한 곳에서 조정할 수 있다.
+- Gateway와 Server가 같은 기반을 공유하므로, 연결 처리/백프레셔 정책을 한 곳에서 조정할 수 있다.
 
 ### 2.2 동시성(`core::concurrent`)
 - `TaskScheduler`는 health-check, presence cleanup, metrics flush 등 반복 작업을 예약한다.
@@ -30,9 +30,9 @@
 - `CrashHandler`, `log` 모듈은 공통 로깅/덤프 정책을 제공하며, `/logs/` 디렉터리에 스택 정보를 남긴다.
 
 ### 2.5 설정/관측성
-- `config::load_dotenv`가 `.env`를 읽어 옵션 구조체(`core::config::Options`)에 반영한다.
-- `metrics` 서브시스템은 Counter/Gauge/Histogram을 정의하고, server_app·gateway_app·load_balancer_app이 `/metrics` HTTP 엔드포인트를 노출한다.
-- Gateway/LB도 동일 metrics 등록 경로를 사용하므로, Prometheus exporter를 공통으로 재사용한다.
+- 과거에는 `.env` 로딩 유틸을 두었으나, 현재 `server_app`/`gateway_app`은 실행 환경에서 주입된 환경 변수를 사용한다.
+- `metrics` 서브시스템은 Counter/Gauge/Histogram을 정의하고, `server_app`·`gateway_app`이 `/metrics` HTTP 엔드포인트를 노출한다.
+- Gateway/Server 모두 동일 metrics 등록 경로를 사용하므로, Prometheus exporter를 공통으로 재사용한다.
 
 ## 3. 실행 흐름
 1. `.env` 로드 → `ServiceRegistry` 초기화 → DbWorkerPool/Redis/Write-behind/TaskScheduler를 등록한다.
@@ -57,5 +57,5 @@
 ## 6. 참고 문서
 - Sapphire 분석: `docs/sapphire_core_insights.md`
 - 전체 아키텍처: `docs/server-architecture.md`
-- Gateway & Load Balancer 운영: `docs/ops/gateway-and-lb.md`
+- Gateway & HAProxy 운영: `docs/ops/gateway-and-lb.md`
 - Redis/Write-behind 전략: `docs/db/redis-strategy.md`, `docs/db/write-behind.md`
