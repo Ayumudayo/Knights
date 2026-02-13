@@ -1,9 +1,15 @@
 # deploy_docker.ps1
 param (
-    [string]$Action = "up", # up, down, restart, build, logs, ps, clean
+    [string]$Action = "up", # up, down, restart, build, logs, ps, clean, config
     [switch]$Detached = $false,
     [switch]$Build = $false,
-    [switch]$NoCache = $false
+    [switch]$NoCache = $false,
+    [string]$ComposeFile = "",
+    [switch]$Stack = $false,
+    [switch]$Infra = $false,
+    [switch]$Observability = $false,
+    [string]$ProjectName = "",
+    [switch]$NoBase = $false
 )
 
 $ErrorActionPreference = "Stop"
@@ -27,25 +33,68 @@ function Test-Docker {
     }
 }
 
-function Test-Env {
-    if (-not (Test-Path ".env")) {
-        Write-Warning ".env file not found. Copying .env.example to .env..."
-        if (Test-Path ".env.example") {
-            Copy-Item ".env.example" ".env"
-            Write-Host ".env created from .env.example. Please review configuration." -ForegroundColor Yellow
+function Resolve-ComposeTarget {
+    $modeCount = 0
+    if ($Stack) { $modeCount++ }
+    if ($Infra) { $modeCount++ }
+    if ($Observability) { $modeCount++ }
+
+    $explicitCompose = $false
+    if ($ComposeFile -and $ComposeFile.Trim() -ne "") {
+        $explicitCompose = $true
+        $modeCount++
+    }
+
+    if ($modeCount -gt 1) {
+        Write-Error "Compose target is ambiguous. Use only one of: -ComposeFile, -Stack, -Infra, -Observability"
+    }
+
+    if (-not $explicitCompose) {
+        if ($Stack) {
+            $ComposeFile = "docker/stack/docker-compose.yml"
+        } elseif ($Infra) {
+            $ComposeFile = "docker/infra/docker-compose.yml"
+        } elseif ($Observability) {
+            $ComposeFile = "docker/observability/docker-compose.yml"
+        } else {
+            $ComposeFile = "docker-compose.yml"
         }
-        else {
-            Write-Error ".env.example not found. Cannot create .env."
-        }
+    }
+
+    $resolved = Resolve-Path $ComposeFile -ErrorAction Stop
+    $composePath = $resolved.Path
+    $composeDir = Split-Path -Parent $composePath
+
+    if (-not $ProjectName -or $ProjectName.Trim() -eq "") {
+        if ($Stack -or $composePath -match "docker\\stack") { $ProjectName = "knights-stack" }
+        elseif ($Infra -or $composePath -match "docker\\infra") { $ProjectName = "knights-infra" }
+        elseif ($Observability -or $composePath -match "docker\\observability") { $ProjectName = "knights-observability" }
+        else { $ProjectName = "knights" }
+    }
+
+    return @{
+        ComposePath = $composePath
+        ComposeDir = $composeDir
+        ProjectName = $ProjectName
     }
 }
 
-Test-Docker
-Test-Env
+function Maybe-PrintComposeEnvHint([string]$ComposeDir) {
+    $envPath = Join-Path $ComposeDir ".env"
+    if (-not (Test-Path $envPath)) {
+        Write-Host "No compose .env found: $envPath (using defaults)" -ForegroundColor Gray
+    }
+}
 
-if ($Action -eq "build") {
-    # 1. Base Image 확인 및 빌드
-    # NoCache가 켜져있거나 이미지가 없으면 빌드
+function Needs-BaseImage([string]$ComposePath) {
+    if ($NoBase) { return $false }
+    $p = $ComposePath.ToLowerInvariant()
+    if ($p.Contains("docker\\infra")) { return $false }
+    if ($p.Contains("docker\\observability")) { return $false }
+    return $true
+}
+
+function Ensure-BaseImage {
     if ($NoCache -or -not (docker images -q knights-base)) {
         Write-Host "Building base image 'knights-base'..." -ForegroundColor Yellow
         $BuildArgs = @("build", "-f", "Dockerfile.base", "-t", "knights-base", ".")
@@ -55,51 +104,71 @@ if ($Action -eq "build") {
             Write-Error "Failed to build base image 'knights-base'."
         }
     }
-    else {
-        Write-Host "Base image 'knights-base' found." -ForegroundColor Green
+}
+
+Test-Docker
+
+$target = Resolve-ComposeTarget
+$ComposePath = $target.ComposePath
+$ComposeDir = $target.ComposeDir
+$ProjectName = $target.ProjectName
+
+Write-Host "Compose: $ComposePath" -ForegroundColor Gray
+Write-Host "Project: $ProjectName" -ForegroundColor Gray
+Maybe-PrintComposeEnvHint $ComposeDir
+
+$ComposeBaseArgs = @(
+    "compose",
+    "--project-name", $ProjectName,
+    "--project-directory", $ComposeDir,
+    "-f", $ComposePath
+)
+
+if ($Action -eq "build") {
+    if (Needs-BaseImage $ComposePath) {
+        Ensure-BaseImage
     }
 
-    # 2. Application Image 빌드
-    Write-Host "Building Application Docker images..." -ForegroundColor Cyan
-    $ComposeArgs = @("compose", "build")
+    Write-Host "Building Docker images..." -ForegroundColor Cyan
+    $ComposeArgs = $ComposeBaseArgs + @("build")
     if ($NoCache) { $ComposeArgs += "--no-cache" }
     docker @ComposeArgs
 }
 elseif ($Action -eq "up") {
-    # Up 실행 시에도 Base Image가 없으면 빌드해야 함 (Build 옵션이 켜져있거나 이미지가 없을 때)
-    if ($Build -or $NoCache -or -not (docker images -q knights-base)) {
-        if ($NoCache -or -not (docker images -q knights-base)) {
-            Write-Host "Building base image 'knights-base'..." -ForegroundColor Yellow
-            $BuildArgs = @("build", "-f", "Dockerfile.base", "-t", "knights-base", ".")
-            if ($NoCache) { $BuildArgs += "--no-cache" }
-            docker @BuildArgs
+    if (Needs-BaseImage $ComposePath) {
+        # Up 실행 시에도 Base Image가 없으면 빌드해야 함 (Build 옵션이 켜져있거나 이미지가 없을 때)
+        if ($Build -or $NoCache -or -not (docker images -q knights-base)) {
+            Ensure-BaseImage
         }
     }
 
     Write-Host "Starting services..." -ForegroundColor Cyan
-    $DockerArgs = @("compose", "up")
+    $DockerArgs = $ComposeBaseArgs + @("up")
     if ($Detached) { $DockerArgs += "-d" }
     if ($Build) { $DockerArgs += "--build" }
     docker @DockerArgs
 }
 elseif ($Action -eq "down") {
     Write-Host "Stopping services..." -ForegroundColor Cyan
-    docker compose down
+    docker @($ComposeBaseArgs + @("down"))
 }
 elseif ($Action -eq "restart") {
     Write-Host "Restarting services..." -ForegroundColor Cyan
-    docker compose restart
+    docker @($ComposeBaseArgs + @("restart"))
 }
 elseif ($Action -eq "logs") {
-    docker compose logs -f
+    docker @($ComposeBaseArgs + @("logs", "-f"))
 }
 elseif ($Action -eq "ps") {
-    docker compose ps
+    docker @($ComposeBaseArgs + @("ps"))
 }
 elseif ($Action -eq "clean") {
     Write-Host "Stopping and removing services, networks, and volumes..." -ForegroundColor Cyan
-    docker compose down -v
+    docker @($ComposeBaseArgs + @("down", "-v"))
+}
+elseif ($Action -eq "config") {
+    docker @($ComposeBaseArgs + @("config", "--quiet"))
 }
 else {
-    Write-Error "Unknown action: $Action. Use 'up', 'down', 'restart', 'build', 'logs', 'ps', or 'clean'."
+    Write-Error "Unknown action: $Action. Use 'up', 'down', 'restart', 'build', 'logs', 'ps', 'clean', or 'config'."
 }
