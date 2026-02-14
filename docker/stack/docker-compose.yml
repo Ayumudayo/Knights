@@ -129,6 +129,7 @@ services:
       REDIS_STREAM_KEY: "session_events"
       WB_GROUP: "wb_group"
       WB_CONSUMER: "worker-1"
+      METRICS_PORT: "9090"
     depends_on:
       redis:
         condition: service_healthy
@@ -138,6 +139,8 @@ services:
         condition: service_completed_successfully
     networks:
       - knights-stack
+    ports:
+      - "${WB_WORKER_METRICS_HOST_PORT:-39093}:9090"
 
   gateway-1:
     <<: *knights-app

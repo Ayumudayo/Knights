@@ -9,9 +9,11 @@
 #include <sstream>
 #include <algorithm>
 #include <atomic>
+#include <cstdint>
 
 #include "server/storage/redis/client.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/metrics/http_server.hpp"
 #include <pqxx/pqxx>
 #include <nlohmann/json.hpp>
 
@@ -38,6 +40,8 @@ struct WorkerConfig {
     bool dlq_on_error = true;
     bool ack_on_error = true;
 
+    std::uint16_t metrics_port = 0;
+
     static WorkerConfig Load() {
         WorkerConfig cfg;
         // .env 파일 로드 (기존 환경변수 덮어쓰기)
@@ -48,6 +52,11 @@ struct WorkerConfig {
         if (const char* v = std::getenv("WB_GROUP")) cfg.group = v;
         if (const char* v = std::getenv("WB_CONSUMER")) cfg.consumer = v;
         if (const char* v = std::getenv("WB_DLQ_STREAM")) cfg.dlq_stream = v;
+
+        if (const char* v = std::getenv("METRICS_PORT")) {
+            auto n = std::strtoul(v, nullptr, 10);
+            if (n > 0 && n <= 65535) cfg.metrics_port = static_cast<std::uint16_t>(n);
+        }
 
         if (const char* v = std::getenv("WB_BATCH_MAX_EVENTS")) {
             auto n = std::strtoul(v, nullptr, 10);
@@ -145,6 +154,13 @@ public:
             // Loop() 내에서 처리하도록 함.
         }
 
+        if (config_.metrics_port != 0) {
+            metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(
+                config_.metrics_port,
+                [this]() { return RenderMetrics(); });
+            metrics_server_->start();
+        }
+
         // 메인 루프 시작
         Loop();
         return 0;
@@ -223,6 +239,7 @@ private:
             if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_pending_log).count() >= 1000) {
                 long long pending = 0;
                 if (redis_->xpending(config_.stream_key, config_.group, pending)) {
+                    wb_pending_.store(pending, std::memory_order_relaxed);
                     server::core::log::info("metric=wb_pending value=" + std::to_string(pending));
                 }
                 last_pending_log = now;
@@ -294,6 +311,25 @@ private:
 
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+        wb_flush_total_.fetch_add(1, std::memory_order_relaxed);
+        wb_flush_ok_total_.fetch_add(static_cast<std::uint64_t>(ok), std::memory_order_relaxed);
+        wb_flush_fail_total_.fetch_add(static_cast<std::uint64_t>(fail), std::memory_order_relaxed);
+        wb_flush_dlq_total_.fetch_add(static_cast<std::uint64_t>(dlqed), std::memory_order_relaxed);
+        wb_flush_batch_size_last_.store(static_cast<std::uint64_t>(buf.size()), std::memory_order_relaxed);
+
+        const auto ms_u = static_cast<std::uint64_t>(ms < 0 ? 0 : ms);
+        wb_flush_commit_ms_last_.store(ms_u, std::memory_order_relaxed);
+        wb_flush_commit_ms_sum_.fetch_add(ms_u, std::memory_order_relaxed);
+        wb_flush_commit_ms_count_.fetch_add(1, std::memory_order_relaxed);
+        {
+            auto& max_ref = wb_flush_commit_ms_max_;
+            auto current_max = max_ref.load(std::memory_order_relaxed);
+            while (current_max < ms_u &&
+                   !max_ref.compare_exchange_weak(current_max, ms_u, std::memory_order_relaxed)) {
+                // retry
+            }
+        }
         
         info("metric=wb_flush wb_commit_ms=" + std::to_string(ms) +
              " wb_batch_size=" + std::to_string(buf.size()) +
@@ -373,6 +409,48 @@ private:
     WorkerConfig config_;
     std::shared_ptr<server::storage::redis::IRedisClient> redis_;
     std::unique_ptr<pqxx::connection> db_;
+
+    std::unique_ptr<server::core::metrics::MetricsHttpServer> metrics_server_;
+    std::atomic<long long> wb_pending_{0};
+    std::atomic<std::uint64_t> wb_flush_total_{0};
+    std::atomic<std::uint64_t> wb_flush_ok_total_{0};
+    std::atomic<std::uint64_t> wb_flush_fail_total_{0};
+    std::atomic<std::uint64_t> wb_flush_dlq_total_{0};
+    std::atomic<std::uint64_t> wb_flush_batch_size_last_{0};
+    std::atomic<std::uint64_t> wb_flush_commit_ms_last_{0};
+    std::atomic<std::uint64_t> wb_flush_commit_ms_max_{0};
+    std::atomic<std::uint64_t> wb_flush_commit_ms_sum_{0};
+    std::atomic<std::uint64_t> wb_flush_commit_ms_count_{0};
+
+    std::string RenderMetrics() const {
+        std::ostringstream stream;
+
+        stream << "# TYPE wb_pending gauge\n";
+        stream << "wb_pending " << wb_pending_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_flush_total counter\n";
+        stream << "wb_flush_total " << wb_flush_total_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE wb_flush_ok_total counter\n";
+        stream << "wb_flush_ok_total " << wb_flush_ok_total_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE wb_flush_fail_total counter\n";
+        stream << "wb_flush_fail_total " << wb_flush_fail_total_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE wb_flush_dlq_total counter\n";
+        stream << "wb_flush_dlq_total " << wb_flush_dlq_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_flush_batch_size_last gauge\n";
+        stream << "wb_flush_batch_size_last " << wb_flush_batch_size_last_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_flush_commit_ms_last gauge\n";
+        stream << "wb_flush_commit_ms_last " << wb_flush_commit_ms_last_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE wb_flush_commit_ms_max gauge\n";
+        stream << "wb_flush_commit_ms_max " << wb_flush_commit_ms_max_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE wb_flush_commit_ms_sum counter\n";
+        stream << "wb_flush_commit_ms_sum " << wb_flush_commit_ms_sum_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE wb_flush_commit_ms_count counter\n";
+        stream << "wb_flush_commit_ms_count " << wb_flush_commit_ms_count_.load(std::memory_order_relaxed) << "\n";
+
+        return stream.str();
+    }
 };
 
 int main(int, char**) {
