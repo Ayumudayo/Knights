@@ -202,8 +202,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "chat_dispatch_last_latency_ms",
-          "legendFormat": "last",
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(chat_dispatch_latency_ms_bucket{instance=~\"$instance\"}[5m])))",
+          "legendFormat": "p50",
           "range": true,
           "refId": "A"
         },
@@ -212,8 +212,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "chat_dispatch_latency_avg_ms",
-          "legendFormat": "avg",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(chat_dispatch_latency_ms_bucket{instance=~\"$instance\"}[5m])))",
+          "legendFormat": "p95",
           "range": true,
           "refId": "B"
         },
@@ -222,8 +222,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "chat_dispatch_max_latency_ms",
-          "legendFormat": "max",
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(chat_dispatch_latency_ms_bucket{instance=~\"$instance\"}[5m])))",
+          "legendFormat": "p99",
           "range": true,
           "refId": "C"
         }
@@ -245,8 +245,8 @@
       "id": 6,
       "targets": [
         {
-          "expr": "chat_dispatch_latency_avg_ms",
-          "legendFormat": "{{instance}}",
+          "expr": "sum(rate(chat_dispatch_latency_ms_sum{instance=~\"$instance\"}[5m])) / clamp_min(sum(rate(chat_dispatch_latency_ms_count{instance=~\"$instance\"}[5m])), 1)",
+          "legendFormat": "avg_5m",
           "refId": "A"
         }
       ],
