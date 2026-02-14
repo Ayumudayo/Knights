@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <cstddef>
@@ -7,6 +8,24 @@
 #include <utility>
 
 namespace server::core::runtime_metrics {
+
+inline constexpr std::array<std::uint64_t, 15> kDispatchLatencyBucketUpperBoundsNs = {
+    100'000,        // 0.1ms
+    250'000,        // 0.25ms
+    500'000,        // 0.5ms
+    1'000'000,      // 1ms
+    2'500'000,      // 2.5ms
+    5'000'000,      // 5ms
+    10'000'000,     // 10ms
+    25'000'000,     // 25ms
+    50'000'000,     // 50ms
+    100'000'000,    // 100ms
+    250'000'000,    // 250ms
+    500'000'000,    // 500ms
+    1'000'000'000,  // 1s
+    2'500'000'000,  // 2.5s
+    5'000'000'000   // 5s
+};
 
 struct Snapshot {
     std::uint64_t accept_total{0};
@@ -28,6 +47,7 @@ struct Snapshot {
     std::uint64_t dispatch_latency_count{0};
     std::uint64_t dispatch_latency_last_ns{0};
     std::uint64_t dispatch_latency_max_ns{0};
+    std::array<std::uint64_t, kDispatchLatencyBucketUpperBoundsNs.size()> dispatch_latency_bucket_counts{};
     std::uint64_t job_queue_depth{0};
     std::uint64_t job_queue_depth_peak{0};
     std::uint64_t db_job_queue_depth{0};

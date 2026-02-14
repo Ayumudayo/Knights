@@ -32,6 +32,7 @@ struct RuntimeCounters {
     std::atomic<std::uint64_t> dispatch_latency_count{0};
     std::atomic<std::uint64_t> dispatch_latency_last_ns{0};
     std::atomic<std::uint64_t> dispatch_latency_max_ns{0};
+    std::array<std::atomic<std::uint64_t>, kDispatchLatencyBucketUpperBoundsNs.size()> dispatch_latency_bucket_counts{};
     std::atomic<std::uint64_t> job_queue_depth{0};
     std::atomic<std::uint64_t> job_queue_depth_peak{0};
     std::atomic<std::uint64_t> memory_pool_capacity{0};
@@ -117,6 +118,13 @@ void record_dispatch_attempt(bool handler_found, std::chrono::nanoseconds elapse
     // P99 등을 계산할 여지는 남겨두고, 일단 최대 지연만 추적해 장애 시점을 빠르게 찾는다.
     while (current_max < ns && !max_ref.compare_exchange_weak(current_max, ns, std::memory_order_relaxed)) {
         // retry until successfully updated or observed newer max
+    }
+
+    for (std::size_t i = 0; i < kDispatchLatencyBucketUpperBoundsNs.size(); ++i) {
+        if (ns <= kDispatchLatencyBucketUpperBoundsNs[i]) {
+            counters().dispatch_latency_bucket_counts[i].fetch_add(1, std::memory_order_relaxed);
+            break;
+        }
     }
 }
 
@@ -207,6 +215,9 @@ Snapshot snapshot() {
     snap.dispatch_latency_count = c.dispatch_latency_count.load(std::memory_order_relaxed);
     snap.dispatch_latency_last_ns = c.dispatch_latency_last_ns.load(std::memory_order_relaxed);
     snap.dispatch_latency_max_ns = c.dispatch_latency_max_ns.load(std::memory_order_relaxed);
+    for (std::size_t i = 0; i < snap.dispatch_latency_bucket_counts.size(); ++i) {
+        snap.dispatch_latency_bucket_counts[i] = c.dispatch_latency_bucket_counts[i].load(std::memory_order_relaxed);
+    }
     snap.job_queue_depth = c.job_queue_depth.load(std::memory_order_relaxed);
     snap.job_queue_depth_peak = c.job_queue_depth_peak.load(std::memory_order_relaxed);
     snap.db_job_queue_depth = c.db_job_queue_depth.load(std::memory_order_relaxed);
