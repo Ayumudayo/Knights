@@ -36,6 +36,9 @@ docker compose -f docker/stack/docker-compose.yml up -d --build
 
 ```powershell
 scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
+
+# 또는 wrapper 사용
+scripts/run_full_stack_observability.ps1
 ```
 
 ### 2.3 Dev 검증 체크리스트

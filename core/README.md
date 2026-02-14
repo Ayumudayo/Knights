@@ -53,11 +53,11 @@ core/
 프로젝트 루트에서 다음 명령을 실행하여 빌드할 수 있습니다.
 
 ```powershell
-# VS2022 Debug 빌드 (Presets 사용)
-cmake --build --preset windows-vs2022-debug
+# 권장: 스크립트 (내부적으로 CMake Presets 사용)
+pwsh scripts/build.ps1 -Config Debug -Target server_core
 
-# 또는 Release 빌드
-cmake --build --preset windows-vs2022-relwithdebinfo
+# (옵션) CMake Presets 직접 사용
+cmake --build --preset windows-debug --target server_core
 ```
 
 ## 사용 예시 (Example)

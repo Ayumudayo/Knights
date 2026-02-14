@@ -36,14 +36,14 @@
 ## 빌드 및 실행 (Build & Run)
 
 ### 빌드
-프로젝트 루트에서 CMake Presets를 사용하여 빌드합니다.
+프로젝트 루트에서 빌드 스크립트를 사용하여 빌드합니다. (내부적으로 CMake Presets 사용)
 
 ```powershell
 # Debug 빌드
-cmake --build --preset windows-vs2022-debug --target server_app
+pwsh scripts/build.ps1 -Config Debug -Target server_app
 
-# Release 빌드
-cmake --build --preset windows-vs2022-relwithdebinfo --target server_app
+# Release 빌드 (RelWithDebInfo)
+pwsh scripts/build.ps1 -Config RelWithDebInfo -Target server_app
 ```
 
 ### 실행 (권장: Linux/Docker)

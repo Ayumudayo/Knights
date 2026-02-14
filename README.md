@@ -191,6 +191,15 @@ GATEWAY_ID=gateway-default
 scripts/build.ps1 -Config Debug
 ```
 
+(옵션) clangd/`compile_commands.json` 생성 (LSP/코드 인텔리전스용):
+
+```powershell
+cmake --preset windows-ninja
+Copy-Item build-windows-ninja/compile_commands.json compile_commands.json
+```
+
+`compile_commands.json`는 `.gitignore`에 포함되어 있으므로 로컬에서만 유지하면 됩니다.
+
 **2. 서버 스택 실행 (권장: Docker/Stack)**
 
 ```powershell
