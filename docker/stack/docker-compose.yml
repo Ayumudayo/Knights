@@ -216,6 +216,32 @@ services:
     networks:
       - knights-stack
 
+  redis_exporter:
+    image: oliver006/redis_exporter:latest
+    profiles: ["observability"]
+    command:
+      - "--redis.addr=redis://redis:6379"
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "${REDIS_EXPORTER_HOST_PORT:-39121}:9121"
+    networks:
+      - knights-stack
+
+  postgres_exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    profiles: ["observability"]
+    environment:
+      - DATA_SOURCE_NAME=postgresql://${POSTGRES_USER:-knights}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-knights_db}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "${POSTGRES_EXPORTER_HOST_PORT:-39187}:9187"
+    networks:
+      - knights-stack
+
 volumes:
   knights_stack_postgres_data:
   knights_stack_redis_data:
