@@ -1,65 +1,86 @@
-# Observability Guide (Expanded)
+# Observability Guide
 
-이 문서는 Knights 스택의 계측 전략을 상세히 설명한다. 목표는 “무슨 문제가 발생했는지 5분 안에 파악”하는 것이다.
+목표는 “무슨 문제가 발생했는지 5분 안에 파악”이다. Knights는 기본적으로 Prometheus text format `/metrics` 를 제공하고, `docker/stack`의 `observability` profile로 Prometheus/Grafana를 함께 올릴 수 있다.
 
-## 1. 메트릭 카탈로그
-| 계열 | 이름 | 유형 | 설명 |
-| --- | --- | --- | --- |
-| Chat | `chat_dispatch_total` | Counter | opcode 처리 누계 |
-|  | `chat_dispatch_latency_*` | Gauge/Counter | 라우팅 지연 (last/max/sum/count) |
-|  | `chat_session_active` | Gauge | 현재 연결 수 |
-|  | `chat_job_queue_depth` | Gauge | JobQueue 길이 |
-| Pub/Sub | `chat_subscribe_total`, `chat_subscribe_last_lag_ms` | Counter/Gauge | Redis Stream lag |
-| Write-behind | `wb_pending`, `wb_flush_*` | Gauge/Log | Redis Stream backlog, flush latency |
-| DLQ | `wb_dlq_replay_*` | Counter | DLQ 처리 상태 |
+## 1. Quick Start (Docker Stack + Observability)
 
-### Prometheus 스크랩
-- 서버 `/metrics`: `server_app`, `wb_worker`
-- 로그 기반: `metric=wb_dlq_replay*` 는 Loki/logfmt exporter로 파싱
-- Recording Rule 예시:
-```yaml
-- record: job:wb_backlog_5m
-  expr: max_over_time(wb_pending[5m])
+```powershell
+pwsh scripts/run_full_stack_observability.ps1
 ```
 
-## 2. Grafana 대시보드
-- `docker/observability/grafana/dashboards/server-metrics.json`
-  - Panel 1: Active Sessions (stat)
-  - Panel 2: Dispatch Rate
-  - Panel 3: Job Queue Depth
-  - Panel 4: Memory Pool Usage
-  - Panel 5: Opcode Table
-  - Panel 6: Write-behind Backlog (5분 max)
-- 대시보드 버전을 Git으로 관리하고, 변경 시 `version` 필드를 증가시킨다.
+기본 접속(Host):
+- 게임 트래픽(HAProxy): `127.0.0.1:6000`
+- HAProxy stats + metrics: `http://127.0.0.1:8404/` (`/metrics` 포함)
+- gateway metrics: `http://127.0.0.1:36001/metrics`, `http://127.0.0.1:36002/metrics`
+- server metrics: `http://127.0.0.1:39091/metrics`, `http://127.0.0.1:39092/metrics`
+- wb_worker metrics: `http://127.0.0.1:39093/metrics`
+- (옵션) Prometheus: `http://127.0.0.1:39090/`
+- (옵션) Grafana: `http://127.0.0.1:33000/` (admin password: `GRAFANA_ADMIN_PASSWORD`, 기본 `admin`)
 
-## 3. 로그 형식
-```json
-{"ts":"2025-11-10T01:00:00Z","level":"info","logger":"server_app","metric":"chat_dispatch_total","opcode":"0x0005","room":"lobby"}
+포트는 `docker/stack/docker-compose.yml`의 `*_HOST_PORT` 환경 변수로 재지정할 수 있다.
+
+## 2. Verification Routine (10 minutes)
+
+1) 스택 기동 확인
+- Prometheus Targets: `http://127.0.0.1:39090/targets`
+- 기대 job: `chat_server`, `gateway`, `write_behind`, `haproxy`, `redis`, `postgres`
+
+```powershell
+# (옵션) 빠른 sanity check
+pwsh scripts/check_observability.ps1
 ```
-- 필수 필드: `ts`, `level`, `logger`, `metric`
-- 선택 필드: `room`, `session_id`, `gateway_id`, `action`
-- logfmt exporter 예시: `metric=wb_flush wb_commit_ms=120 wb_batch_size=50` → Prometheus 지표로 변환(로그 파서 규칙에 따라 라벨/타입 정의)
 
-## 4. Alerting 전략
-| 이름 | PromQL | 조건 | Runbook |
-| --- | --- | --- | --- |
-| Redis Pub/Sub Lag | `chat_subscribe_last_lag_ms{quantile="0.95"}` | > 200ms | 같은 문서 |
-| WB Backlog | `wb_pending` | > 500 | DLQ 가이드 |
-| Dispatch Errors | `sum(rate(chat_dispatch_exception_total[1m]))` | > 1 | runbook |
+2) 트래픽 주입
+- 채팅 트래픽(권장): `client_gui` 또는 `dev_chat_cli`로 로그인/룸 입장/채팅 몇 회 수행
+- write-behind roundtrip(도구 기반): `pwsh scripts/smoke_wb.ps1` (Streams -> DB 검증)
 
-AlertManager → Slack/Webhook → On-call 순으로 전달하며, 각 알람에는 runbook 링크를 포함한다.
+3) Grafana 대시보드가 의미 있는지 확인
+- `server-metrics.json`: active sessions, dispatch latency(p50/p95/p99), job queue depth가 움직이는지
+- `write-behind.json`: `wb_pending`이 감소/평탄화되는지, `wb_flush_*`가 증가하는지
+- `infra.json`: redis/postgres exporter가 up인지
+- `load-balancer.json`: HAProxy connection/health 추세가 보이는지
 
-## 5. Trace
-- OpenTelemetry SDK 사용, OTLP → Jaeger/Tempo
-- Trace ID 를 로그와 메트릭에 함께 남기기 위해 `trace_id`, `span_id` 필드를 삽입
-- 샘플링 정책: 1% 기본, 장애 시 100% 로 임시 조정 가능 (환경 변수 `OTEL_TRACES_SAMPLER_ARG`)
+## 3. Metrics Catalog (Current)
 
-## 6. 데이터 수명 주기
-- Prometheus: 30일 보관, 장기 분석은 Thanos/Promscale 로 downsample
-- 로그: S3/Glacier 에 90일 보관
-- DLQ/Replayer 로그: 7일 보관 후 압축
+### server_app
+- Sessions: `chat_session_active` (gauge), `chat_session_started_total`, `chat_session_stopped_total`
+- Frames: `chat_frame_total`, `chat_frame_error_total`, `chat_frame_payload_*`
+- Dispatch: `chat_dispatch_total`, `chat_dispatch_unknown_total`, `chat_dispatch_exception_total`
+- Dispatch latency:
+  - Gauges: `chat_dispatch_last_latency_ms`, `chat_dispatch_max_latency_ms`, `chat_dispatch_latency_avg_ms`
+  - Histogram: `chat_dispatch_latency_ms_bucket`, `chat_dispatch_latency_ms_sum`, `chat_dispatch_latency_ms_count`
+- Queues/DB: `chat_job_queue_depth`, `chat_db_job_queue_depth`, `chat_db_job_processed_total`, `chat_db_job_failed_total`
+- Fanout/Subscribe: `chat_subscribe_total`, `chat_self_echo_drop_total`, `chat_subscribe_last_lag_ms`
+- Per-opcode: `chat_dispatch_opcode_total{opcode="0x0000"}`
 
-## 7. 참고
-- `docs/ops/runbook.md`
-- `docs/ops/fallback-and-alerts.md`
-- `docs/ops/deployment.md`
+### gateway_app
+- `gateway_sessions_active` (gauge)
+- `gateway_connections_total` (counter)
+
+### wb_worker
+- Backlog: `wb_pending` (gauge)
+- Flush: `wb_flush_total`, `wb_flush_ok_total`, `wb_flush_fail_total`, `wb_flush_dlq_total` (counters)
+- Batch/Latency: `wb_flush_batch_size_last` (gauge), `wb_flush_commit_ms_last` (gauge)
+
+## 4. PromQL Snippets
+
+```promql
+# 모든 타겟이 up 인지 빠르게 확인
+sum(up)
+
+# server_app dispatch p95 (traffic가 있어야 NaN이 아님)
+histogram_quantile(0.95, sum by (le) (rate(chat_dispatch_latency_ms_bucket[5m])))
+
+# write-behind backlog (최근 5분 max)
+max_over_time(wb_pending[5m])
+```
+
+## 5. Troubleshooting
+
+- p95/p99가 NaN: 최근 rate window에 샘플이 없으면 정상적으로 NaN이 나올 수 있다. (트래픽 주입 후 재확인)
+- No data: `/metrics` 엔드포인트(Host port mapping)와 Prometheus Targets를 먼저 확인한다.
+- redis/postgres exporter down: `docker/stack/docker-compose.yml`의 `observability` profile이 올라왔는지 확인한다.
+
+## 6. Tracing (Roadmap)
+
+OpenTelemetry/OTLP는 아직 `docker/stack` 표준 런타임에 포함되어 있지 않다. `/metrics` + structured log를 우선 기준으로 하고, tracing은 이후 단계에서 추가한다.

@@ -4,6 +4,9 @@ Aux binaries + code generation.
 
 ## Entry Points
 - `tools/wb_worker/main.cpp` + `tools/wb_worker/README.md`: Redis Streams -> Postgres write-behind worker.
+- `tools/wb_emit/main.cpp` + `tools/wb_emit/README.md`: emit test events into Redis Streams (`XADD`).
+- `tools/wb_check/main.cpp` + `tools/wb_check/README.md`: verify Postgres `session_events` contains an `event_id`.
+- `tools/wb_dlq_replayer/main.cpp` + `tools/wb_dlq_replayer/README.md`: replay DLQ stream -> Postgres (and/or dead stream).
 - `tools/migrations/runner.cpp` + `tools/migrations/*.sql`: schema migrations.
 - `tools/gen_opcodes.py`: generates `core/include/server/core/protocol/system_opcodes.hpp` from `core/protocol/system_opcodes.json`.
 - `tools/gen_wire_codec.py`: generates `core/include/server/wire/codec.hpp` from `protocol/wire_map.json`.
@@ -13,6 +16,21 @@ Aux binaries + code generation.
 - `tools/wb_check/README.md`: verify Postgres state after write-behind.
 - `tools/wb_dlq_replayer/README.md`: reprocess DLQ stream.
 - `tools/migrations/README.md`: migration order + operational notes.
+
+## Write-behind Pipeline (Streams -> Postgres)
+- Produce: `wb_emit` writes events to `REDIS_STREAM_KEY` (default `session_events`).
+- Consume: `wb_worker` uses `XREADGROUP` (group `WB_GROUP`, consumer `WB_CONSUMER`) and flushes into Postgres table `session_events`.
+- Failure handling:
+  - DLQ stream: configurable via `WB_DLQ_STREAM` (default `session_events_dlq`).
+  - Dead stream: used by `wb_dlq_replayer` after retry budget (`WB_DEAD_STREAM`, default `session_events_dead`).
+
+## Worker Metrics
+`wb_worker` can expose `/metrics` when `METRICS_PORT` is set:
+- `wb_pending` (gauge)
+- `wb_flush_total`, `wb_flush_ok_total`, `wb_flush_fail_total`, `wb_flush_dlq_total` (counters)
+- `wb_flush_batch_size_last` (gauge)
+- `wb_flush_commit_ms_last`, `wb_flush_commit_ms_max` (gauges)
+- `wb_flush_commit_ms_sum`, `wb_flush_commit_ms_count` (counters)
 
 ## Build (Windows)
 ```powershell

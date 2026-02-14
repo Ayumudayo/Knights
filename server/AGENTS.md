@@ -1,6 +1,6 @@
 # server (server_app)
 
-Chat logic node. Owns room/user state, storage access, write-behind emission, and Redis instance registry.
+Chat logic node. Owns room/user state, storage access, and Redis instance registry.
 
 ## Entry Points
 - `server/src/main.cpp`: process entry; calls into bootstrap.
@@ -11,6 +11,18 @@ Chat logic node. Owns room/user state, storage access, write-behind emission, an
 - `server/src/state/instance_registry.cpp`: Redis instance registry (discovery for gateways).
 - `server/src/app/metrics_server.cpp`: Prometheus `/metrics` endpoint (port via `METRICS_PORT`).
 
+## Flow
+- Bootstrap: `server::app::run_server()` loads `ServerConfig`, installs crash handler, and wires DI via `ServiceRegistry`.
+- Core runtime: `asio::io_context`, `JobQueue`, `ThreadManager`, `BufferManager`, `Dispatcher`, `SessionOptions`, `SharedState`.
+- Storage:
+  - Postgres pool: `server::storage::postgres::make_connection_pool()` + periodic health checks.
+  - Redis client: `server::storage::redis::make_redis_client()` + periodic health checks.
+- Discovery: if Redis is present, upsert `InstanceRecord` into `RedisInstanceStateBackend` and refresh via scheduled heartbeat.
+- Routing: `register_routes(dispatcher, chat)` binds opcodes to `ChatService` handlers.
+- Listener: `core::Acceptor` accepts sessions and hands frames to `Dispatcher`.
+- Fanout: optional Redis Pub/Sub `psubscribe` on `${REDIS_CHANNEL_PREFIX}fanout:*` for distributed room broadcasts.
+- Observability: optional `MetricsServer` starts when `METRICS_PORT` is set.
+
 ## Run (Standard Runtime = Docker)
 ```powershell
 pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build
@@ -20,11 +32,13 @@ pwsh scripts/run_full_stack_observability.ps1
 ```
 
 ## Config (Env Vars)
-- Required: `DB_URI`
-- Common: `PORT`, `REDIS_URI`, `WRITE_BEHIND_ENABLED`, `REDIS_STREAM_KEY`, `USE_REDIS_PUBSUB`
-- Discovery: `SERVER_INSTANCE_ID`, `SERVER_ADVERTISE_HOST`, `SERVER_ADVERTISE_PORT`, `SERVER_REGISTRY_PREFIX`, `SERVER_REGISTRY_TTL`
+- Common: `PORT`, `LOG_BUFFER_CAPACITY`
+- Storage: `DB_URI` (unset -> DB features disabled)
+- Discovery: `SERVER_INSTANCE_ID`, `SERVER_ADVERTISE_HOST`, `SERVER_ADVERTISE_PORT`, `SERVER_HEARTBEAT_INTERVAL`, `SERVER_REGISTRY_PREFIX`, `SERVER_REGISTRY_TTL`
+- DB: `DB_POOL_MIN`, `DB_POOL_MAX`, `DB_CONN_TIMEOUT_MS`, `DB_QUERY_TIMEOUT_MS`, `DB_PREPARE_STATEMENTS`, `DB_WORKER_THREADS`
+- Redis: `REDIS_URI`, `REDIS_POOL_MAX`, `REDIS_USE_STREAMS`, `PRESENCE_CLEAN_ON_START`, `REDIS_CHANNEL_PREFIX`, `USE_REDIS_PUBSUB`, `GATEWAY_ID`
 - Observability: `METRICS_PORT`
 
 ## Notes
 - Dispatch latency quantiles can be NaN if there are no samples in the PromQL rate window (normal; send traffic).
-- If `WRITE_BEHIND_ENABLED=1`, ensure `wb_worker` is running (included in `docker/stack`).
+- Instance registry uses Redis and the `SERVER_REGISTRY_PREFIX` keyspace.

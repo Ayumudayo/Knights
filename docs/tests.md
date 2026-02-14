@@ -36,7 +36,9 @@ scripts/smoke_wb.ps1 -Config Debug -BuildDir build-windows
 
 ## 5. Observability 체크
 - `.env`의 `METRICS_PORT`를 지정한 뒤 `curl http://127.0.0.1:<port>/metrics`로 확인.
-- 핵심 지표: `chat_subscribe_total`, `chat_self_echo_drop_total`, `chat_subscribe_last_lag_ms`, `wb_batch_size`, `wb_commit_ms`, `wb_pending`.
+- 핵심 지표(현재 구현 기준):
+  - server_app: `chat_session_active`, `chat_dispatch_latency_ms_*`, `chat_job_queue_depth`, `chat_subscribe_total`, `chat_subscribe_last_lag_ms`
+  - wb_worker: `wb_pending`, `wb_flush_total`, `wb_flush_batch_size_last`, `wb_flush_commit_ms_last`
 
 ## 6. CI 권장 플랜
 - Windows/Linux, Debug/Release 매트릭스에서 스토리지/Redis 스모크 테스트 실행.

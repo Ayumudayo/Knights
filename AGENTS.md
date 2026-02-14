@@ -45,6 +45,13 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 | `gateway::GatewayConnection` | class | `gateway/include/gateway/gateway_connection.hpp` | 클라이언트<->백엔드 브리지 |
 | `WbWorker` | class | `tools/wb_worker/main.cpp` | Redis Streams -> Postgres write-behind |
 
+## Key Flows
+- Client -> Stack: `haproxy`(TCP) -> `gateway_app` -> `server_app`.
+- Gateway routing: sticky(`SessionDirectory`) -> least-connections(`InstanceRecord.active_sessions`) backend selection.
+- Distributed fanout: `server_app` can `psubscribe` to `${REDIS_CHANNEL_PREFIX}fanout:*` for room broadcasts.
+- Streams -> DB: `wb_emit`(`XADD`) -> `wb_worker`(`XREADGROUP`) -> Postgres `session_events`.
+- Metrics: each service exposes Prometheus text format on `/metrics` (ports wired in `docker/stack/docker-compose.yml`).
+
 ## Where To Look
 | Task | Location | Notes |
 |---|---|---|
@@ -94,4 +101,4 @@ ctest --test-dir build-windows/tests
 - Dispatch latency quantile(p95/p99)는 최근 구간에 샘플이 없으면 NaN이 나올 수 있음(정상). 트래픽 주입 후 확인.
 - `prometheus/prometheus.yml`는 단일 job 샘플 구성(legacy)이며, 표준은 `docker/observability/prometheus/prometheus.yml`.
 - `Sapphire/`는 참고용으로 동봉된 별도 프로젝트이며, Knights의 런타임/빌드 대상으로 취급하지 않는다.
-- clangd/LSP 정밀 진단이 필요하면 `cmake --preset windows-ninja`로 `build-windows-ninja/compile_commands.json`를 생성한 뒤, repo root에 `compile_commands.json`를 두면 된다(파일은 `.gitignore` 처리됨).
+- clangd/LSP 정밀 진단이 필요하면 `pwsh scripts/configure_windows_ninja.ps1`로 `build-windows-ninja/compile_commands.json`를 생성한 뒤, repo root에 `compile_commands.json`를 두면 된다(파일은 `.gitignore` 처리됨).
