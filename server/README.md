@@ -78,6 +78,8 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
 | `SERVER_REGISTRY_TTL` | Instance Registry TTL seconds | `30` |
 | `METRICS_PORT` | 메트릭 수집을 위한 HTTP 포트 | `9090` |
 | `LOG_BUFFER_CAPACITY` | 메모리 내 로그 버퍼 크기 | `256` |
+| `CHAT_JOB_QUEUE_MAX` | 서버 로직 작업 큐 최대 길이(트래픽 스파이크 시 백프레셔/메모리 보호) | `8192` |
+| `CHAT_DB_JOB_QUEUE_MAX` | DB 작업 큐 최대 길이(DB 지연 시 백프레셔/메모리 보호) | `4096` |
 
 ## 디렉터리 구조
 
