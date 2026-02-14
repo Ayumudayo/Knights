@@ -12,27 +12,13 @@
 namespace gateway {
 namespace game_proto = server::protocol;
 
-namespace {
-// 레거시 메시지 포맷에서 토큰을 추출하는 헬퍼 함수입니다.
-// 메시지 형식이 "token:client_id" 또는 "client_id:token"인 경우를 처리합니다.
-// ':' 문자를 기준으로 앞부분을 클라이언트 ID로 분리합니다.
-std::string extract_token_legacy(const std::string& message, std::string& client_id) {
-    auto pos = message.find(':');
-    if (pos == std::string::npos) {
-        client_id.clear();
-        return message;
-    }
-    client_id = message.substr(0, pos);
-    return message.substr(pos + 1);
-}
-} // namespace
-
 GatewayConnection::GatewayConnection(std::shared_ptr<server::core::net::Hive> hive,
                                      std::shared_ptr<auth::IAuthenticator> authenticator,
                                      GatewayApp& app)
     : server::core::net::Connection(std::move(hive))
     , authenticator_(std::move(authenticator))
-    , app_(app) {}
+    , app_(app)
+    , handshake_timer_(io()) {}
 
 // 백엔드(게임 서버)로부터 수신한 데이터를 클라이언트에게 전달합니다.
 // 게이트웨이는 투명한 프록시 역할을 하므로 데이터를 변조하지 않고 그대로 전달합니다.
@@ -40,7 +26,7 @@ void GatewayConnection::handle_backend_payload(std::vector<std::uint8_t> payload
     if (payload.empty() || closing_.load(std::memory_order_relaxed)) {
         return;
     }
-    async_send(payload);
+    async_send(std::move(payload));
 }
 
 void GatewayConnection::handle_backend_close(const std::string& reason) {
@@ -57,43 +43,30 @@ void GatewayConnection::handle_backend_close(const std::string& reason) {
 void GatewayConnection::on_connect() {
     app_.record_connection_accept();
 
-    std::string remote_ip;
     try {
         const auto remote = socket().remote_endpoint();
-        remote_ip = remote.address().to_string();
-        server::core::log::info("GatewayConnection accepted from " + remote_ip);
+        remote_ip_ = remote.address().to_string();
+        server::core::log::info("GatewayConnection accepted from " + remote_ip_);
     } catch (const std::exception& ex) {
+        remote_ip_.clear();
         server::core::log::warn(std::string("GatewayConnection remote endpoint unknown: ") + ex.what());
     }
 
-    auth::AuthRequest request{};
-    request.remote_address = remote_ip;
-    if (authenticator_) {
-        last_auth_result_ = authenticator_->authenticate(request);
-        authenticated_ = last_auth_result_.success;
-    } else {
-        authenticated_ = true;
-        last_auth_result_.success = true;
-        last_auth_result_.subject = request.client_id.empty() ? "anonymous" : request.client_id;
-    }
-
-    if (!authenticated_) {
-        server::core::log::warn(std::string("GatewayConnection pre-auth failed: ")
-            + last_auth_result_.failure_reason);
-        stop();
-        return;
-    }
-
-    client_id_ = !last_auth_result_.subject.empty() ? last_auth_result_.subject : remote_ip;
-    if (client_id_.empty()) {
-        client_id_ = "anonymous";
-    }
-
-    open_backend_session();
+    // Handshake flow:
+    // - Wait for a full first frame (TCP fragmentation-safe).
+    // - Parse MSG_LOGIN_REQ to extract identity.
+    // - Authenticate (pluggable).
+    // - Select backend and begin transparent bridging.
+    phase_ = Phase::kWaitingForLogin;
+    prebuffer_.clear();
+    start_handshake_deadline();
 }
 
 void GatewayConnection::on_disconnect() {
     closing_.store(true, std::memory_order_relaxed);
+
+    (void)handshake_timer_.cancel();
+
     if (!session_id_.empty()) {
         app_.close_backend_session(session_id_);
     }
@@ -106,65 +79,17 @@ void GatewayConnection::on_read(const std::uint8_t* data, std::size_t length) {
         return;
     }
 
-    const std::string raw_message(reinterpret_cast<const char*>(data), length);
-
-    if (!authenticated_) {
-        auth::AuthRequest request{};
-        
-        // 로그인 요청 패킷인지 확인합니다.
-        // 클라이언트가 처음 보내는 MSG_LOGIN_REQ 패킷을 스누핑(Snooping)하여
-        // 클라이언트 ID와 토큰을 추출합니다. 이 정보는 세션 스티키니스(Sticky Session)를 위해 사용됩니다.
-        // 게이트웨이는 패킷 내용을 엿보기만 하고 구조를 변경하지 않습니다.
-        bool is_login_frame = false;
-        if (length >= server::core::protocol::k_header_bytes) {
-            server::core::protocol::PacketHeader header{};
-            server::core::protocol::decode_header(data, header);
-            if (header.msg_id == game_proto::MSG_LOGIN_REQ) {
-                is_login_frame = true;
-                auto payload = std::span<const std::uint8_t>(data + server::core::protocol::k_header_bytes, 
-                                                           length - server::core::protocol::k_header_bytes);
-                std::string user, token;
-                // Protobuf가 아닌 자체 바이너리 포맷(Length-Prefixed UTF8)을 파싱합니다.
-                if (server::core::protocol::read_lp_utf8(payload, user)) {
-                    request.client_id = user;
-                    server::core::protocol::read_lp_utf8(payload, token);
-                    request.token = token;
-                }
-            }
-        }
-
-        if (!is_login_frame) {
-            request.token = extract_token_legacy(raw_message, request.client_id);
-        }
-
-        try {
-            request.remote_address = socket().remote_endpoint().address().to_string();
-        } catch (...) {
-            request.remote_address.clear();
-        }
-
-        if (authenticator_) {
-            last_auth_result_ = authenticator_->authenticate(request);
-            authenticated_ = last_auth_result_.success;
-        } else {
-            authenticated_ = true;
-            last_auth_result_.success = true;
-            last_auth_result_.subject = request.client_id.empty() ? "anonymous" : request.client_id;
-        }
-
-        if (!authenticated_) {
-            server::core::log::warn(std::string("GatewayConnection authentication failed: ")
-                + last_auth_result_.failure_reason);
+    if (phase_ == Phase::kWaitingForLogin) {
+        constexpr std::size_t kMaxHandshakeBytes = 64 * 1024;
+        if (prebuffer_.size() + length > kMaxHandshakeBytes) {
+            server::core::log::warn("GatewayConnection handshake buffer limit exceeded; closing");
             stop();
             return;
         }
 
-        client_id_ = !request.client_id.empty() ? request.client_id : last_auth_result_.subject;
-        if (client_id_.empty()) {
-            client_id_ = "anonymous";
-        }
-
-        open_backend_session();
+        prebuffer_.insert(prebuffer_.end(), data, data + length);
+        (void)try_finish_handshake();
+        return;
     }
 
     if (!backend_session_) {
@@ -173,7 +98,7 @@ void GatewayConnection::on_read(const std::uint8_t* data, std::size_t length) {
     }
 
     std::vector<std::uint8_t> payload(data, data + length);
-    send_to_backend(payload);
+    send_to_backend(std::move(payload));
 }
 
 void GatewayConnection::on_error(const boost::system::error_code& ec) {
@@ -187,9 +112,122 @@ void GatewayConnection::on_error(const boost::system::error_code& ec) {
     server::core::log::warn(std::string("GatewayConnection error: ") + ec.message());
 }
 
+void GatewayConnection::start_handshake_deadline() {
+    (void)handshake_timer_.cancel();
+    handshake_timer_.expires_after(std::chrono::seconds(3));
+
+    auto self = std::static_pointer_cast<GatewayConnection>(shared_from_this());
+    std::weak_ptr<GatewayConnection> weak_self = self;
+    handshake_timer_.async_wait([weak_self](const boost::system::error_code& ec) {
+        if (ec == boost::asio::error::operation_aborted) {
+            return;
+        }
+        auto locked = weak_self.lock();
+        if (!locked) {
+            return;
+        }
+        if (locked->closing_.load(std::memory_order_relaxed) || locked->is_stopped()) {
+            return;
+        }
+        if (locked->phase_ == Phase::kWaitingForLogin) {
+            server::core::log::warn("GatewayConnection handshake timeout; closing");
+            locked->stop();
+        }
+    });
+}
+
+bool GatewayConnection::try_finish_handshake() {
+    namespace proto = server::core::protocol;
+    constexpr std::size_t kMaxLoginPayloadBytes = 32 * 1024;
+
+    if (phase_ != Phase::kWaitingForLogin) {
+        return true;
+    }
+    if (prebuffer_.size() < proto::k_header_bytes) {
+        return false;
+    }
+
+    proto::PacketHeader header{};
+    proto::decode_header(prebuffer_.data(), header);
+
+    if (header.length > kMaxLoginPayloadBytes) {
+        server::core::log::warn("GatewayConnection login payload too large; closing");
+        stop();
+        return true;
+    }
+
+    const std::size_t frame_bytes = proto::k_header_bytes + static_cast<std::size_t>(header.length);
+    if (prebuffer_.size() < frame_bytes) {
+        return false;
+    }
+
+    if (header.msg_id != game_proto::MSG_LOGIN_REQ) {
+        server::core::log::warn(
+            std::string("GatewayConnection expected MSG_LOGIN_REQ first; got msg_id=") + std::to_string(header.msg_id)
+        );
+        stop();
+        return true;
+    }
+
+    auto payload = std::span<const std::uint8_t>(
+        prebuffer_.data() + proto::k_header_bytes,
+        static_cast<std::size_t>(header.length)
+    );
+
+    std::string user;
+    std::string token;
+    if (!proto::read_lp_utf8(payload, user) || !proto::read_lp_utf8(payload, token)) {
+        server::core::log::warn("GatewayConnection invalid login payload; closing");
+        stop();
+        return true;
+    }
+
+    auth::AuthRequest request{};
+    request.client_id = user;
+    request.token = token;
+    request.remote_address = remote_ip_;
+
+    if (authenticator_) {
+        last_auth_result_ = authenticator_->authenticate(request);
+    } else {
+        last_auth_result_.success = true;
+        last_auth_result_.subject = request.client_id.empty() ? "anonymous" : request.client_id;
+        last_auth_result_.failure_reason.clear();
+    }
+
+    if (!last_auth_result_.success) {
+        server::core::log::warn(std::string("GatewayConnection authentication failed: ") + last_auth_result_.failure_reason);
+        stop();
+        return true;
+    }
+
+    std::string routing_key = !request.client_id.empty() ? request.client_id : last_auth_result_.subject;
+    if (routing_key.empty() || routing_key == "guest") {
+        routing_key = "anonymous";
+    }
+    client_id_ = std::move(routing_key);
+
+    open_backend_session();
+    if (!backend_session_) {
+        stop();
+        return true;
+    }
+
+    (void)handshake_timer_.cancel();
+
+    // Forward the raw bytes exactly as received (transparent proxy).
+    send_to_backend(std::move(prebuffer_));
+    phase_ = Phase::kBridging;
+    return true;
+}
+
 void GatewayConnection::open_backend_session() {
     if (backend_session_) {
         return;
+    }
+
+    if (client_id_.empty()) {
+        client_id_ = "anonymous";
     }
 
     auto self = std::static_pointer_cast<GatewayConnection>(shared_from_this());
@@ -204,11 +242,11 @@ void GatewayConnection::open_backend_session() {
     session_id_ = backend_session_->session_id();
 }
 
-void GatewayConnection::send_to_backend(const std::vector<std::uint8_t>& payload) {
+void GatewayConnection::send_to_backend(std::vector<std::uint8_t> payload) {
     if (!backend_session_) {
         return;
     }
-    backend_session_->send(payload);
+    backend_session_->send(std::move(payload));
 }
 
 } // namespace gateway

@@ -1,9 +1,13 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
+
+#include <boost/asio/steady_timer.hpp>
 
 #include "gateway/auth/authenticator.hpp"
 #include "gateway/gateway_app.hpp"
@@ -40,20 +44,31 @@ protected:
     void on_error(const boost::system::error_code& ec) override;
 
 private:
+    enum class Phase {
+        kWaitingForLogin,
+        kBridging,
+    };
+
+    void start_handshake_deadline();
+    bool try_finish_handshake();
     void open_backend_session();
-    void send_to_backend(const std::vector<std::uint8_t>& payload);
+    void send_to_backend(std::vector<std::uint8_t> payload);
 
     std::shared_ptr<auth::IAuthenticator> authenticator_;
     GatewayApp& app_;
     
     std::string session_id_; 
     std::string client_id_;  
+    std::string remote_ip_;
     
     GatewayApp::BackendSessionPtr backend_session_; 
     
-    bool authenticated_{false};
     auth::AuthResult last_auth_result_{};
     std::atomic<bool> closing_{false};
+
+    Phase phase_{Phase::kWaitingForLogin};
+    boost::asio::steady_timer handshake_timer_;
+    std::vector<std::uint8_t> prebuffer_;
 };
 
 } // namespace gateway

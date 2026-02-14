@@ -11,6 +11,8 @@
 #include <random>
 #include <algorithm>
 #include <deque>
+#include <iomanip>
+#include <sstream>
 
 #include <boost/asio/connect.hpp>
 #include <boost/asio/write.hpp>
@@ -60,6 +62,14 @@ std::pair<std::string, std::uint16_t> parse_listen(std::string_view value, std::
     return {std::move(host), port};
 }
 
+std::string make_boot_id() {
+    std::random_device rd;
+    const std::uint64_t v = (static_cast<std::uint64_t>(rd()) << 32) ^ static_cast<std::uint64_t>(rd());
+    std::ostringstream oss;
+    oss << std::hex << std::setw(8) << std::setfill('0') << static_cast<std::uint32_t>(v & 0xFFFFFFFFu);
+    return oss.str();
+}
+
 } // namespace
 
 // --- BackendSession Implementation ---
@@ -67,12 +77,16 @@ std::pair<std::string, std::uint16_t> parse_listen(std::string_view value, std::
 // Re-implementing GatewayApp::BackendSession methods directly
 
 GatewayApp::BackendSession::BackendSession(GatewayApp& app,
-                                           std::string session_id,
-                                           std::string client_id,
-                                           std::weak_ptr<GatewayConnection> connection)
+                                            std::string session_id,
+                                            std::string client_id,
+                                            std::string backend_instance_id,
+                                            bool sticky_hit,
+                                            std::weak_ptr<GatewayConnection> connection)
     : app_(app)
     , session_id_(std::move(session_id))
     , client_id_(std::move(client_id))
+    , backend_instance_id_(std::move(backend_instance_id))
+    , sticky_hit_(sticky_hit)
     , connection_(std::move(connection))
     , socket_(app.io_) {
 }
@@ -117,16 +131,20 @@ void GatewayApp::BackendSession::do_connect(const std::string& host, std::uint16
                             do_write();
                         }
                     }
+
+                    // Backend TCP 연결이 성공했으므로 sticky binding을 갱신한다.
+                    // connect 성공 후에만 바인딩해야, 연결 실패로 인한 zombie mapping을 피할 수 있다.
+                    app_.on_backend_connected(client_id_, backend_instance_id_, sticky_hit_);
                     do_read();
                 });
         });
 }
 
-void GatewayApp::BackendSession::send(const std::vector<std::uint8_t>& payload) {
+void GatewayApp::BackendSession::send(std::vector<std::uint8_t> payload) {
     std::lock_guard<std::mutex> lock(send_mutex_);
     if (closed_) return;
 
-    write_queue_.push_back(payload);
+    write_queue_.push_back(std::move(payload));
     if (connected_ && !write_in_progress_) {
         do_write();
     }
@@ -210,6 +228,10 @@ GatewayApp::GatewayApp()
     , authenticator_(std::make_shared<auth::NoopAuthenticator>()) {
     
     configure_gateway();
+
+    boot_id_ = make_boot_id();
+    server::core::log::info("GatewayApp boot_id=" + boot_id_);
+
     configure_infrastructure();
 
     if (const char* port_env = std::getenv("METRICS_PORT")) {
@@ -270,8 +292,8 @@ void GatewayApp::stop() {
 
 GatewayApp::BackendSessionPtr GatewayApp::create_backend_session(const std::string& client_id,
                                                                  std::weak_ptr<GatewayConnection> connection) {
-    auto target = select_best_server(client_id);
-    if (!target) {
+    auto selected = select_best_server(client_id);
+    if (!selected) {
         server::core::log::error("GatewayApp: No available backend server found");
         return nullptr;
     }
@@ -279,24 +301,23 @@ GatewayApp::BackendSessionPtr GatewayApp::create_backend_session(const std::stri
     // 고유 세션 ID 생성
     // 더 나은 생성기를 사용할 수 있지만, 현재는 원자적 카운터로 충분합니다.
     static std::atomic<std::uint64_t> counter{0};
-    std::string session_id = gateway_id_ + "-" + std::to_string(++counter);
+    std::string session_id = gateway_id_ + "-" + boot_id_ + "-" + std::to_string(++counter);
 
-    auto session = std::make_shared<BackendSession>(*this, session_id, client_id, std::move(connection));
-    
-    server::core::log::info("GatewayApp connecting session " + session_id + " to " + target->first + ":" + std::to_string(target->second));
-    session->connect(target->first, target->second);
+    auto session = std::make_shared<BackendSession>(
+        *this,
+        session_id,
+        client_id,
+        selected->record.instance_id,
+        selected->sticky_hit,
+        std::move(connection)
+    );
 
-    // Binding session if authenticated
-    if (session_directory_ && !client_id.empty() && client_id != "anonymous") {
-        // 호스트/포트로 백엔드 ID를 찾습니다.
-        // 참고: 이상적으로는 select_best_server가 InstanceRecord를 반환해야 하지만, 
-        // 현재는 호스트:포트 일관성에 의존하거나 조회합니다.
-        // 더 간단하게 구현하기 위해 필요하다면 호스트:포트를 ID로 사용할 수 있습니다.
-        // 추후 select_best_server가 InstanceRecord를 반환하도록 개선할 예정입니다.
-        
-        // 사실, 연결 성공 후 바인딩을 보장하는 것이 더 좋습니다.
-        // 하지만 Instance ID가 필요합니다.
-    }
+    server::core::log::info(
+        "GatewayApp connecting session " + session_id +
+        " backend=" + selected->record.instance_id +
+        " addr=" + selected->record.host + ":" + std::to_string(selected->record.port)
+    );
+    session->connect(selected->record.host, selected->record.port);
 
     {
         std::lock_guard<std::mutex> lock(session_mutex_);
@@ -321,53 +342,72 @@ void GatewayApp::close_backend_session(const std::string& session_id) {
     }
 }
 
-std::optional<std::pair<std::string, std::uint16_t>> GatewayApp::select_best_server(const std::string& client_id) {
-    if (!backend_registry_) return std::nullopt;
+std::optional<GatewayApp::SelectedBackend> GatewayApp::select_best_server(const std::string& client_id) {
+    if (!backend_registry_) {
+        return std::nullopt;
+    }
 
     auto instances = backend_registry_->list_instances();
-    if (instances.empty()) return std::nullopt;
+    if (instances.empty()) {
+        return std::nullopt;
+    }
 
-    // 1. 세션 스티키니스 (Session Stickiness)
-    // 클라이언트가 이전에 연결했던 백엔드가 있다면 해당 서버로 다시 연결을 시도합니다.
+    // 1) 세션 스티키니스: 기존 바인딩이 유효하면 우선 사용한다.
     if (session_directory_ && !client_id.empty() && client_id != "anonymous") {
         if (auto backend_id = session_directory_->find_backend(client_id)) {
             auto it = std::find_if(instances.begin(), instances.end(), [&](const auto& rec) {
                 return rec.instance_id == *backend_id;
             });
             if (it != instances.end()) {
-                 // 활성 상태인 스티키 백엔드를 찾았습니다.
-                 return std::make_pair(it->host, it->port);
+                return SelectedBackend{*it, true};
             }
-            // 백엔드가 사라졌거나 비활성화되었으므로 바인딩을 해제합니다.
+            // 바인딩된 인스턴스가 사라졌거나 비활성화되었으므로 바인딩을 해제한다.
             session_directory_->release_backend(client_id, *backend_id);
         }
     }
 
-    // 2. 새로운 백엔드 선택 (최소 연결 수, Least Connections)
+    // 2) 신규 선택: least-connections(active_sessions) 기반.
     std::vector<server::state::InstanceRecord> candidates;
+    candidates.reserve(instances.size());
     std::copy_if(instances.begin(), instances.end(), std::back_inserter(candidates), [](const auto& rec) {
-        return !rec.host.empty() && rec.port > 0;
+        return !rec.instance_id.empty() && !rec.host.empty() && rec.port > 0;
     });
+    if (candidates.empty()) {
+        return std::nullopt;
+    }
 
-    if (candidates.empty()) return std::nullopt;
-
-    // 활성 세션 수(active_sessions)를 기준으로 오름차순 정렬
     std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
         return a.active_sessions < b.active_sessions;
     });
 
-    // 가장 부하가 적은 서버를 선택합니다.
-    // 만약 최소 연결 수를 가진 서버가 여러 대라면 랜덤하게 선택하여 편중(thundering herd)을 막을 수 있지만,
-    // 현재는 단순하게 가장 첫 번째 서버를 선택합니다.
+    // 가장 부하가 적은 서버를 선택한다.
     const auto& selected = candidates.front();
+    return SelectedBackend{selected, false};
+}
 
-    // 3. 새로운 백엔드 바인딩 (세션 고정)
-    // 다음에 이 클라이언트가 다시 접속하면 동일한 서버로 연결되도록 기록합니다.
-    if (session_directory_ && !client_id.empty() && client_id != "anonymous") {
-        session_directory_->refresh_backend(client_id, selected.instance_id);
+void GatewayApp::on_backend_connected(const std::string& client_id,
+                                     const std::string& backend_instance_id,
+                                     bool sticky_hit) {
+    if (!session_directory_) {
+        return;
     }
-    
-    return std::make_pair(selected.host, selected.port);
+    if (client_id.empty() || client_id == "anonymous") {
+        return;
+    }
+    if (backend_instance_id.empty()) {
+        return;
+    }
+
+    // Post-connect binding: only commit sticky mapping after the backend TCP connection succeeds.
+    // ensure_backend() creates the mapping if absent (SETNX) and refreshes TTL if already bound.
+    auto bound = session_directory_->ensure_backend(client_id, backend_instance_id);
+    if (sticky_hit && bound && *bound != backend_instance_id) {
+        server::core::log::warn(
+            "GatewayApp sticky mismatch: client_id=" + client_id +
+            " desired=" + backend_instance_id +
+            " existing=" + *bound
+        );
+    }
 }
 
 void GatewayApp::configure_gateway() {

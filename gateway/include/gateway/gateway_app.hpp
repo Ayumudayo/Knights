@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -30,6 +31,11 @@ class GatewayConnection;
 // Redis Instance Registry를 바탕으로 backend(server_app)를 선택해 TCP 브리지를 구성합니다.
 class GatewayApp {
 public:
+    struct SelectedBackend {
+        server::state::InstanceRecord record;
+        bool sticky_hit{false};
+    };
+
     // 서버와의 TCP 연결 세션을 관리하는 내부 클래스입니다.
     // GatewayConnection(Client)과 Game Server 간의 트래픽을 중계합니다.
     class BackendSession : public std::enable_shared_from_this<BackendSession> {
@@ -37,11 +43,13 @@ public:
         BackendSession(GatewayApp& app,
                        std::string session_id,
                        std::string client_id,
+                       std::string backend_instance_id,
+                       bool sticky_hit,
                        std::weak_ptr<GatewayConnection> connection);
         ~BackendSession();
 
         void connect(const std::string& host, std::uint16_t port);
-        void send(const std::vector<std::uint8_t>& payload);
+        void send(std::vector<std::uint8_t> payload);
         void close();
         const std::string& session_id() const;
 
@@ -54,6 +62,8 @@ public:
         GatewayApp& app_;
         std::string session_id_;
         std::string client_id_;
+        std::string backend_instance_id_;
+        bool sticky_hit_{false};
         std::weak_ptr<GatewayConnection> connection_;
         boost::asio::ip::tcp::socket socket_;
         std::array<std::uint8_t, 8192> buffer_;
@@ -81,7 +91,7 @@ public:
     void close_backend_session(const std::string& session_id);
     
     // Redis Registry에서 최적의 서버를 선택합니다.
-    std::optional<std::pair<std::string, std::uint16_t>> select_best_server(const std::string& client_id = "");
+    std::optional<SelectedBackend> select_best_server(const std::string& client_id = "");
 
     std::string gateway_id() const { return gateway_id_; }
 
@@ -95,6 +105,9 @@ public:
     std::uint16_t listen_port_{6000};
 
 private:
+    void on_backend_connected(const std::string& client_id,
+                              const std::string& backend_instance_id,
+                              bool sticky_hit);
     void configure_gateway();
     void configure_infrastructure();
     void start_listener();
@@ -107,6 +120,8 @@ private:
     std::unordered_map<std::string, SessionState> sessions_;
 
     std::atomic<std::uint64_t> connections_total_{0};
+
+    std::string boot_id_;
     
     std::unique_ptr<server::core::metrics::MetricsHttpServer> metrics_server_;
     std::uint16_t metrics_port_{6001};
