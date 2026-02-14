@@ -1,10 +1,14 @@
+x-knights-app: &knights-app
+  image: knights-app:local
+  pull_policy: never
+
+x-knights-app-build: &knights-app-build
+  <<: *knights-app
+  build:
+    context: ../..
+    dockerfile: Dockerfile
+
 services:
-  x-knights-app: &knights-app
-    build:
-      context: ../..
-      dockerfile: Dockerfile
-    pull_policy: never
-    image: knights-app:local
 
   postgres:
     image: postgres:16-alpine
@@ -39,7 +43,7 @@ services:
       retries: 10
 
   migrator:
-    <<: *knights-app
+    <<: *knights-app-build
     command: ["migrate"]
     environment:
       DB_URI: postgresql://${POSTGRES_USER:-knights}:${POSTGRES_PASSWORD:-password}@postgres:5432/${POSTGRES_DB:-knights_db}
@@ -75,6 +79,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     networks:
       - knights-stack
     ports:
@@ -106,6 +112,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     networks:
       - knights-stack
     ports:
@@ -126,6 +134,8 @@ services:
         condition: service_healthy
       postgres:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     networks:
       - knights-stack
 
