@@ -55,6 +55,8 @@ void GatewayConnection::handle_backend_close(const std::string& reason) {
 }
 
 void GatewayConnection::on_connect() {
+    app_.record_connection_accept();
+
     std::string remote_ip;
     try {
         const auto remote = socket().remote_endpoint();

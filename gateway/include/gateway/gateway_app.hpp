@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -71,6 +72,10 @@ public:
     int run();
     void stop();
 
+    void record_connection_accept() {
+        connections_total_.fetch_add(1, std::memory_order_relaxed);
+    }
+
     BackendSessionPtr create_backend_session(const std::string& client_id,
                                              std::weak_ptr<GatewayConnection> connection);
     void close_backend_session(const std::string& session_id);
@@ -100,6 +105,8 @@ private:
     };
     std::mutex session_mutex_;
     std::unordered_map<std::string, SessionState> sessions_;
+
+    std::atomic<std::uint64_t> connections_total_{0};
     
     std::unique_ptr<server::core::metrics::MetricsHttpServer> metrics_server_;
     std::uint16_t metrics_port_{6001};

@@ -216,17 +216,19 @@ GatewayApp::GatewayApp()
         metrics_port_ = static_cast<std::uint16_t>(std::stoi(port_env));
     }
 
-    metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(metrics_port_, [this]() {
-        std::ostringstream stream;
-        stream << "# TYPE gateway_sessions_active gauge\n";
-        {
-            std::lock_guard<std::mutex> lock(session_mutex_);
-            stream << "gateway_sessions_active " << sessions_.size() << "\n";
-        }
-        return stream.str();
-    });
-    metrics_server_->start();
-}
+     metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(metrics_port_, [this]() {
+         std::ostringstream stream;
+         stream << "# TYPE gateway_sessions_active gauge\n";
+         {
+             std::lock_guard<std::mutex> lock(session_mutex_);
+             stream << "gateway_sessions_active " << sessions_.size() << "\n";
+         }
+         stream << "# TYPE gateway_connections_total counter\n";
+         stream << "gateway_connections_total " << connections_total_.load(std::memory_order_relaxed) << "\n";
+         return stream.str();
+     });
+     metrics_server_->start();
+ }
 
 GatewayApp::~GatewayApp() {
     stop();
