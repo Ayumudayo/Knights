@@ -139,6 +139,22 @@ void MetricsServer::do_accept() {
                         append_gauge("chat_dispatch_latency_sum_ms", sum_ms);
                         append_gauge("chat_dispatch_latency_avg_ms", avg_ms);
                         append_counter("chat_dispatch_latency_count", snap.dispatch_latency_count);
+
+                        // Dispatch latency histogram (for p95/p99 etc.)
+                        stream << "# TYPE chat_dispatch_latency_ms histogram\n";
+                        std::uint64_t bucket_cumulative = 0;
+                        for (std::size_t i = 0; i < snap.dispatch_latency_bucket_counts.size(); ++i) {
+                            bucket_cumulative += snap.dispatch_latency_bucket_counts[i];
+                            auto le_ms = static_cast<long double>(server::core::runtime_metrics::kDispatchLatencyBucketUpperBoundsNs[i]) / 1'000'000.0L;
+                            stream << "chat_dispatch_latency_ms_bucket{le=\"";
+                            stream << std::fixed << std::setprecision(3) << le_ms;
+                            stream << "\"} " << bucket_cumulative << "\n";
+                            stream << std::defaultfloat << std::setprecision(6);
+                        }
+                        stream << "chat_dispatch_latency_ms_bucket{le=\"+Inf\"} " << snap.dispatch_latency_count << "\n";
+                        stream << "chat_dispatch_latency_ms_sum " << std::fixed << std::setprecision(3) << sum_ms << "\n";
+                        stream << std::defaultfloat << std::setprecision(6);
+                        stream << "chat_dispatch_latency_ms_count " << snap.dispatch_latency_count << "\n";
                         append_gauge("chat_job_queue_depth", static_cast<long double>(snap.job_queue_depth));
                         append_gauge("chat_job_queue_depth_peak", static_cast<long double>(snap.job_queue_depth_peak));
                         append_gauge("chat_db_job_queue_depth", static_cast<long double>(snap.db_job_queue_depth));
