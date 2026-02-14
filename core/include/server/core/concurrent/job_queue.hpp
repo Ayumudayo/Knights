@@ -1,4 +1,5 @@
 #pragma once
+#include <cstddef>
 #include <functional>
 #include <queue>
 #include <mutex>
@@ -16,11 +17,17 @@ using Job = std::function<void()>;
  */
 class JobQueue {
 public:
+    explicit JobQueue(std::size_t max_size = 0);
+
     /**
      * @brief 작업을 큐에 추가합니다.
      * @param job 실행할 함수 객체 (std::function<void()>)
      */
     void Push(Job job);
+
+    // 큐가 가득 찼으면 false를 반환하고 job을 버립니다.
+    // stopping 상태에서도 false를 반환합니다.
+    bool TryPush(Job job);
 
     /**
      * @brief 작업을 큐에서 꺼냅니다. (Blocking)
@@ -34,11 +41,14 @@ public:
      */
     void Stop();
 
+    std::size_t max_size() const;
+
 private:
     std::queue<Job> jobs_;
     std::mutex mutex_;
     std::condition_variable cv_;
     bool stopping_ = false;
+    std::size_t max_size_ = 0; // 0이면 무제한
 };
 
 } // namespace server::core
