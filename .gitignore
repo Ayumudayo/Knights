@@ -558,7 +558,7 @@ log.txt
 .env
 
 # AGENTS
-AGENTS.md
+# AGENTS.md files are tracked as the repo knowledge base.
 Sapphire/
 
 # Documentation

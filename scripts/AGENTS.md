@@ -1,0 +1,15 @@
+# scripts
+
+Canonical entry points for building and running the stack.
+
+## Key Scripts
+- `scripts/build.ps1`: CMake preset configure/build; `-Target <name>` builds a single target.
+- `scripts/deploy_docker.ps1`: manage `docker/stack` compose (`up/down/restart/build/logs/ps/clean/config`).
+- `scripts/run_full_stack_observability.ps1`: wrapper for `deploy_docker.ps1 -Observability`.
+- `scripts/smoke_wb.ps1`: end-to-end smoke test for the write-behind pipeline (expects the Docker stack up).
+
+## Examples
+```powershell
+pwsh scripts/build.ps1 -Config Debug -Target server_app
+pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
+```
