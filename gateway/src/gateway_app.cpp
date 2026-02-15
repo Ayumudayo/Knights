@@ -237,6 +237,7 @@ GatewayApp::GatewayApp()
 
     // Redis is required for backend discovery and sticky routing.
     app_host_.declare_dependency("redis", server::core::app::AppHost::DependencyRequirement::kRequired);
+    app_host_.set_ready(false);
 
     if (const char* port_env = std::getenv("METRICS_PORT")) {
         try {
@@ -259,8 +260,12 @@ GatewayApp::GatewayApp()
         }
         stream << "# TYPE gateway_connections_total counter\n";
         stream << "gateway_connections_total " << connections_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << app_host_.dependency_metrics_text();
         return stream.str();
     });
+
+    app_host_.add_shutdown_step("stop gateway", [this]() { stop(); });
 }
 
 GatewayApp::~GatewayApp() {
@@ -271,7 +276,7 @@ int GatewayApp::run() {
     start_listener();
     app_host_.set_ready(true);
     start_infrastructure_probe();
-    app_host_.install_asio_termination_signals(io_, [this]() { stop(); });
+    app_host_.install_asio_termination_signals(io_, {});
 
     server::core::log::info("GatewayApp starting main loop");
     hive_->run();
