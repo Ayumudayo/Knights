@@ -253,6 +253,10 @@ std::string render_metrics() {
         }
     }
 
+    if (const auto host = services::get<server::core::app::AppHost>()) {
+        stream << host->dependency_metrics_text();
+    }
+
     stream << std::setfill(' ') << std::dec << std::nouppercase;
     return stream.str();
 }
@@ -277,7 +281,19 @@ void MetricsServer::start() {
         []() { return render_metrics(); },
         []() { return health_ok(); },
         []() { return ready_ok(); },
-        []() { return render_logs(); });
+        []() { return render_logs(); },
+        [](bool ok) {
+            if (const auto host = services::get<server::core::app::AppHost>()) {
+                return host->health_body(ok);
+            }
+            return ok ? std::string("ok\n") : std::string("unhealthy\n");
+        },
+        [](bool ok) {
+            if (const auto host = services::get<server::core::app::AppHost>()) {
+                return host->readiness_body(ok);
+            }
+            return ok ? std::string("ready\n") : std::string("not ready\n");
+        });
     http_server_->start();
 }
 

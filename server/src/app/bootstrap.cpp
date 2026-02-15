@@ -98,6 +98,9 @@ int run_server(int argc, char** argv) {
             app_host.declare_dependency("redis");
         }
 
+        // Base readiness will flip to true after listeners/threads are running.
+        app_host.set_ready(false);
+
         if (config.log_buffer_capacity > 0) {
             corelog::set_buffer_capacity(config.log_buffer_capacity);
             corelog::info(std::string("Log buffer capacity set to ") + std::to_string(config.log_buffer_capacity));
@@ -375,21 +378,35 @@ int run_server(int argc, char** argv) {
         }
 
         // 12. 종료 시그널 대기
-        app_host.install_asio_termination_signals(io, [&]() {
-            corelog::info("Shutdown signal received...");
+        app_host.add_shutdown_step("stop workers", [&]() { workers.Stop(); });
+        app_host.add_shutdown_step("stop io_context", [&]() { io.stop(); });
+        app_host.add_shutdown_step("stop acceptor", [&]() { acceptor->stop(); });
+        app_host.add_shutdown_step("stop db worker pool", [&]() {
+            if (db_workers) {
+                try { db_workers->stop(); } catch (...) {}
+            }
+        });
+        app_host.add_shutdown_step("cancel scheduler timer", [&]() {
+            try {
+                if (scheduler_timer) scheduler_timer->cancel();
+            } catch (...) {
+            }
+        });
+        app_host.add_shutdown_step("shutdown scheduler", [&]() { scheduler.shutdown(); });
+        app_host.add_shutdown_step("stop metrics server", [&]() {
+            if (metrics_server) metrics_server->stop();
+        });
+        app_host.add_shutdown_step("stop redis pubsub", [&]() {
+            try { if (redis) redis->stop_psubscribe(); } catch (...) {}
+        });
+        app_host.add_shutdown_step("deregister instance", [&]() {
             if (registry_registered && registry_backend) {
                 try { registry_backend->remove(registry_record.instance_id); } catch (...) {}
                 registry_registered = false;
             }
-            try { if (redis) redis->stop_psubscribe(); } catch (...) {}
-            if (metrics_server) metrics_server->stop();
-            scheduler.shutdown();
-            try { scheduler_timer->cancel(); } catch (...) {}
-            if (db_workers) try { db_workers->stop(); } catch (...) {}
-            acceptor->stop();
-            io.stop();
-            workers.Stop();
         });
+
+        app_host.install_asio_termination_signals(io, {});
 
         for (auto& t : io_threads) {
             t.join();
