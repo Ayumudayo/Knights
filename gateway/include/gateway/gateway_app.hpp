@@ -103,13 +103,16 @@ public:
     std::string listen_host_;
     std::uint16_t listen_port_{6000};
 
-private:
-    void on_backend_connected(const std::string& client_id,
-                              const std::string& backend_instance_id,
-                              bool sticky_hit);
-    void configure_gateway();
-    void configure_infrastructure();
-    void start_listener();
+ private:
+     void on_backend_connected(const std::string& client_id,
+                               const std::string& backend_instance_id,
+                               bool sticky_hit);
+     void configure_gateway();
+     void configure_infrastructure();
+     void start_listener();
+
+     void start_infrastructure_probe();
+     void stop_infrastructure_probe();
 
     struct SessionState {
         BackendSessionPtr session;
@@ -122,11 +125,16 @@ private:
     std::string boot_id_;
     std::uint16_t metrics_port_{6001};
 
-    // State & Storage
-    std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
-    std::shared_ptr<server::state::IInstanceStateBackend> backend_registry_;
-    std::unique_ptr<SessionDirectory> session_directory_;
-    std::string redis_uri_;
-};
+     // State & Storage
+     std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
+     std::shared_ptr<server::state::IInstanceStateBackend> backend_registry_;
+     std::unique_ptr<SessionDirectory> session_directory_;
+     std::string redis_uri_;
 
-} // namespace gateway
+     std::atomic<bool> listener_ready_{false};
+     std::atomic<bool> redis_ready_{false};
+     std::atomic<bool> infra_probe_stop_{false};
+     std::thread infra_probe_thread_;
+ };
+
+ } // namespace gateway

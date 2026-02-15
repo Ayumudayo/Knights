@@ -1,6 +1,7 @@
 #include "gateway/gateway_app.hpp"
 
 #include <cstdlib>
+#include <chrono>
 #include <filesystem>
 #include <mutex>
 #include <stdexcept>
@@ -265,11 +266,14 @@ GatewayApp::~GatewayApp() {
 
 int GatewayApp::run() {
     start_listener();
-    app_host_.set_ready(true);
+    listener_ready_.store(true, std::memory_order_relaxed);
+    start_infrastructure_probe();
     app_host_.install_asio_termination_signals(io_, [this]() { stop(); });
 
     server::core::log::info("GatewayApp starting main loop");
     hive_->run();
+
+    stop_infrastructure_probe();
     app_host_.set_ready(false);
     server::core::log::info("GatewayApp stopped");
     return 0;
@@ -277,7 +281,9 @@ int GatewayApp::run() {
 
 void GatewayApp::stop() {
     app_host_.request_stop();
+    listener_ready_.store(false, std::memory_order_relaxed);
     app_host_.set_ready(false);
+    stop_infrastructure_probe();
     app_host_.stop_admin_http();
 
     if (listener_) {
@@ -298,6 +304,58 @@ void GatewayApp::stop() {
         hive_->stop();
     }
     io_.stop();
+}
+
+void GatewayApp::start_infrastructure_probe() {
+    if (infra_probe_thread_.joinable()) {
+        return;
+    }
+
+    infra_probe_stop_.store(false, std::memory_order_relaxed);
+    infra_probe_thread_ = std::thread([this]() {
+        bool last_ok = true;
+        while (!infra_probe_stop_.load(std::memory_order_relaxed) && !app_host_.stop_requested()) {
+            bool ok = false;
+            try {
+                if (redis_client_) {
+                    ok = redis_client_->health_check();
+                }
+            } catch (const std::exception& e) {
+                server::core::log::warn(std::string("GatewayApp Redis health_check exception: ") + e.what());
+                ok = false;
+            } catch (...) {
+                server::core::log::warn("GatewayApp Redis health_check unknown exception");
+                ok = false;
+            }
+
+            redis_ready_.store(ok, std::memory_order_relaxed);
+            app_host_.set_ready(listener_ready_.load(std::memory_order_relaxed) && ok);
+
+            if (ok != last_ok) {
+                if (ok) {
+                    server::core::log::info("GatewayApp Redis health_check OK");
+                } else {
+                    server::core::log::warn("GatewayApp Redis health_check FAILED");
+                }
+                last_ok = ok;
+            }
+
+            for (int i = 0; i < 20; ++i) {
+                if (infra_probe_stop_.load(std::memory_order_relaxed) || app_host_.stop_requested()) {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        }
+        app_host_.set_ready(false);
+    });
+}
+
+void GatewayApp::stop_infrastructure_probe() {
+    infra_probe_stop_.store(true, std::memory_order_relaxed);
+    if (infra_probe_thread_.joinable() && infra_probe_thread_.get_id() != std::this_thread::get_id()) {
+        infra_probe_thread_.join();
+    }
 }
 
 GatewayApp::BackendSessionPtr GatewayApp::create_backend_session(const std::string& client_id,
@@ -477,10 +535,10 @@ void GatewayApp::configure_infrastructure() {
                   std::chrono::seconds(600) // 10 minutes session stickiness
               );
 
-             server::core::log::info("GatewayApp connected to Redis at " + redis_uri_);
-        } else {
-            server::core::log::error("GatewayApp failed to create Redis client at " + redis_uri_);
-        }
+             server::core::log::info("GatewayApp Redis client initialised");
+         } else {
+            server::core::log::error("GatewayApp failed to create Redis client (REDIS_URI redacted)");
+         }
     } catch (const std::exception& e) {
         server::core::log::error(std::string("GatewayApp infrastructure init failed: ") + e.what());
     }
