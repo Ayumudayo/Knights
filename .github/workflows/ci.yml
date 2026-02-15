@@ -85,6 +85,47 @@ jobs:
           raise SystemExit(f'HAProxy not ready: {last_err}')
           PY
 
+      - name: Verify Health/Ready Endpoints
+        run: |
+          python3 - <<'PY'
+          import time
+          import urllib.request
+
+          bases = [
+              'http://127.0.0.1:36001',
+              'http://127.0.0.1:36002',
+              'http://127.0.0.1:39091',
+              'http://127.0.0.1:39092',
+              'http://127.0.0.1:39093',
+          ]
+          paths = ['/healthz', '/readyz']
+
+          def fetch(url):
+              with urllib.request.urlopen(url, timeout=5) as r:
+                  return r.status, r.read().decode('utf-8', errors='replace')
+
+          pending = {(b, p) for b in bases for p in paths}
+          deadline = time.time() + 30
+          last_err = None
+          while time.time() < deadline and pending:
+              for b, p in list(pending):
+                  try:
+                      st, txt = fetch(b + p)
+                      if st == 200:
+                          pending.remove((b, p))
+                      else:
+                          last_err = f'{b}{p} -> {st} {txt[:120]}'
+                  except Exception as e:
+                      last_err = f'{b}{p} -> {e}'
+              if pending:
+                  time.sleep(0.5)
+
+          if pending:
+              raise SystemExit(f'health/ready not OK for: {sorted(pending)} (last={last_err})')
+
+          print('health/ready endpoints OK')
+          PY
+
       - name: Smoke Test (PONG)
         run: |
           python3 tests/python/verify_pong.py
