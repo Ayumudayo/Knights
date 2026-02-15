@@ -2,9 +2,32 @@
 
 #include "server/core/util/log.hpp"
 
+#include <mutex>
+#include <vector>
+
 namespace server::core::app {
 
 namespace corelog = server::core::log;
+
+struct AppHost::DependencyRegistry {
+    struct Entry {
+        std::string name;
+        DependencyRequirement requirement{DependencyRequirement::kRequired};
+        bool ok{false};
+    };
+
+    std::mutex mutex;
+    std::vector<Entry> entries;
+
+    bool compute_ok() const {
+        for (const auto& e : entries) {
+            if (e.requirement == DependencyRequirement::kRequired && !e.ok) {
+                return false;
+            }
+        }
+        return true;
+    }
+};
 
 AppHost::AppHost(std::string name)
     : name_(std::move(name)) {
@@ -31,11 +54,70 @@ bool AppHost::healthy() const noexcept {
 }
 
 void AppHost::set_ready(bool ready) noexcept {
-    ready_.store(ready, std::memory_order_relaxed);
+    ready_base_.store(ready, std::memory_order_relaxed);
 }
 
 bool AppHost::ready() const noexcept {
-    return ready_.load(std::memory_order_relaxed);
+    return ready_base_.load(std::memory_order_relaxed) && deps_ok_.load(std::memory_order_relaxed);
+}
+
+void AppHost::declare_dependency(std::string name, DependencyRequirement requirement) {
+    if (name.empty()) {
+        corelog::warn(name_ + " declare_dependency called with empty name");
+        return;
+    }
+    if (!deps_) {
+        deps_ = std::make_unique<DependencyRegistry>();
+    }
+
+    std::lock_guard<std::mutex> lock(deps_->mutex);
+
+    for (auto& e : deps_->entries) {
+        if (e.name == name) {
+            e.requirement = requirement;
+            deps_ok_.store(deps_->compute_ok(), std::memory_order_relaxed);
+            return;
+        }
+    }
+
+    DependencyRegistry::Entry entry;
+    entry.name = std::move(name);
+    entry.requirement = requirement;
+    entry.ok = false;
+    deps_->entries.emplace_back(std::move(entry));
+    deps_ok_.store(deps_->compute_ok(), std::memory_order_relaxed);
+}
+
+void AppHost::set_dependency_ok(std::string_view name, bool ok) {
+    if (name.empty()) {
+        corelog::warn(name_ + " set_dependency_ok called with empty name");
+        return;
+    }
+    if (!deps_) {
+        deps_ = std::make_unique<DependencyRegistry>();
+    }
+
+    std::lock_guard<std::mutex> lock(deps_->mutex);
+
+    for (auto& e : deps_->entries) {
+        if (e.name == name) {
+            e.ok = ok;
+            deps_ok_.store(deps_->compute_ok(), std::memory_order_relaxed);
+            return;
+        }
+    }
+
+    corelog::warn(name_ + " set_dependency_ok used before declare_dependency: " + std::string(name));
+    DependencyRegistry::Entry entry;
+    entry.name = std::string(name);
+    entry.requirement = DependencyRequirement::kRequired;
+    entry.ok = ok;
+    deps_->entries.emplace_back(std::move(entry));
+    deps_ok_.store(deps_->compute_ok(), std::memory_order_relaxed);
+}
+
+bool AppHost::dependencies_ok() const noexcept {
+    return deps_ok_.load(std::memory_order_relaxed);
 }
 
 void AppHost::start_admin_http(unsigned short port,

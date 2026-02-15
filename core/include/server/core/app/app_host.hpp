@@ -1,9 +1,11 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <string_view>
 
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/signal_set.hpp>
@@ -21,6 +23,11 @@ namespace server::core::app {
 // - Install graceful shutdown hooks (SIGINT/SIGTERM via boost::asio::signal_set)
 class AppHost {
 public:
+    enum class DependencyRequirement : std::uint8_t {
+        kRequired,
+        kOptional,
+    };
+
     explicit AppHost(std::string name);
     ~AppHost();
 
@@ -36,6 +43,17 @@ public:
     void set_ready(bool ready) noexcept;
     bool ready() const noexcept;
 
+    // Declare a dependency that must be healthy for readiness.
+    // Required dependencies default to "not OK" until set_dependency_ok() marks them OK.
+    void declare_dependency(std::string name,
+                            DependencyRequirement requirement = DependencyRequirement::kRequired);
+
+    // Updates a dependency status. If the dependency was not declared yet, it is
+    // declared as required.
+    void set_dependency_ok(std::string_view name, bool ok);
+
+    bool dependencies_ok() const noexcept;
+
     void start_admin_http(unsigned short port,
                           server::core::metrics::MetricsHttpServer::MetricsCallback metrics_callback);
     void stop_admin_http();
@@ -46,10 +64,15 @@ public:
                                          std::function<void()> on_shutdown);
 
 private:
+    struct DependencyRegistry;
+
     std::string name_;
     std::atomic<bool> stop_requested_{false};
     std::atomic<bool> healthy_{true};
-    std::atomic<bool> ready_{false};
+    std::atomic<bool> ready_base_{false};
+    std::atomic<bool> deps_ok_{true};
+
+    std::unique_ptr<DependencyRegistry> deps_;
 
     std::unique_ptr<server::core::metrics::MetricsHttpServer> admin_http_;
     std::unique_ptr<boost::asio::signal_set> signals_;
