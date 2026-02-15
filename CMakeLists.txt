@@ -4,6 +4,7 @@ project(ServerProject LANGUAGES CXX)
 option(SERVER_ENABLE_TLS "Enable TLS(Asio SSL)" OFF)
 option(SERVER_ENABLE_PROFILING "Enable profiling markers" OFF)
 option(SERVER_USE_HEADER_ONLY_BOOST_SYSTEM "Use header-only boost::system (no lib link)" OFF)
+option(KNIGHTS_ENABLE_SANITIZERS "Enable sanitizers (ASan+UBSan)" OFF)
 option(BUILD_SERVER_STACK "Build server libraries and server_app" ON)
 option(BUILD_GATEWAY_APP "Build gateway_app" ON)
 
@@ -20,6 +21,21 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 if (MSVC)
     add_compile_options(/utf-8 /MP)
+endif()
+
+if (KNIGHTS_ENABLE_SANITIZERS)
+    message(STATUS "Sanitizers enabled (ASan+UBSan where supported)")
+
+    if (CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+        add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address,undefined)
+    elseif (MSVC)
+        # NOTE: MSVC ASan support depends on toolchain/runtime; keep opt-in.
+        add_compile_options(/fsanitize=address)
+        add_link_options(/INCREMENTAL:NO)
+    else()
+        message(WARNING "KNIGHTS_ENABLE_SANITIZERS=ON but unsupported compiler: ${CMAKE_CXX_COMPILER_ID}")
+    endif()
 endif()
 
 if (NOT BUILD_SERVER_STACK)

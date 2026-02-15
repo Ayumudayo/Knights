@@ -100,6 +100,17 @@
         "CMAKE_BUILD_TYPE": "Release",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
+    },
+    {
+      "name": "linux-asan",
+      "inherits": "linux-base",
+      "displayName": "Linux ASan/UBSan (Ninja)",
+      "description": "Linux configuration using Ninja (Debug, ASan+UBSan)",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "KNIGHTS_ENABLE_SANITIZERS": "ON"
+      }
     }
   ],
   "buildPresets": [
@@ -138,6 +149,12 @@
       "configurePreset": "linux-release",
       "configuration": "Release",
       "displayName": "Linux Release"
+    },
+    {
+      "name": "linux-asan",
+      "configurePreset": "linux-asan",
+      "configuration": "Debug",
+      "displayName": "Linux ASan/UBSan"
     }
   ],
   "testPresets": [
