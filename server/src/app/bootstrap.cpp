@@ -75,6 +75,11 @@ int run_server(int argc, char** argv) {
     bool registry_registered = false;
     server::core::app::AppHost app_host{"server_app"};
 
+    // Readiness depends on required infrastructure.
+    std::atomic<bool> started{false};
+    std::atomic<bool> db_ok{false};
+    std::atomic<bool> redis_ok{true};
+
     try {
 #if defined(_WIN32)
         // 윈도우 콘솔의 인코딩을 UTF-8로 설정
@@ -91,6 +96,22 @@ int run_server(int argc, char** argv) {
             corelog::error("Failed to load configuration");
             return 1;
         }
+
+        // For server_app, DB is required to be considered "ready".
+        // Redis is considered required only when configured.
+        db_ok.store(false, std::memory_order_relaxed);
+        redis_ok.store(config.redis_uri.empty(), std::memory_order_relaxed);
+
+        const auto update_ready = [&]() {
+            auto host = services::get<server::core::app::AppHost>();
+            if (!host) {
+                return;
+            }
+            const bool ok = started.load(std::memory_order_relaxed)
+                && db_ok.load(std::memory_order_relaxed)
+                && redis_ok.load(std::memory_order_relaxed);
+            host->set_ready(ok);
+        };
 
         if (config.log_buffer_capacity > 0) {
             corelog::set_buffer_capacity(config.log_buffer_capacity);
@@ -147,7 +168,7 @@ int run_server(int argc, char** argv) {
         // 4. DB 커넥션 풀 구성
         std::shared_ptr<core::storage::IConnectionPool> db_pool;
         if (!config.db_uri.empty()) {
-            corelog::info(std::string("Detected DB_URI: ") + config.db_uri);
+            corelog::info("Detected DB_URI (redacted)");
             core::storage::PoolOptions popts{};
             popts.min_size = config.db_pool_min;
             popts.max_size = config.db_pool_max;
@@ -161,8 +182,10 @@ int run_server(int argc, char** argv) {
                 return 2;
             }
             corelog::info("DB connection pool initialised.");
+            db_ok.store(true, std::memory_order_relaxed);
         } else {
             corelog::warn("DB_URI is not set; database features remain disabled.");
+            db_ok.store(false, std::memory_order_relaxed);
         }
 
         if (db_pool) {
@@ -178,10 +201,15 @@ int run_server(int argc, char** argv) {
             corelog::info(std::string("DB worker pool started: ") + std::to_string(log_workers) + " threads.");
 
             // 주기적인 DB 헬스 체크
-            scheduler.schedule_every([job_queue_ptr, db_pool]() {
-                job_queue_ptr->Push([db_pool]() {
+            scheduler.schedule_every([job_queue_ptr, db_pool, &db_ok, update_ready]() {
+                job_queue_ptr->Push([db_pool, &db_ok, update_ready]() {
                     try {
-                        if (!db_pool->health_check()) corelog::warn("Periodic DB health check failed");
+                        const bool ok = db_pool->health_check();
+                        db_ok.store(ok, std::memory_order_relaxed);
+                        if (!ok) {
+                            corelog::warn("Periodic DB health check failed");
+                        }
+                        update_ready();
                     } catch (const std::exception& ex) {
                         corelog::error(std::string("Periodic DB health check exception: ") + ex.what());
                     } catch (...) {
@@ -194,7 +222,7 @@ int run_server(int argc, char** argv) {
         // 5. Redis 클라이언트 구성
         std::shared_ptr<server::storage::redis::IRedisClient> redis;
         if (!config.redis_uri.empty()) {
-            corelog::info(std::string("Detected REDIS_URI: ") + config.redis_uri);
+            corelog::info("Detected REDIS_URI (redacted)");
             server::storage::redis::Options ropts{};
             ropts.pool_max = config.redis_pool_max;
             ropts.use_streams = config.redis_use_streams;
@@ -209,21 +237,29 @@ int run_server(int argc, char** argv) {
             }
             if (!redis || !redis->health_check()) {
                 corelog::error("Redis health check failed; please verify REDIS_URI.");
+                redis_ok.store(false, std::memory_order_relaxed);
             } else {
                 corelog::info("Redis client initialised.");
+                redis_ok.store(true, std::memory_order_relaxed);
             }
         } else {
             corelog::warn("REDIS_URI is not set; Redis features remain disabled.");
+            redis_ok.store(true, std::memory_order_relaxed);
         }
 
         if (redis) {
             services::set(redis);
 
             // 주기적인 Redis 헬스 체크
-            scheduler.schedule_every([job_queue_ptr, redis]() {
-                job_queue_ptr->Push([redis]() {
+            scheduler.schedule_every([job_queue_ptr, redis, &redis_ok, update_ready]() {
+                job_queue_ptr->Push([redis, &redis_ok, update_ready]() {
                     try {
-                        if (!redis->health_check()) corelog::warn("Periodic Redis health check failed");
+                        const bool ok = redis->health_check();
+                        redis_ok.store(ok, std::memory_order_relaxed);
+                        if (!ok) {
+                            corelog::warn("Periodic Redis health check failed");
+                        }
+                        update_ready();
                     } catch (const std::exception& ex) {
                         corelog::error(std::string("Periodic Redis health check exception: ") + ex.what());
                     } catch (...) {
@@ -305,7 +341,8 @@ int run_server(int argc, char** argv) {
         }
         corelog::info(std::to_string(num_io_threads) + " I/O threads started.");
 
-        app_host.set_ready(true);
+        started.store(true, std::memory_order_relaxed);
+        update_ready();
 
         // 10. Redis Pub/Sub 구독 (분산 채팅용)
         if (redis && config.use_redis_pubsub) {
@@ -376,6 +413,7 @@ int run_server(int argc, char** argv) {
             t.join();
         }
 
+        started.store(false, std::memory_order_relaxed);
         app_host.set_ready(false);
 
         // 정리 작업
