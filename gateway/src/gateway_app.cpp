@@ -21,6 +21,7 @@
 #include "gateway/gateway_connection.hpp"
 #include "server/core/util/paths.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/metrics/build_info.hpp"
 #include "server/storage/redis/client.hpp"
 #include "server/state/instance_registry.hpp"
 
@@ -238,13 +239,17 @@ GatewayApp::GatewayApp()
         metrics_port_ = static_cast<std::uint16_t>(std::stoi(port_env));
     }
 
-     metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(metrics_port_, [this]() {
-         std::ostringstream stream;
-         stream << "# TYPE gateway_sessions_active gauge\n";
-         {
-             std::lock_guard<std::mutex> lock(session_mutex_);
-             stream << "gateway_sessions_active " << sessions_.size() << "\n";
-         }
+      metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(metrics_port_, [this]() {
+          std::ostringstream stream;
+
+          // Build metadata (git hash/describe + build time)
+          server::core::metrics::append_build_info(stream);
+
+          stream << "# TYPE gateway_sessions_active gauge\n";
+          {
+              std::lock_guard<std::mutex> lock(session_mutex_);
+              stream << "gateway_sessions_active " << sessions_.size() << "\n";
+          }
          stream << "# TYPE gateway_connections_total counter\n";
          stream << "gateway_connections_total " << connections_total_.load(std::memory_order_relaxed) << "\n";
          return stream.str();
