@@ -54,9 +54,20 @@ public:
 
     bool dependencies_ok() const noexcept;
 
+    // Convenience helpers for admin endpoints.
+    std::string health_body(bool ok) const;
+    std::string readiness_body(bool ok) const;
+
+    // Prometheus metrics for dependency health.
+    std::string dependency_metrics_text() const;
+
     void start_admin_http(unsigned short port,
                           server::core::metrics::MetricsHttpServer::MetricsCallback metrics_callback);
     void stop_admin_http();
+
+    // Register shutdown steps that should run once when the process receives SIGINT/SIGTERM.
+    // Steps execute in reverse registration order (LIFO).
+    void add_shutdown_step(std::string name, std::function<void()> step);
 
     // Installs async signal handlers on the given io_context.
     // `on_shutdown` should stop app components and eventually stop the io_context.
@@ -65,6 +76,9 @@ public:
 
 private:
     struct DependencyRegistry;
+    struct ShutdownRegistry;
+
+    void run_shutdown_steps() noexcept;
 
     std::string name_;
     std::atomic<bool> stop_requested_{false};
@@ -72,7 +86,10 @@ private:
     std::atomic<bool> ready_base_{false};
     std::atomic<bool> deps_ok_{true};
 
+    std::atomic<bool> shutdown_ran_{false};
+
     std::unique_ptr<DependencyRegistry> deps_;
+    std::unique_ptr<ShutdownRegistry> shutdown_;
 
     std::unique_ptr<server::core::metrics::MetricsHttpServer> admin_http_;
     std::unique_ptr<boost::asio::signal_set> signals_;

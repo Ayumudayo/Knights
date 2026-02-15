@@ -3,7 +3,9 @@
 #include "server/core/util/log.hpp"
 
 #include <mutex>
+#include <utility>
 #include <vector>
+#include <sstream>
 
 namespace server::core::app {
 
@@ -27,6 +29,13 @@ struct AppHost::DependencyRegistry {
         }
         return true;
     }
+};
+
+struct AppHost::ShutdownRegistry {
+    using Step = std::pair<std::string, std::function<void()>>;
+
+    std::mutex mutex;
+    std::vector<Step> steps;
 };
 
 AppHost::AppHost(std::string name)
@@ -120,6 +129,83 @@ bool AppHost::dependencies_ok() const noexcept {
     return deps_ok_.load(std::memory_order_relaxed);
 }
 
+std::string AppHost::health_body(bool ok) const {
+    if (ok) {
+        return "ok\n";
+    }
+    if (stop_requested()) {
+        return "stopping\n";
+    }
+    return "unhealthy\n";
+}
+
+std::string AppHost::readiness_body(bool ok) const {
+    if (ok) {
+        return "ready\n";
+    }
+
+    std::ostringstream oss;
+    oss << "not ready";
+
+    std::vector<std::string> reasons;
+    if (stop_requested()) {
+        reasons.emplace_back("stopping");
+    }
+    if (!healthy()) {
+        reasons.emplace_back("unhealthy");
+    }
+    if (!ready_base_.load(std::memory_order_relaxed)) {
+        reasons.emplace_back("starting");
+    }
+
+    std::vector<std::string> missing;
+    if (deps_ && !dependencies_ok()) {
+        std::lock_guard<std::mutex> lock(deps_->mutex);
+        for (const auto& e : deps_->entries) {
+            if (e.requirement == DependencyRequirement::kRequired && !e.ok) {
+                missing.emplace_back(e.name);
+            }
+        }
+    }
+    if (!missing.empty()) {
+        std::ostringstream dep;
+        dep << "deps=";
+        for (std::size_t i = 0; i < missing.size(); ++i) {
+            if (i != 0) dep << ',';
+            dep << missing[i];
+        }
+        reasons.emplace_back(dep.str());
+    }
+
+    if (!reasons.empty()) {
+        oss << ": ";
+        for (std::size_t i = 0; i < reasons.size(); ++i) {
+            if (i != 0) oss << ", ";
+            oss << reasons[i];
+        }
+    }
+    oss << "\n";
+    return oss.str();
+}
+
+std::string AppHost::dependency_metrics_text() const {
+    std::ostringstream out;
+    out << "# TYPE knights_dependency_ready gauge\n";
+
+    if (deps_) {
+        std::lock_guard<std::mutex> lock(deps_->mutex);
+        for (const auto& e : deps_->entries) {
+            const char* required = (e.requirement == DependencyRequirement::kRequired) ? "true" : "false";
+            out << "knights_dependency_ready{name=\"" << e.name << "\",required=\"" << required << "\"} "
+                << (e.ok ? 1 : 0) << "\n";
+        }
+    }
+
+    out << "# TYPE knights_dependencies_ok gauge\n";
+    out << "knights_dependencies_ok " << (dependencies_ok() ? 1 : 0) << "\n";
+    return out.str();
+}
+
 void AppHost::start_admin_http(unsigned short port,
                                server::core::metrics::MetricsHttpServer::MetricsCallback metrics_callback) {
     if (port == 0) {
@@ -139,7 +225,10 @@ void AppHost::start_admin_http(unsigned short port,
         [this]() {
             // Readiness implies health.
             return ready() && healthy() && !stop_requested();
-        });
+        },
+        server::core::metrics::MetricsHttpServer::LogsCallback{},
+        [this](bool ok) { return health_body(ok); },
+        [this](bool ok) { return readiness_body(ok); });
     admin_http_->start();
 
     corelog::info(name_ + " admin http enabled on :" + std::to_string(port));
@@ -151,6 +240,47 @@ void AppHost::stop_admin_http() {
     }
     admin_http_->stop();
     admin_http_.reset();
+}
+
+void AppHost::add_shutdown_step(std::string name, std::function<void()> step) {
+    if (!step) {
+        return;
+    }
+    if (name.empty()) {
+        name = "(unnamed)";
+    }
+    if (!shutdown_) {
+        shutdown_ = std::make_unique<ShutdownRegistry>();
+    }
+
+    std::lock_guard<std::mutex> lock(shutdown_->mutex);
+    shutdown_->steps.emplace_back(std::move(name), std::move(step));
+}
+
+void AppHost::run_shutdown_steps() noexcept {
+    if (shutdown_ran_.exchange(true, std::memory_order_acq_rel)) {
+        return;
+    }
+    if (!shutdown_ || shutdown_->steps.empty()) {
+        return;
+    }
+
+    std::vector<ShutdownRegistry::Step> steps;
+    {
+        std::lock_guard<std::mutex> lock(shutdown_->mutex);
+        steps.swap(shutdown_->steps);
+    }
+
+    for (auto it = steps.rbegin(); it != steps.rend(); ++it) {
+        const auto& name = it->first;
+        try {
+            it->second();
+        } catch (const std::exception& ex) {
+            corelog::error(name_ + " shutdown step failed: " + name + ": " + ex.what());
+        } catch (...) {
+            corelog::error(name_ + " shutdown step failed: " + name + ": unknown exception");
+        }
+    }
 }
 
 void AppHost::install_asio_termination_signals(boost::asio::io_context& io,
@@ -184,6 +314,8 @@ void AppHost::install_asio_termination_signals(boost::asio::io_context& io,
 
         set_ready(false);
         corelog::info(name_ + " received shutdown signal");
+
+        run_shutdown_steps();
         try {
             if (on_shutdown) {
                 on_shutdown();
