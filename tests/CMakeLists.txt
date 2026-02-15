@@ -44,6 +44,8 @@ target_link_libraries(server_state_tests PRIVATE
 add_executable(chat_history_tests
     chat_history_tests.cpp
     ${CMAKE_SOURCE_DIR}/server/src/chat/chat_service_core.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_manager.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_chain.cpp
 )
 target_include_directories(chat_history_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
@@ -56,6 +58,9 @@ target_link_libraries(chat_history_tests PRIVATE
     server_storage_redis
     wire_proto
 )
+
+# dlopen/dlsym (Linux)
+target_link_libraries(chat_history_tests PRIVATE ${CMAKE_DL_LIBS})
 
 include(GoogleTest)
 gtest_discover_tests(storage_basic_tests)
@@ -84,6 +89,8 @@ gtest_discover_tests(core_general_tests)
 add_executable(server_general_tests
     server/test_server_chat.cpp
     ${CMAKE_SOURCE_DIR}/server/src/chat/chat_service_core.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_manager.cpp
+    ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_chain.cpp
     ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_login.cpp
     ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_join.cpp
     ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_leave.cpp
@@ -102,4 +109,7 @@ target_link_libraries(server_general_tests PRIVATE
     server_storage_redis
     wire_proto
 )
+
+# dlopen/dlsym (Linux)
+target_link_libraries(server_general_tests PRIVATE ${CMAKE_DL_LIBS})
 gtest_discover_tests(server_general_tests)
