@@ -16,26 +16,28 @@
 
 ## 🏗️ 아키텍처 (Architecture)
 
-시스템은 크게 4가지 주요 컴포넌트로 구성됩니다.
+시스템은 크게 5가지 주요 컴포넌트로 구성됩니다.
 
-0.  **Edge Load Balancer (예: HAProxy)**:
+1.  **Edge Load Balancer (예: HAProxy)**:
     -   외부 TCP(L4) 로드밸런서로, 다수의 `gateway_app` 인스턴스로 클라이언트 연결을 분산합니다.
     -   애플리케이션 프로토콜(opcode)은 해석하지 않습니다.
 
-1.  **Gateway (`gateway/`)**:
+2.  **Gateway (`gateway/`)**:
     -   클라이언트의 TCP 연결을 수용하는 진입점입니다.
     -   인증(Authentication), 세션 관리, Heartbeat 처리를 담당합니다.
     -   **Service Discovery**: Redis를 통해 서버 인스턴스를 찾아, **Least Connections** 방식으로 트래픽을 분산합니다.
     -   **Session Stickiness**: 재접속 시 이전 세션 정보를 바탕으로 동일한 서버로 라우팅을 시도합니다.
 
-
-
 3.  **Server (`server/`)**:
     -   실제 채팅 로직을 처리하는 핵심 서버입니다.
     -   방(Room) 관리, 메시지 브로드캐스팅, Redis Pub/Sub 연동을 수행합니다.
-    -   **Write-Behind** 패턴을 통해 채팅 로그를 비동기로 DB에 저장합니다.
+    -   **Write-Behind** 패턴을 위해 Redis Streams에 이벤트를 적재합니다.
 
-4.  **Core (`core/`)**:
+4.  **Write-Behind Worker (`wb_worker`)**:
+    -   Redis Streams -> Postgres 비동기 적재를 담당합니다.
+    -   스택 구동 시 함께 실행되며 `/metrics`를 노출할 수 있습니다.
+
+5.  **Core (`core/`)**:
     -   모든 프로젝트에서 공유하는 정적 라이브러리입니다.
     -   네트워크(Session, Listener), 동시성(JobQueue, ThreadManager), 메모리 관리(MemoryPool) 등의 공통 기능을 제공합니다.
 
@@ -147,7 +149,7 @@ flowchart TB
 
 ### 필수 요구 사항 (Prerequisites)
 
--   **OS**: Windows 10/11 (Linux 지원 예정)
+-   **OS**: Windows 10/11 (개발) + Linux(Docker) 런타임(검증/운영)
 -   **Compiler**: MSVC 19.3x+ (Visual Studio 2022), Clang 14+, GCC 11+
 -   **Build System**: CMake 3.20+
 -   **Dependency Manager**: vcpkg
@@ -228,7 +230,7 @@ scripts/deploy_docker.ps1 -Action down
 
 ```powershell
 cmake --build build-windows --target chat_history_tests
-ctest --test-dir build-windows/tests
+ctest --preset windows-test
 ```
 
 **통합 스모크 테스트 (Smoke Test)**

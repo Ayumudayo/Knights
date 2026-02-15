@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-02-14
-Commit: 4f82d9b
+Generated: 2026-02-16
+Commit: b9d2dd7
 Branch: Huge-Refactor
 
 ## Overview
@@ -35,10 +35,13 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 |---|---|---|---|
 | `server::core::net::Hive` | class | `core/include/server/core/net/hive.hpp` | io_context 수명/실행 관리 |
 | `server::core::metrics::MetricsHttpServer` | class | `core/include/server/core/metrics/http_server.hpp` | `/metrics` HTTP endpoint |
+| `server::core::metrics::append_build_info` | fn | `core/include/server/core/metrics/build_info.hpp` | `knights_build_info` 메트릭 라인 출력 |
 | `server::core::runtime_metrics::Snapshot` | struct | `core/include/server/core/runtime_metrics.hpp` | 프로세스 런타임 카운터 스냅샷 |
 | `server::app::run_server` | fn | `server/src/app/bootstrap.cpp` | server_app 부트스트랩(설정/DI/리스너/루프) |
 | `server::app::register_routes` | fn | `server/src/app/router.cpp` | opcode -> handler 라우팅 |
 | `server::app::chat::ChatService` | class | `server/include/server/chat/chat_service.hpp` | 채팅 상태/핸들러 구현 |
+| `server::app::chat::ChatHookPluginChain` | class | `server/src/chat/chat_hook_plugin_chain.hpp` | 채팅 훅 플러그인 체인(멀티 플러그인 + reload 폴링) |
+| `server::app::chat::ChatHookPluginManager` | class | `server/src/chat/chat_hook_plugin_manager.hpp` | 단일 플러그인 로더(cache-copy + lock/sentinel) |
 | `server::app::MetricsServer` | class | `server/src/app/metrics_server.cpp` | server_app `/metrics` endpoint |
 | `gateway::GatewayApp` | class | `gateway/include/gateway/gateway_app.hpp` | 게이트웨이 라이프사이클/백엔드 선택 |
 | `gateway::GatewayApp::run` | method | `gateway/src/gateway_app.cpp` | 게이트웨이 메인 루프(리스너/메트릭 포함) |
@@ -49,6 +52,7 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 - Client -> Stack: `haproxy`(TCP) -> `gateway_app` -> `server_app`.
 - Gateway routing: sticky(`SessionDirectory`) -> least-connections(`InstanceRecord.active_sessions`) backend selection.
 - Distributed fanout: `server_app` can `psubscribe` to `${REDIS_CHANNEL_PREFIX}fanout:*` for room broadcasts.
+- Chat hook plugin(실험): `MSG_CHAT_SEND` 경로에 hot-reload 가능한 플러그인 체인을 적용(파일명 순서; cache-copy + 선택적 lock/sentinel).
 - Streams -> DB: `wb_emit`(`XADD`) -> `wb_worker`(`XREADGROUP`) -> Postgres `session_events`.
 - Metrics: each service exposes Prometheus text format on `/metrics` (ports wired in `docker/stack/docker-compose.yml`).
 
@@ -60,11 +64,14 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 | Docker 풀스택 | `docker/stack/docker-compose.yml`, `scripts/deploy_docker.ps1` | `observability` profile 포함 |
 | Observability | `docker/observability/prometheus/prometheus.yml`, `docker/observability/grafana/dashboards/` | Grafana provisioning은 `docker/observability/grafana/provisioning/` |
 | 서버 런타임 메트릭 | `core/include/server/core/runtime_metrics.hpp`, `server/src/app/metrics_server.cpp` | `/metrics` 텍스트 포맷 노출 |
+| Chat hook plugin | `server/src/chat/chat_hook_plugin_*.{hpp,cpp}`, `server/plugins/` | 설정: `docs/configuration.md`, `server/README.md` |
 | 게이트웨이 라우팅/세션 | `gateway/src/gateway_app.cpp`, `gateway/src/gateway_connection.cpp` | Redis Instance Registry + SessionDirectory |
 | Write-behind 워커 | `tools/wb_worker/main.cpp` | Redis Streams -> Postgres + `/metrics`(옵션) |
 | DB 마이그레이션 | `tools/migrations/runner.cpp`, `tools/migrations/*.sql` | `CREATE INDEX CONCURRENTLY`는 트랜잭션 밖 |
 | 프로토콜 코드 생성 | `core/protocol/system_opcodes.json`, `tools/gen_opcodes.py`, `protocol/wire_map.json`, `tools/gen_wire_codec.py` | 생성 대상: `core/include/server/core/protocol/system_opcodes.hpp`, `core/include/server/wire/codec.hpp` |
-| 테스트 | `tests/CMakeLists.txt`, `scripts/smoke_wb.ps1` | `ctest --test-dir build-windows/tests` |
+| Opcode 문서/검증 | `tools/gen_opcode_docs.py`, `docs/protocol/opcodes.md` | system/game 전체 16-bit 중복 검증 + CI 체크 |
+| CI | `.github/workflows/ci.yml` | Windows 빌드/테스트 + Linux Docker 풀스택 스모크 + opcode check |
+| 테스트 | `tests/CMakeLists.txt`, `scripts/smoke_wb.ps1` | `ctest --preset windows-test` |
 
 ## Commands
 ```powershell
@@ -78,7 +85,10 @@ pwsh scripts/run_full_stack_observability.ps1
 pwsh scripts/deploy_docker.ps1 -Action down -Observability
 
 # Tests
-ctest --test-dir build-windows/tests
+ctest --preset windows-test
+
+# Opcode spec/doc check
+python tools/gen_opcode_docs.py --check
 ```
 
 ## Conventions
