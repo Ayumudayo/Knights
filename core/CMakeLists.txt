@@ -1,4 +1,5 @@
 add_library(server_core
+    src/app/app_host.cpp
     src/net/acceptor.cpp
     src/net/session.cpp
     src/net/dispatcher.cpp
