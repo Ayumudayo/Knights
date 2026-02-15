@@ -152,6 +152,11 @@ public:
     int Run() {
         server::core::app::install_termination_signal_handlers();
 
+        // Readiness requires both Redis and DB to function.
+        app_host_.declare_dependency("redis");
+        app_host_.declare_dependency("db");
+        app_host_.set_ready(true);
+
         if (config_.db_uri.empty()) {
             std::cerr << "WB worker: DB_URI not set" << std::endl;
             return 2;
@@ -168,6 +173,7 @@ public:
             std::cerr << "WB worker: Redis health check failed" << std::endl;
             return 3;
         }
+        app_host_.set_dependency_ok("redis", true);
 
         // Consumer Group 생성 (이미 존재하면 무시됨)
         // Consumer Group은 여러 워커가 메시지를 중복 없이 나눠서 처리하게 해줍니다.
@@ -184,7 +190,6 @@ public:
             // Loop() 내에서 처리하도록 함.
         }
 
-        app_host_.set_ready(false);
         app_host_.start_admin_http(config_.metrics_port, [this]() { return RenderMetrics(); });
 
         // 메인 루프 시작
@@ -196,10 +201,10 @@ private:
     bool EnsureDbConnection() {
         if (db_ && db_->is_open()) {
             if (EnsureDbPrepared()) {
-                app_host_.set_ready(true);
+                app_host_.set_dependency_ok("db", true);
                 return true;
             }
-            app_host_.set_ready(false);
+            app_host_.set_dependency_ok("db", false);
             return false;
         }
 
@@ -210,16 +215,16 @@ private:
                 info("DB connected successfully.");
                 if (!EnsureDbPrepared()) {
                     server::core::log::warn("DB connected but prepare failed; will retry");
-                    app_host_.set_ready(false);
+                    app_host_.set_dependency_ok("db", false);
                     return false;
                 }
-                app_host_.set_ready(true);
+                app_host_.set_dependency_ok("db", true);
                 return true;
             }
         } catch (const std::exception& e) {
             std::cerr << "DB connection attempt failed: " << e.what() << std::endl;
         }
-        app_host_.set_ready(false);
+        app_host_.set_dependency_ok("db", false);
         return false;
     }
 
@@ -641,6 +646,8 @@ private:
         stream << "wb_flush_commit_ms_sum " << wb_flush_commit_ms_sum_.load(std::memory_order_relaxed) << "\n";
         stream << "# TYPE wb_flush_commit_ms_count counter\n";
         stream << "wb_flush_commit_ms_count " << wb_flush_commit_ms_count_.load(std::memory_order_relaxed) << "\n";
+
+        stream << app_host_.dependency_metrics_text();
 
         return stream.str();
     }
