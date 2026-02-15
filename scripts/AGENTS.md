@@ -16,3 +16,7 @@ pwsh scripts/build.ps1 -Config Debug -Target server_app
 pwsh scripts/configure_windows_ninja.ps1 -CopyCompileCommands
 pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 ```
+
+## Related Checks
+- Opcode spec/doc check (CI uses this): `python tools/gen_opcode_docs.py --check`
+- Sanitizers (Linux): `cmake --preset linux-asan` (sets `KNIGHTS_ENABLE_SANITIZERS=ON`)

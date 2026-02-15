@@ -8,8 +8,15 @@ Aux binaries + code generation.
 - `tools/wb_check/main.cpp` + `tools/wb_check/README.md`: verify Postgres `session_events` contains an `event_id`.
 - `tools/wb_dlq_replayer/main.cpp` + `tools/wb_dlq_replayer/README.md`: replay DLQ stream -> Postgres (and/or dead stream).
 - `tools/migrations/runner.cpp` + `tools/migrations/*.sql`: schema migrations.
-- `tools/gen_opcodes.py`: generates `core/include/server/core/protocol/system_opcodes.hpp` from `core/protocol/system_opcodes.json`.
+- `tools/gen_opcodes.py`: generates opcode headers from JSON specs (grouping + `opcode_name()` helpers).
+- `tools/gen_opcode_docs.py`: validates opcode specs and generates `docs/protocol/opcodes.md` (system/game share the same 16-bit space).
 - `tools/gen_wire_codec.py`: generates `core/include/server/wire/codec.hpp` from `protocol/wire_map.json`.
+
+## Opcode Codegen
+- Specs (JSON): `core/protocol/system_opcodes.json`, `server/protocol/game_opcodes.json`
+- Generated headers (C++): `core/include/server/core/protocol/system_opcodes.hpp`, `server/include/server/protocol/game_opcodes.hpp`
+- Docs: `tools/gen_opcode_docs.py` -> `docs/protocol/opcodes.md`
+- CI check: `python tools/gen_opcode_docs.py --check`
 
 ## Related Tool Docs
 - `tools/wb_emit/README.md`: emit test events into Redis Streams.

@@ -17,7 +17,7 @@ pwsh scripts/build.ps1 -Config Debug -Target chat_history_tests
 
 Run:
 ```powershell
-ctest --test-dir build-windows/tests
+ctest --preset windows-test
 ```
 
 Note: `ctest` does not rebuild binaries. If a test executable fails to start with an error like "entry point not found" (often after vcpkg updates or branch switches), rebuild the affected test target(s) or do a clean rebuild of `build-windows/`.
