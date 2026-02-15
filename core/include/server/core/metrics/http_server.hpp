@@ -14,11 +14,13 @@ class MetricsHttpServer {
 public:
     using MetricsCallback = std::function<std::string()>;
     using StatusCallback = std::function<bool()>;
+    using LogsCallback = std::function<std::string()>;
 
     MetricsHttpServer(unsigned short port,
                       MetricsCallback metrics_callback,
                       StatusCallback health_callback = {},
-                      StatusCallback ready_callback = {});
+                      StatusCallback ready_callback = {},
+                      LogsCallback logs_callback = {});
     ~MetricsHttpServer();
 
     void start();
@@ -31,6 +33,7 @@ private:
     MetricsCallback callback_;
     StatusCallback health_callback_;
     StatusCallback ready_callback_;
+    LogsCallback logs_callback_;
     std::shared_ptr<boost::asio::io_context> io_context_;
     std::shared_ptr<boost::asio::ip::tcp::acceptor> acceptor_;
     std::unique_ptr<std::thread> thread_;
