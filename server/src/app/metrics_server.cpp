@@ -1,18 +1,25 @@
 #include "server/app/metrics_server.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/metrics/build_info.hpp"
 #include "server/core/runtime_metrics.hpp"
+#include "server/core/protocol/system_opcodes.hpp"
+#include "server/protocol/game_opcodes.hpp"
+#include "server/core/util/service_registry.hpp"
+#include "server/chat/chat_service.hpp"
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/write.hpp>
 #include <iostream>
 #include <sstream>
 #include <iomanip>
+#include <string_view>
 
 namespace server::app {
 
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 namespace corelog = server::core::log;
+namespace services = server::core::util::services;
 
 // 전역 메트릭 변수 (bootstrap.cpp에서 정의됨, extern으로 참조)
 extern std::atomic<std::uint64_t> g_subscribe_total;
@@ -100,6 +107,10 @@ void MetricsServer::do_accept() {
                     } else if (target == "/metrics" || target == "/") {
                         auto snap = server::core::runtime_metrics::snapshot();
                         std::ostringstream stream;
+
+                        // Build metadata (git hash/describe + build time)
+                        server::core::metrics::append_build_info(stream);
+
                         auto append_counter = [&](const char* name, std::uint64_t value) {
                             stream << "# TYPE " << name << " counter\n" << name << ' ' << value << '\n';
                         };
@@ -181,6 +192,114 @@ void MetricsServer::do_accept() {
                                 std::ostringstream label;
                                 label << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << opcode;
                                 stream << "chat_dispatch_opcode_total{opcode=\"0x" << label.str() << "\"} " << count << "\n";
+                            }
+
+                            // Same counter, but with stable, human-readable opcode names.
+                            // Keep the original metric intact to avoid breaking existing dashboards.
+                            stream << "# TYPE chat_dispatch_opcode_named_total counter\n";
+                            for (const auto& [opcode, count] : snap.opcode_counts) {
+                                std::string_view name = server::protocol::opcode_name(opcode);
+                                if (name.empty()) {
+                                    name = server::core::protocol::opcode_name(opcode);
+                                }
+                                if (name.empty()) {
+                                    name = "unknown";
+                                }
+
+                                std::ostringstream label;
+                                label << std::hex << std::uppercase << std::setw(4) << std::setfill('0') << opcode;
+                                stream << "chat_dispatch_opcode_named_total{opcode=\"0x" << label.str() << "\",name=\"" << name << "\"} " << count << "\n";
+                            }
+                        }
+
+                        // Chat hook plugins (hot-reloadable shared libraries)
+                        {
+                            const auto escape_label_value = [](std::string_view s) {
+                                std::string out;
+                                out.reserve(s.size());
+                                for (const char c : s) {
+                                    switch (c) {
+                                    case '\\': out += "\\\\"; break;
+                                    case '"': out += "\\\""; break;
+                                    case '\n': out += "\\n"; break;
+                                    default: out.push_back(c); break;
+                                    }
+                                }
+                                return out;
+                            };
+
+                            const auto append_gauge_labeled = [&](const char* name,
+                                                                  std::string_view labels,
+                                                                  long double value) {
+                                stream << name << '{' << labels << "} ";
+                                stream << std::fixed << std::setprecision(3) << value << "\n";
+                                stream << std::defaultfloat << std::setprecision(6);
+                            };
+
+                            const auto append_counter_labeled = [&](const char* name,
+                                                                    std::string_view labels,
+                                                                    std::uint64_t value) {
+                                stream << name << '{' << labels << "} " << value << "\n";
+                            };
+
+                            server::app::chat::ChatService::ChatHookPluginsMetrics pm;
+                            bool have_pm = false;
+                            if (auto chat = services::get<server::app::chat::ChatService>()) {
+                                pm = chat->chat_hook_plugins_metrics();
+                                have_pm = true;
+                            } else {
+                                pm.enabled = false;
+                                pm.mode = "none";
+                            }
+
+                            stream << "# TYPE chat_hook_plugins_enabled gauge\n";
+                            stream << "chat_hook_plugins_enabled{mode=\"";
+                            stream << escape_label_value(pm.mode);
+                            stream << "\"} " << (pm.enabled ? 1 : 0) << "\n";
+
+                            stream << "# TYPE chat_hook_plugins_count gauge\n";
+                            stream << "chat_hook_plugins_count " << static_cast<long double>(pm.plugins.size()) << "\n";
+
+                            std::size_t loaded = 0;
+                            for (const auto& p : pm.plugins) {
+                                if (p.loaded) {
+                                    ++loaded;
+                                }
+                            }
+                            stream << "# TYPE chat_hook_plugins_loaded gauge\n";
+                            stream << "chat_hook_plugins_loaded " << static_cast<long double>(loaded) << "\n";
+
+                            if (have_pm && !pm.plugins.empty()) {
+                                stream << "# TYPE chat_hook_plugin_loaded gauge\n";
+                                stream << "# TYPE chat_hook_plugin_order gauge\n";
+                                stream << "# TYPE chat_hook_plugin_info gauge\n";
+                                stream << "# TYPE chat_hook_plugin_reload_attempt_total counter\n";
+                                stream << "# TYPE chat_hook_plugin_reload_success_total counter\n";
+                                stream << "# TYPE chat_hook_plugin_reload_failure_total counter\n";
+
+                                for (std::size_t i = 0; i < pm.plugins.size(); ++i) {
+                                    const auto& p = pm.plugins[i];
+                                    if (p.file.empty()) {
+                                        continue;
+                                    }
+
+                                    const auto file = escape_label_value(p.file);
+                                    std::string labels = std::string("file=\"") + file + "\"";
+
+                                    append_gauge_labeled("chat_hook_plugin_loaded", labels, p.loaded ? 1.0L : 0.0L);
+                                    append_gauge_labeled("chat_hook_plugin_order", labels, static_cast<long double>(i + 1));
+
+                                    append_counter_labeled("chat_hook_plugin_reload_attempt_total", labels, p.reload_attempt_total);
+                                    append_counter_labeled("chat_hook_plugin_reload_success_total", labels, p.reload_success_total);
+                                    append_counter_labeled("chat_hook_plugin_reload_failure_total", labels, p.reload_failure_total);
+
+                                    if (p.loaded) {
+                                        std::string info_labels = labels;
+                                        info_labels += ",name=\"" + escape_label_value(p.name) + "\"";
+                                        info_labels += ",version=\"" + escape_label_value(p.version) + "\"";
+                                        append_gauge_labeled("chat_hook_plugin_info", info_labels, 1.0L);
+                                    }
+                                }
                             }
                         }
 
