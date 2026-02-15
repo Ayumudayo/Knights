@@ -12,7 +12,7 @@
 
 #include "server/storage/redis/client.hpp"
 #include "server/core/util/log.hpp"
-#include "server/core/metrics/http_server.hpp"
+#include "server/core/app/app_host.hpp"
 #include "server/core/metrics/build_info.hpp"
 #include <pqxx/pqxx>
 #include <nlohmann/json.hpp>
@@ -150,6 +150,8 @@ public:
     explicit WbWorker(WorkerConfig config) : config_(std::move(config)) {}
 
     int Run() {
+        server::core::app::install_termination_signal_handlers();
+
         if (config_.db_uri.empty()) {
             std::cerr << "WB worker: DB_URI not set" << std::endl;
             return 2;
@@ -182,12 +184,8 @@ public:
             // Loop() 내에서 처리하도록 함.
         }
 
-        if (config_.metrics_port != 0) {
-            metrics_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(
-                config_.metrics_port,
-                [this]() { return RenderMetrics(); });
-            metrics_server_->start();
-        }
+        app_host_.set_ready(false);
+        app_host_.start_admin_http(config_.metrics_port, [this]() { return RenderMetrics(); });
 
         // 메인 루프 시작
         Loop();
@@ -196,7 +194,14 @@ public:
 
 private:
     bool EnsureDbConnection() {
-        if (db_ && db_->is_open()) return true;
+        if (db_ && db_->is_open()) {
+            if (EnsureDbPrepared()) {
+                app_host_.set_ready(true);
+                return true;
+            }
+            app_host_.set_ready(false);
+            return false;
+        }
 
         try {
             db_prepared_ = false;
@@ -205,13 +210,16 @@ private:
                 info("DB connected successfully.");
                 if (!EnsureDbPrepared()) {
                     server::core::log::warn("DB connected but prepare failed; will retry");
+                    app_host_.set_ready(false);
                     return false;
                 }
+                app_host_.set_ready(true);
                 return true;
             }
         } catch (const std::exception& e) {
             std::cerr << "DB connection attempt failed: " << e.what() << std::endl;
         }
+        app_host_.set_ready(false);
         return false;
     }
 
@@ -272,7 +280,7 @@ private:
         buf.reserve(config_.batch_max_events);
         std::size_t buf_bytes = 0;
 
-        while (true) {
+        while (!app_host_.stop_requested()) {
             // DB 연결 확인 (끊어졌으면 재연결 시도)
             if (!EnsureDbConnection()) {
                 std::this_thread::sleep_for(std::chrono::seconds(1));
@@ -546,12 +554,13 @@ private:
         }
     }
 
+    server::core::app::AppHost app_host_{"wb_worker"};
+
     WorkerConfig config_;
     std::shared_ptr<server::storage::redis::IRedisClient> redis_;
     std::unique_ptr<pqxx::connection> db_;
     bool db_prepared_{false};
 
-    std::unique_ptr<server::core::metrics::MetricsHttpServer> metrics_server_;
     std::atomic<long long> wb_pending_{0};
 
     std::string reclaim_next_id_{"0-0"};
