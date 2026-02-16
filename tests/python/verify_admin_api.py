@@ -102,6 +102,7 @@ def main() -> int:
             "instances_ready",
             "instances_not_ready",
             "http_errors_total",
+            "http_server_errors_total",
             "http_unauthorized_total",
             "http_forbidden_total",
         ):
@@ -109,6 +110,24 @@ def main() -> int:
                 raise RuntimeError(f"overview.counts missing '{key}'")
             if not isinstance(counts[key], int):
                 raise RuntimeError(f"overview.counts.{key} expected int")
+
+        audit_trend = data.get("audit_trend", {})
+        if "step_ms" not in audit_trend or "max_points" not in audit_trend:
+            raise RuntimeError("overview.audit_trend missing step_ms/max_points")
+        points = audit_trend.get("points")
+        if not isinstance(points, list):
+            raise RuntimeError("overview.audit_trend.points expected list")
+        if points:
+            sample = points[-1]
+            for key in (
+                "timestamp_ms",
+                "http_errors_total",
+                "http_server_errors_total",
+                "http_unauthorized_total",
+                "http_forbidden_total",
+            ):
+                if key not in sample:
+                    raise RuntimeError(f"overview.audit_trend.points sample missing '{key}'")
 
         if "meta" not in overview or "request_id" not in overview["meta"]:
             raise RuntimeError("overview meta.request_id missing")

@@ -21,6 +21,7 @@
 | --- | --- | --- |
 | `METRICS_PORT` | admin HTTP 포트 | `39200` |
 | `ADMIN_POLL_INTERVAL_MS` | 백그라운드 상태 수집 주기(ms) | `1000` |
+| `ADMIN_AUDIT_TREND_MAX_POINTS` | overview audit_trend 히스토리 최대 포인트 수 | `300` |
 | `ADMIN_INSTANCE_METRICS_PORT` | instance detail 조회 시 metrics/ready probe 포트 | `9090` |
 | `REDIS_URI` | Redis 연결 문자열(인스턴스/세션 조회용) | (unset) |
 | `SERVER_REGISTRY_PREFIX` | 인스턴스 레지스트리 prefix | `gateway/instances/` |
@@ -86,3 +87,11 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 - `method`, `path`, `resource`
 - `result`, `status_code`, `latency_ms`
 - `source_ip`, `timestamp`
+
+## Overview 트렌드
+
+`GET /api/v1/overview`는 `counts` 외에 `audit_trend`를 제공한다.
+
+- `counts.http_server_errors_total`
+- `audit_trend.step_ms`, `audit_trend.max_points`
+- `audit_trend.points[]` (`timestamp_ms`, `http_errors_total`, `http_server_errors_total`, `http_unauthorized_total`, `http_forbidden_total`)

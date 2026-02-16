@@ -128,8 +128,17 @@ Phase 1 구현 스펙(현재):
 응답 필드:
 
 - `services`: `gateway`, `server`, `wb_worker`, `haproxy` 요약
-- `counts`: ready/up/down 집계 + `http_errors_total`, `http_unauthorized_total`, `http_forbidden_total`
+- `counts`: ready/up/down 집계 + `http_errors_total`, `http_server_errors_total`, `http_unauthorized_total`, `http_forbidden_total`
+- `audit_trend`: 최근 카운터 스냅샷 (`step_ms`, `max_points`, `points[]`)
 - `generated_at_ms`
+
+`audit_trend.points[]` 필드:
+
+- `timestamp_ms`
+- `http_errors_total`
+- `http_server_errors_total`
+- `http_unauthorized_total`
+- `http_forbidden_total`
 
 데이터 소스:
 

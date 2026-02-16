@@ -43,6 +43,8 @@ MVP 네비게이션:
   - not ready instance 존재 시 강조
 - 최근 에러 카운터
   - `admin_http_errors_total`
+  - `admin_http_server_errors_total`
+  - `admin_http_unauthorized_total`, `admin_http_forbidden_total`
 
 API 매핑:
 

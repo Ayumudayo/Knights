@@ -75,7 +75,8 @@ pwsh scripts/check_observability.ps1
 
 ### admin_app
 - Build: `knights_build_info{...} 1`
-- API traffic: `admin_http_requests_total`, `admin_http_errors_total` (counters)
+- API traffic: `admin_http_requests_total`, `admin_http_errors_total`, `admin_http_server_errors_total` (counters)
+- Auth traffic: `admin_http_unauthorized_total`, `admin_http_forbidden_total` (counters)
 - API per-surface: `admin_overview_requests_total`, `admin_instances_requests_total`, `admin_session_lookup_requests_total`, `admin_worker_requests_total` (counters)
 - Polling/cache: `admin_poll_errors_total` (counter), `admin_instances_cached` (gauge)
 - Dependency/state: `admin_redis_available`, `admin_worker_metrics_available`, `admin_read_only_mode` (gauges)

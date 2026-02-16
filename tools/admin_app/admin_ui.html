@@ -157,6 +157,68 @@
       gap: 6px;
       margin-top: 8px;
     }
+    .trend-grid {
+      margin-top: 8px;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    }
+    .trend-card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fcfefe;
+      padding: 8px 9px;
+      display: grid;
+      gap: 4px;
+    }
+    .trend-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 8px;
+    }
+    .trend-label {
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .trend-total {
+      font-size: 15px;
+      font-weight: 700;
+      color: #1f3742;
+    }
+    .trend-delta {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+    }
+    .trend-delta.up { color: var(--err); }
+    .trend-delta.flat { color: #3f545e; }
+    .trend-delta.down { color: var(--ok); }
+    .sparkline {
+      width: 100%;
+      height: 36px;
+      display: block;
+    }
+    .sparkline path {
+      fill: none;
+      stroke-width: 2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    .sparkline .grid {
+      stroke: #dde8ec;
+      stroke-width: 1;
+    }
+    .trend-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 11px;
+    }
     .status-item {
       border: 1px solid var(--line);
       border-radius: 10px;
@@ -344,6 +406,7 @@
         <div class="panel-body">
           <div class="cards" id="overview-cards"></div>
           <div class="status-list" id="service-status"></div>
+          <div id="audit-trend" class="trend-grid"><div class="muted">Audit trend data is warming up...</div></div>
           <div id="overview-error"></div>
         </div>
       </article>
@@ -432,6 +495,7 @@
       modePill: document.getElementById('mode-pill'),
       overviewCards: document.getElementById('overview-cards'),
       serviceStatus: document.getElementById('service-status'),
+      auditTrend: document.getElementById('audit-trend'),
       overviewError: document.getElementById('overview-error'),
       workerCards: document.getElementById('worker-cards'),
       workerChip: document.getElementById('worker-chip'),
@@ -512,6 +576,127 @@
         return fallback;
       }
       return Math.floor(n);
+    }
+
+    function toNum(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) {
+        return 0;
+      }
+      return n;
+    }
+
+    function sum(values) {
+      if (!Array.isArray(values)) {
+        return 0;
+      }
+      return values.reduce((acc, cur) => acc + toNum(cur), 0);
+    }
+
+    function sparklinePath(values, width, height, padding) {
+      if (!Array.isArray(values) || values.length === 0) {
+        return '';
+      }
+      const points = values.map((v) => Math.max(0, toNum(v)));
+      const max = Math.max(...points, 1);
+      const min = Math.min(...points, 0);
+      const range = Math.max(1, max - min);
+
+      if (points.length === 1) {
+        const y = height - padding - (((points[0] - min) / range) * (height - (padding * 2)));
+        return `M ${padding} ${y} L ${width - padding} ${y}`;
+      }
+
+      let d = '';
+      for (let i = 0; i < points.length; i += 1) {
+        const x = padding + ((width - (padding * 2)) * (i / (points.length - 1)));
+        const y = height - padding - (((points[i] - min) / range) * (height - (padding * 2)));
+        d += (i === 0 ? 'M ' : ' L ') + x + ' ' + y;
+      }
+      return d;
+    }
+
+    function sparklineSvg(values, toneClass) {
+      const width = 150;
+      const height = 36;
+      const padding = 2;
+      const path = sparklinePath(values, width, height, padding);
+      if (!path) {
+        return '<span class="muted">n/a</span>';
+      }
+
+      let stroke = '#3f545e';
+      if (toneClass === 'err') {
+        stroke = '#b62f2f';
+      } else if (toneClass === 'warn') {
+        stroke = '#b06b1c';
+      } else if (toneClass === 'ok') {
+        stroke = '#1f8454';
+      }
+
+      return '<svg class="sparkline" viewBox="0 0 ' + width + ' ' + height + '" preserveAspectRatio="none" role="img" aria-label="trend">' +
+        '<path class="grid" d="M 0 ' + (height - 1) + ' L ' + width + ' ' + (height - 1) + '"></path>' +
+        '<path style="stroke:' + stroke + ';" d="' + path + '"></path>' +
+        '</svg>';
+    }
+
+    function toStepSeries(points, key) {
+      if (!Array.isArray(points) || points.length === 0) {
+        return [];
+      }
+      const out = [];
+      for (let i = 0; i < points.length; i += 1) {
+        const current = toNum(points[i] && points[i][key]);
+        const prev = i > 0 ? toNum(points[i - 1] && points[i - 1][key]) : current;
+        out.push(Math.max(0, current - prev));
+      }
+      return out;
+    }
+
+    function renderAuditTrend(data) {
+      const counts = data && data.counts ? data.counts : {};
+      const trend = data && data.audit_trend ? data.audit_trend : {};
+      const points = Array.isArray(trend.points) ? trend.points : [];
+      const stepMs = readInt(trend.step_ms, state.refreshMs);
+      const windowPoints = Math.min(points.length, 120);
+      const windowSlice = points.slice(-windowPoints);
+
+      if (windowSlice.length === 0) {
+        dom.auditTrend.innerHTML = '<div class="muted">Audit trend data is warming up...</div>';
+        return;
+      }
+
+      const spanMs = Math.max(0, (windowSlice.length - 1) * stepMs);
+      const spanLabel = spanMs >= 60000
+        ? ('last ' + Math.max(1, Math.round(spanMs / 60000)) + 'm')
+        : ('last ' + Math.max(1, Math.round(spanMs / 1000)) + 's');
+
+      const specs = [
+        ['http_errors_total', 'Total Errors', 'err'],
+        ['http_server_errors_total', '5xx Errors', 'err'],
+        ['http_unauthorized_total', '401 Unauthorized', 'warn'],
+        ['http_forbidden_total', '403 Forbidden', 'warn'],
+      ];
+
+      dom.auditTrend.innerHTML = specs.map((spec) => {
+        const key = spec[0];
+        const label = spec[1];
+        const tone = spec[2];
+        const currentTotal = toNum(counts[key]);
+        const steps = toStepSeries(windowSlice, key);
+        const windowDelta = sum(steps);
+        const peak = steps.length > 0 ? Math.max(...steps) : 0;
+        const deltaClass = windowDelta > 0 ? 'up' : 'flat';
+
+        return '<div class="trend-card">' +
+          '<div class="trend-head"><span class="trend-label">' + label + '</span><span class="trend-total">' + fmtNum(currentTotal) + '</span></div>' +
+          sparklineSvg(steps, tone) +
+          '<div class="trend-foot">' +
+            '<span class="trend-delta ' + deltaClass + '">' + (windowDelta > 0 ? '+' : '') + fmtNum(windowDelta) + ' in ' + spanLabel + '</span>' +
+            '<span class="mono">peak ' + fmtNum(peak) + '/tick</span>' +
+          '</div>' +
+        '</div>';
+      }).join('');
     }
 
     async function apiGet(path) {
@@ -606,6 +791,7 @@
         ['Instances Ready', fmtNum(counts.instances_ready)],
         ['Instances Not Ready', fmtNum(counts.instances_not_ready)],
         ['HTTP Errors', fmtNum(counts.http_errors_total)],
+        ['HTTP 5xx', fmtNum(counts.http_server_errors_total)],
         ['401 Unauthorized', fmtNum(counts.http_unauthorized_total)],
         ['403 Forbidden', fmtNum(counts.http_forbidden_total)],
         ['Redis Available', services.redis && services.redis.available ? 'yes' : 'no'],
@@ -627,6 +813,7 @@
 
       const ok = !!(data && data.healthy && data.ready);
       setChip(dom.overallChip, ok ? 'Healthy' : 'Degraded', ok ? 'ok' : 'warn');
+      renderAuditTrend(data);
       dom.overviewError.innerHTML = '';
     }
 
@@ -778,6 +965,7 @@
       const res = await apiGet('/api/v1/overview');
       if (!res.ok) {
         dom.overviewError.innerHTML = asError('Overview: ' + res.code + ' - ' + res.message);
+        dom.auditTrend.innerHTML = '<div class="muted">Audit trend unavailable.</div>';
         applyAuthError('Overview', res);
         setChip(dom.overallChip, 'Degraded', 'warn');
         return false;

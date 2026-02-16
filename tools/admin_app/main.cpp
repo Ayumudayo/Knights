@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
+#include <deque>
 #include <fstream>
 #include <limits>
 #include <memory>
@@ -49,6 +50,8 @@ constexpr std::uint32_t kDefaultTimeoutMs = 1500;
 constexpr std::uint32_t kMaxTimeoutMs = 5000;
 constexpr std::uint32_t kDefaultLimit = 100;
 constexpr std::uint32_t kMaxLimit = 500;
+constexpr std::uint32_t kDefaultAuditTrendMaxPoints = 300;
+constexpr std::uint32_t kMaxAuditTrendMaxPoints = 5000;
 
 constexpr std::string_view kAdminUiFileName = "admin_ui.html";
 
@@ -573,6 +576,7 @@ public:
         admin_ui_html_ = load_admin_ui_html();
         init_dependencies();
         init_backends();
+        capture_audit_trend_point();
 
         poller_running_.store(true, std::memory_order_release);
         poller_ = std::thread([this]() { poll_loop(); });
@@ -648,9 +652,22 @@ private:
         std::string source_ip;
     };
 
+    struct AuditTrendPoint {
+        std::uint64_t timestamp_ms{0};
+        std::uint64_t http_errors_total{0};
+        std::uint64_t http_unauthorized_total{0};
+        std::uint64_t http_forbidden_total{0};
+        std::uint64_t http_server_errors_total{0};
+    };
+
     void load_config() {
         metrics_port_ = read_env_u16("METRICS_PORT", kDefaultAdminPort, 1, 65535);
         poll_interval_ms_ = read_env_u32("ADMIN_POLL_INTERVAL_MS", kDefaultPollIntervalMs, 100, 60000);
+        audit_trend_max_points_ = read_env_u32(
+            "ADMIN_AUDIT_TREND_MAX_POINTS",
+            kDefaultAuditTrendMaxPoints,
+            30,
+            kMaxAuditTrendMaxPoints);
         instance_metrics_port_ = read_env_u16("ADMIN_INSTANCE_METRICS_PORT", kDefaultInstanceMetricsPort, 1, 65535);
 
         redis_uri_ = read_env_string("REDIS_URI", "");
@@ -815,6 +832,22 @@ private:
         corelog::info(log.str());
     }
 
+    void capture_audit_trend_point() {
+        AuditTrendPoint point;
+        point.timestamp_ms = now_ms();
+        point.http_errors_total = http_errors_total_.load(std::memory_order_relaxed);
+        point.http_unauthorized_total = http_unauthorized_total_.load(std::memory_order_relaxed);
+        point.http_forbidden_total = http_forbidden_total_.load(std::memory_order_relaxed);
+        point.http_server_errors_total = http_server_errors_total_.load(std::memory_order_relaxed);
+
+        std::lock_guard<std::mutex> lock(cache_mutex_);
+        audit_trend_points_.push_back(point);
+        const std::size_t max_points = static_cast<std::size_t>(audit_trend_max_points_);
+        while (audit_trend_points_.size() > max_points) {
+            audit_trend_points_.pop_front();
+        }
+    }
+
     std::string make_instance_metrics_url(const server::state::InstanceRecord& item) const {
         return "http://" + item.host + ":" + std::to_string(instance_metrics_port_) + "/metrics";
     }
@@ -887,6 +920,7 @@ private:
         while (poller_running_.load(std::memory_order_acquire) && !app_host_.stop_requested()) {
             refresh_instances_cache();
             refresh_worker_cache();
+            capture_audit_trend_point();
             std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_));
         }
     }
@@ -1002,6 +1036,10 @@ private:
         stream << "admin_http_forbidden_total "
                << http_forbidden_total_.load(std::memory_order_relaxed) << "\n";
 
+        stream << "# TYPE admin_http_server_errors_total counter\n";
+        stream << "admin_http_server_errors_total "
+               << http_server_errors_total_.load(std::memory_order_relaxed) << "\n";
+
         stream << "# TYPE admin_overview_requests_total counter\n";
         stream << "admin_overview_requests_total " << overview_requests_total_.load(std::memory_order_relaxed) << "\n";
 
@@ -1080,6 +1118,10 @@ private:
                 http_unauthorized_total_.fetch_add(1, std::memory_order_relaxed);
             } else if (status_code == 403) {
                 http_forbidden_total_.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            if (status_code >= 500) {
+                http_server_errors_total_.fetch_add(1, std::memory_order_relaxed);
             }
 
             emit_audit_log(event);
@@ -1195,6 +1237,7 @@ private:
         std::size_t ready = 0;
         std::uint64_t instances_updated_ms = 0;
         WorkerSnapshot worker;
+        std::deque<AuditTrendPoint> audit_trend;
         {
             std::lock_guard<std::mutex> lock(cache_mutex_);
             total = instances_cache_.size();
@@ -1202,6 +1245,7 @@ private:
                 std::count_if(instances_cache_.begin(), instances_cache_.end(), [](const auto& v) { return v.ready; }));
             instances_updated_ms = instances_updated_at_ms_;
             worker = worker_cache_;
+            audit_trend = audit_trend_points_;
         }
 
         std::ostringstream data;
@@ -1246,7 +1290,27 @@ private:
         data << "\"http_errors_total\":" << http_errors_total_.load(std::memory_order_relaxed) << ",";
         data << "\"http_unauthorized_total\":" << http_unauthorized_total_.load(std::memory_order_relaxed)
              << ",";
-        data << "\"http_forbidden_total\":" << http_forbidden_total_.load(std::memory_order_relaxed);
+        data << "\"http_forbidden_total\":" << http_forbidden_total_.load(std::memory_order_relaxed) << ",";
+        data << "\"http_server_errors_total\":" << http_server_errors_total_.load(std::memory_order_relaxed);
+        data << "},";
+        data << "\"audit_trend\":{";
+        data << "\"step_ms\":" << poll_interval_ms_ << ",";
+        data << "\"max_points\":" << audit_trend_max_points_ << ",";
+        data << "\"points\":[";
+        for (std::size_t i = 0; i < audit_trend.size(); ++i) {
+            const auto& point = audit_trend[i];
+            if (i != 0) {
+                data << ",";
+            }
+            data << "{";
+            data << "\"timestamp_ms\":" << point.timestamp_ms << ",";
+            data << "\"http_errors_total\":" << point.http_errors_total << ",";
+            data << "\"http_unauthorized_total\":" << point.http_unauthorized_total << ",";
+            data << "\"http_forbidden_total\":" << point.http_forbidden_total << ",";
+            data << "\"http_server_errors_total\":" << point.http_server_errors_total;
+            data << "}";
+        }
+        data << "]";
         data << "},";
         data << "\"updated_at\":{";
         data << "\"instances_ms\":" << instances_updated_ms << ",";
@@ -1623,6 +1687,7 @@ private:
     std::uint16_t metrics_port_{kDefaultAdminPort};
     std::uint16_t instance_metrics_port_{kDefaultInstanceMetricsPort};
     std::uint32_t poll_interval_ms_{kDefaultPollIntervalMs};
+    std::uint32_t audit_trend_max_points_{kDefaultAuditTrendMaxPoints};
 
     std::string redis_uri_;
     std::string registry_prefix_;
@@ -1656,6 +1721,7 @@ private:
     std::unordered_map<std::string, InstanceDetailSnapshot> instance_details_index_;
     std::uint64_t instances_updated_at_ms_{0};
     WorkerSnapshot worker_cache_;
+    std::deque<AuditTrendPoint> audit_trend_points_;
 
     std::atomic<bool> redis_available_{false};
     std::atomic<bool> worker_available_{false};
@@ -1664,6 +1730,7 @@ private:
     std::atomic<std::uint64_t> http_errors_total_{0};
     std::atomic<std::uint64_t> http_unauthorized_total_{0};
     std::atomic<std::uint64_t> http_forbidden_total_{0};
+    std::atomic<std::uint64_t> http_server_errors_total_{0};
     std::atomic<std::uint64_t> overview_requests_total_{0};
     std::atomic<std::uint64_t> auth_context_requests_total_{0};
     std::atomic<std::uint64_t> instances_requests_total_{0};
