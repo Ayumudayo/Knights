@@ -172,6 +172,11 @@ services:
       - knights-stack
     ports:
       - "${ADMIN_APP_HOST_PORT:-39200}:39200"
+    healthcheck:
+      test: ["CMD", "bash", "-lc", "exec 3<>/dev/tcp/127.0.0.1/39200 && printf 'GET /healthz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && IFS= read -r line <&3 && [[ \"$$line\" == *\" 200 \"* ]]"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   gateway-1:
     <<: *knights-app

@@ -4,7 +4,7 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <string_view>
+#include <unordered_map>
 #include <thread>
 #include <atomic>
 #include <boost/asio/io_context.hpp>
@@ -14,6 +14,13 @@ namespace server::core::metrics {
 
 class MetricsHttpServer {
 public:
+    struct HttpRequest {
+        std::string method;
+        std::string target;
+        std::unordered_map<std::string, std::string> headers;
+        std::string source_ip;
+    };
+
     struct RouteResponse {
         std::string status;
         std::string content_type;
@@ -24,8 +31,7 @@ public:
     using StatusCallback = std::function<bool()>;
     using StatusBodyCallback = std::function<std::string(bool ok)>;
     using LogsCallback = std::function<std::string()>;
-    using RouteCallback = std::function<std::optional<RouteResponse>(std::string_view method,
-                                                                     std::string_view target)>;
+    using RouteCallback = std::function<std::optional<RouteResponse>(const HttpRequest& request)>;
 
     MetricsHttpServer(unsigned short port,
                       MetricsCallback metrics_callback,

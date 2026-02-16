@@ -1,8 +1,10 @@
 #include "server/core/metrics/http_server.hpp"
 #include "server/core/util/log.hpp"
+#include <algorithm>
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/read_until.hpp>
 #include <boost/asio/write.hpp>
+#include <cctype>
 #include <iostream>
 #include <sstream>
 
@@ -11,6 +13,27 @@ namespace server::core::metrics {
 namespace asio = boost::asio;
 using tcp = asio::ip::tcp;
 namespace corelog = server::core::log;
+
+std::string trim_ascii(std::string_view value) {
+    std::size_t begin = 0;
+    while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin])) != 0) {
+        ++begin;
+    }
+
+    std::size_t end = value.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
+        --end;
+    }
+    return std::string(value.substr(begin, end - begin));
+}
+
+std::string to_lower_ascii(std::string_view value) {
+    std::string out(value);
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return out;
+}
 
 MetricsHttpServer::MetricsHttpServer(unsigned short port,
                                      MetricsCallback metrics_callback,
@@ -82,13 +105,45 @@ void MetricsHttpServer::do_accept() {
                     std::getline(request_stream, request_line);
                     if (!request_line.empty() && request_line.back() == '\r') request_line.pop_back();
 
-                    std::string method;
-                    std::string target;
+                    MetricsHttpServer::HttpRequest request;
                     {
                         std::istringstream line_stream(request_line);
-                        line_stream >> method >> target;
+                        line_stream >> request.method >> request.target;
                     }
-                    if (target.empty()) target = "/metrics";
+                    if (request.target.empty()) request.target = "/metrics";
+
+                    std::string header_line;
+                    while (std::getline(request_stream, header_line)) {
+                        if (!header_line.empty() && header_line.back() == '\r') {
+                            header_line.pop_back();
+                        }
+                        if (header_line.empty()) {
+                            break;
+                        }
+
+                        const auto colon = header_line.find(':');
+                        if (colon == std::string::npos) {
+                            continue;
+                        }
+
+                        const std::string name = to_lower_ascii(trim_ascii(std::string_view(header_line).substr(0, colon)));
+                        const std::string value = trim_ascii(std::string_view(header_line).substr(colon + 1));
+                        if (!name.empty()) {
+                            request.headers[name] = value;
+                        }
+                    }
+
+                    request.source_ip = "unknown";
+                    boost::system::error_code endpoint_ec;
+                    const auto remote = sock->remote_endpoint(endpoint_ec);
+                    if (!endpoint_ec) {
+                        const auto ip = remote.address().to_string();
+                        if (!ip.empty()) {
+                            request.source_ip = ip;
+                        }
+                    }
+
+                    const std::string& target = request.target;
 
                     std::string body;
                     std::string status = "200 OK";
@@ -130,7 +185,7 @@ void MetricsHttpServer::do_accept() {
                     } else {
                         bool handled_custom = false;
                         if (route_callback_) {
-                            if (auto custom = route_callback_(method, target)) {
+                            if (auto custom = route_callback_(request)) {
                                 handled_custom = true;
                                 status = custom->status.empty() ? "200 OK" : std::move(custom->status);
                                 content_type = custom->content_type.empty()

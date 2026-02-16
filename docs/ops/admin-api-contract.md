@@ -25,6 +25,27 @@ Phase 1 기본 정책:
 2. `admin_app` 앞단 reverse proxy에서 인증 수행
 3. `admin_app`은 신뢰된 identity header 또는 bearer 토큰을 해석
 
+Phase 1 구현 스펙(현재):
+
+- 보호 경로: `/admin`, `/api/v1/*`
+- 공개 경로: `/healthz`, `/readyz`, `/metrics`
+- `ADMIN_AUTH_MODE`:
+  - `off` (기본값): 인증 비활성(내부망 전용 운영 전제)
+  - `header`: identity header만 허용
+  - `bearer`: bearer 토큰만 허용
+  - `header_or_bearer`: header 우선, 미존재 시 bearer 허용
+- Header 모드 기본 header 이름:
+  - user: `X-Admin-User` (`ADMIN_AUTH_USER_HEADER`로 변경 가능)
+  - role: `X-Admin-Role` (`ADMIN_AUTH_ROLE_HEADER`로 변경 가능)
+- Header 모드 role 규칙:
+  - role 미지정 시 `viewer`로 간주
+  - `viewer|operator|admin` 외 값은 `FORBIDDEN(403)`
+- Bearer 모드 스펙:
+  - `Authorization: Bearer <token>`
+  - 토큰 비교값: `ADMIN_BEARER_TOKEN`
+  - actor/role 주입값: `ADMIN_BEARER_ACTOR`, `ADMIN_BEARER_ROLE`
+  - token 미설정/불일치/형식오류는 `UNAUTHORIZED(401)`
+
 최소 role:
 
 - `viewer`: 모든 Phase 1 조회 API 접근 가능
@@ -238,6 +259,5 @@ Phase 1 기본 정책:
 
 ## 11. 오픈 이슈
 
-1. 인증 헤더 스펙 확정 (`X-Admin-User`, `X-Admin-Role` 등)
-2. `client_id` canonical 규칙 확정 (username vs uuid subject)
-3. multi-gateway 환경에서 fanout 관측 요약 지표 추가 여부
+1. `client_id` canonical 규칙 확정 (username vs uuid subject)
+2. multi-gateway 환경에서 fanout 관측 요약 지표 추가 여부

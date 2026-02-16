@@ -97,6 +97,7 @@ jobs:
               'http://127.0.0.1:39091',
               'http://127.0.0.1:39092',
               'http://127.0.0.1:39093',
+              'http://127.0.0.1:39200',
           ]
           paths = ['/healthz', '/readyz']
 
@@ -137,6 +138,14 @@ jobs:
       - name: Smoke Test (Cross-Instance Whisper)
         run: |
           python3 tests/python/verify_whisper_cross_instance.py
+
+      - name: Smoke Test (Admin API/UI)
+        run: |
+          python3 tests/python/verify_admin_api.py
+
+      - name: Smoke Test (Admin Auth Mode)
+        run: |
+          python3 tests/python/verify_admin_auth.py
 
       - name: Verify Plugin Metrics
         run: |

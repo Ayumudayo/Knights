@@ -1,9 +1,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <fstream>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -41,7 +43,12 @@ using tcp = asio::ip::tcp;
 
 constexpr std::uint16_t kDefaultAdminPort = 39200;
 constexpr std::uint16_t kDefaultWorkerMetricsPort = 39093;
+constexpr std::uint16_t kDefaultInstanceMetricsPort = 9090;
 constexpr std::uint32_t kDefaultPollIntervalMs = 1000;
+constexpr std::uint32_t kDefaultTimeoutMs = 1500;
+constexpr std::uint32_t kMaxTimeoutMs = 5000;
+constexpr std::uint32_t kDefaultLimit = 100;
+constexpr std::uint32_t kMaxLimit = 500;
 
 constexpr std::string_view kAdminUiFileName = "admin_ui.html";
 
@@ -87,6 +94,48 @@ struct HttpUrl {
     std::string host;
     std::uint16_t port{80};
     std::string target{"/"};
+};
+
+struct HttpResponse {
+    std::uint32_t status_code{0};
+    std::string body;
+};
+
+struct SplitTarget {
+    std::string path;
+    std::string query;
+};
+
+struct QueryOptions {
+    std::uint32_t timeout_ms{kDefaultTimeoutMs};
+    std::uint32_t limit{kDefaultLimit};
+    std::string cursor;
+    bool timeout_overridden{false};
+    bool limit_overridden{false};
+};
+
+struct QueryParseResult {
+    QueryOptions options;
+    bool ok{true};
+    std::string error_message;
+    std::string error_param;
+    std::string error_value;
+};
+
+enum class AdminAuthMode {
+    kOff,
+    kHeader,
+    kBearer,
+    kHeaderOrBearer,
+};
+
+struct AuthContext {
+    bool ok{true};
+    std::string actor{"anonymous"};
+    std::string role{"viewer"};
+    std::string error_status{"401 Unauthorized"};
+    std::string error_code{"UNAUTHORIZED"};
+    std::string error_message;
 };
 
 std::string read_env_string(const char* key, std::string fallback) {
@@ -158,12 +207,197 @@ std::string json_escape(std::string_view input) {
     return out;
 }
 
-std::string strip_query(std::string_view target) {
+std::string trim_ascii(std::string_view value) {
+    std::size_t begin = 0;
+    while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin])) != 0) {
+        ++begin;
+    }
+    std::size_t end = value.size();
+    while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
+        --end;
+    }
+    return std::string(value.substr(begin, end - begin));
+}
+
+std::string to_lower_ascii(std::string_view value) {
+    std::string out(value);
+    std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+    });
+    return out;
+}
+
+std::string normalize_role(std::string_view value) {
+    return to_lower_ascii(trim_ascii(value));
+}
+
+bool is_supported_role(std::string_view role) {
+    return role == "viewer" || role == "operator" || role == "admin";
+}
+
+AdminAuthMode parse_auth_mode(std::string_view raw) {
+    const std::string mode = to_lower_ascii(trim_ascii(raw));
+    if (mode == "header") {
+        return AdminAuthMode::kHeader;
+    }
+    if (mode == "bearer") {
+        return AdminAuthMode::kBearer;
+    }
+    if (mode == "header_or_bearer" || mode == "header-or-bearer") {
+        return AdminAuthMode::kHeaderOrBearer;
+    }
+    return AdminAuthMode::kOff;
+}
+
+std::optional<std::string> parse_bearer_token(std::string_view authorization_value) {
+    constexpr std::string_view kBearerPrefix = "Bearer ";
+    if (authorization_value.size() < kBearerPrefix.size()) {
+        return std::nullopt;
+    }
+
+    const std::string_view prefix = authorization_value.substr(0, kBearerPrefix.size());
+    if (to_lower_ascii(prefix) != "bearer ") {
+        return std::nullopt;
+    }
+
+    const std::string token = trim_ascii(authorization_value.substr(kBearerPrefix.size()));
+    if (token.empty()) {
+        return std::nullopt;
+    }
+    return token;
+}
+
+std::uint32_t parse_http_status_code(std::string_view status_line) {
+    std::istringstream stream{std::string(status_line)};
+    std::uint32_t code = 0;
+    stream >> code;
+    return code;
+}
+
+SplitTarget split_target(std::string_view target) {
+    SplitTarget out;
     const auto query_pos = target.find('?');
     if (query_pos == std::string_view::npos) {
-        return std::string(target);
+        out.path = std::string(target);
+        return out;
     }
-    return std::string(target.substr(0, query_pos));
+    out.path = std::string(target.substr(0, query_pos));
+    out.query = std::string(target.substr(query_pos + 1));
+    return out;
+}
+
+bool parse_u32_strict(std::string_view raw, std::uint32_t& out_value) {
+    if (raw.empty()) {
+        return false;
+    }
+    try {
+        std::size_t pos = 0;
+        const auto parsed = std::stoull(std::string(raw), &pos, 10);
+        if (pos != raw.size() || parsed > std::numeric_limits<std::uint32_t>::max()) {
+            return false;
+        }
+        out_value = static_cast<std::uint32_t>(parsed);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+std::unordered_map<std::string, std::string> parse_query_string(std::string_view query) {
+    std::unordered_map<std::string, std::string> out;
+    std::size_t start = 0;
+    while (start <= query.size()) {
+        std::size_t end = query.find('&', start);
+        if (end == std::string_view::npos) {
+            end = query.size();
+        }
+        const std::string_view pair = query.substr(start, end - start);
+        if (!pair.empty()) {
+            const std::size_t eq = pair.find('=');
+            if (eq == std::string_view::npos) {
+                out.try_emplace(std::string(pair), std::string());
+            } else {
+                out.try_emplace(std::string(pair.substr(0, eq)), std::string(pair.substr(eq + 1)));
+            }
+        }
+        if (end == query.size()) {
+            break;
+        }
+        start = end + 1;
+    }
+    return out;
+}
+
+QueryParseResult parse_common_query_options(std::string_view query) {
+    QueryParseResult result;
+    if (query.empty()) {
+        return result;
+    }
+
+    const auto params = parse_query_string(query);
+
+    if (const auto it = params.find("timeout_ms"); it != params.end()) {
+        std::uint32_t value = 0;
+        if (!parse_u32_strict(it->second, value) || value == 0 || value > kMaxTimeoutMs) {
+            result.ok = false;
+            result.error_message = "timeout_ms must be between 1 and 5000";
+            result.error_param = "timeout_ms";
+            result.error_value = it->second;
+            return result;
+        }
+        result.options.timeout_ms = value;
+        result.options.timeout_overridden = true;
+    }
+
+    if (const auto it = params.find("limit"); it != params.end()) {
+        std::uint32_t value = 0;
+        if (!parse_u32_strict(it->second, value) || value == 0 || value > kMaxLimit) {
+            result.ok = false;
+            result.error_message = "limit must be between 1 and 500";
+            result.error_param = "limit";
+            result.error_value = it->second;
+            return result;
+        }
+        result.options.limit = value;
+        result.options.limit_overridden = true;
+    }
+
+    if (const auto it = params.find("cursor"); it != params.end()) {
+        result.options.cursor = it->second;
+    }
+
+    return result;
+}
+
+std::string json_details(std::string_view key, std::string_view value) {
+    std::ostringstream details;
+    details << "{\"" << json_escape(key) << "\":\"" << json_escape(value) << "\"}";
+    return details.str();
+}
+
+std::string resource_from_path(std::string_view path) {
+    if (path == "/api/v1/overview") {
+        return "overview";
+    }
+    if (path == "/api/v1/instances") {
+        return "instances";
+    }
+    if (path.starts_with("/api/v1/instances/")) {
+        return "instance_detail";
+    }
+    if (path.starts_with("/api/v1/sessions/")) {
+        return "session_lookup";
+    }
+    if (path == "/api/v1/worker/write-behind") {
+        return "worker_write_behind";
+    }
+    if (path == "/api/v1/metrics/links") {
+        return "metrics_links";
+    }
+    if (path == "/admin" || path == "/admin/") {
+        return "admin_ui";
+    }
+    return "unknown";
 }
 
 std::string ensure_trailing_slash(std::string value) {
@@ -226,7 +460,7 @@ std::optional<HttpUrl> parse_http_url(std::string_view raw) {
     return url;
 }
 
-std::optional<std::string> http_get_text(const HttpUrl& url) {
+std::optional<HttpResponse> http_get_response(const HttpUrl& url) {
     try {
         asio::io_context io;
         tcp::resolver resolver(io);
@@ -242,15 +476,15 @@ std::optional<std::string> http_get_text(const HttpUrl& url) {
             "Accept: text/plain\r\n\r\n";
         asio::write(socket, asio::buffer(request));
 
-        asio::streambuf response;
+        asio::streambuf response_buf;
         boost::system::error_code ec;
-        while (asio::read(socket, response, asio::transfer_at_least(1), ec)) {
+        while (asio::read(socket, response_buf, asio::transfer_at_least(1), ec)) {
         }
         if (ec != asio::error::eof) {
             return std::nullopt;
         }
 
-        const std::string raw(asio::buffers_begin(response.data()), asio::buffers_end(response.data()));
+        const std::string raw(asio::buffers_begin(response_buf.data()), asio::buffers_end(response_buf.data()));
         const auto header_end = raw.find("\r\n\r\n");
         const auto status_end = raw.find("\r\n");
         if (header_end == std::string::npos || status_end == std::string::npos) {
@@ -258,14 +492,29 @@ std::optional<std::string> http_get_text(const HttpUrl& url) {
         }
 
         const std::string_view status_line(raw.data(), status_end);
-        if (status_line.find(" 200 ") == std::string_view::npos) {
+        std::istringstream status_stream{std::string(status_line)};
+        std::string http_version;
+        std::uint32_t status_code = 0;
+        status_stream >> http_version >> status_code;
+        if (status_code == 0) {
             return std::nullopt;
         }
 
-        return raw.substr(header_end + 4);
+        HttpResponse http_response;
+        http_response.status_code = status_code;
+        http_response.body = raw.substr(header_end + 4);
+        return http_response;
     } catch (...) {
         return std::nullopt;
     }
+}
+
+std::optional<std::string> http_get_text(const HttpUrl& url) {
+    const auto response = http_get_response(url);
+    if (!response || response->status_code != 200) {
+        return std::nullopt;
+    }
+    return response->body;
 }
 
 std::optional<std::uint64_t> parse_prom_u64(std::string_view metrics_text, std::string_view metric_name) {
@@ -319,8 +568,8 @@ public:
             server::core::metrics::MetricsHttpServer::LogsCallback{},
             [this](bool ok) { return app_host_.health_body(ok); },
             [this](bool ok) { return app_host_.readiness_body(ok); },
-            [this](std::string_view method, std::string_view target) {
-                return handle_route(method, target);
+            [this](const server::core::metrics::MetricsHttpServer::HttpRequest& request) {
+                return handle_route(request);
             });
         http_server_->start();
 
@@ -363,9 +612,29 @@ private:
         std::string last_error;
     };
 
+    struct InstanceDetailSnapshot {
+        std::string metrics_url;
+        std::string ready_reason;
+        std::uint64_t updated_at_ms{0};
+    };
+
+    struct AuditEvent {
+        std::uint64_t request_id{0};
+        std::string actor;
+        std::string role;
+        std::string method;
+        std::string path;
+        std::string resource;
+        std::string result;
+        std::uint32_t status_code{0};
+        std::uint64_t latency_ms{0};
+        std::string source_ip;
+    };
+
     void load_config() {
         metrics_port_ = read_env_u16("METRICS_PORT", kDefaultAdminPort, 1, 65535);
         poll_interval_ms_ = read_env_u32("ADMIN_POLL_INTERVAL_MS", kDefaultPollIntervalMs, 100, 60000);
+        instance_metrics_port_ = read_env_u16("ADMIN_INSTANCE_METRICS_PORT", kDefaultInstanceMetricsPort, 1, 65535);
 
         redis_uri_ = read_env_string("REDIS_URI", "");
         registry_prefix_ = ensure_trailing_slash(read_env_string("SERVER_REGISTRY_PREFIX", "gateway/instances/"));
@@ -379,6 +648,181 @@ private:
 
         grafana_base_url_ = read_env_string("GRAFANA_BASE_URL", "http://127.0.0.1:33000");
         prometheus_base_url_ = read_env_string("PROMETHEUS_BASE_URL", "http://127.0.0.1:39090");
+
+        auth_mode_raw_ = read_env_string("ADMIN_AUTH_MODE", "off");
+        auth_mode_ = parse_auth_mode(auth_mode_raw_);
+        auth_user_header_name_ = to_lower_ascii(read_env_string("ADMIN_AUTH_USER_HEADER", "X-Admin-User"));
+        auth_role_header_name_ = to_lower_ascii(read_env_string("ADMIN_AUTH_ROLE_HEADER", "X-Admin-Role"));
+        auth_bearer_token_ = read_env_string("ADMIN_BEARER_TOKEN", "");
+        auth_bearer_actor_ = read_env_string("ADMIN_BEARER_ACTOR", "token-user");
+        auth_bearer_role_ = normalize_role(read_env_string("ADMIN_BEARER_ROLE", "viewer"));
+
+        if (!is_supported_role(auth_bearer_role_)) {
+            corelog::warn("admin_app ADMIN_BEARER_ROLE is invalid; fallback to viewer");
+            auth_bearer_role_ = "viewer";
+        }
+
+        if ((auth_mode_ == AdminAuthMode::kBearer || auth_mode_ == AdminAuthMode::kHeaderOrBearer)
+            && auth_bearer_token_.empty()) {
+            corelog::warn("admin_app bearer auth mode selected but ADMIN_BEARER_TOKEN is empty");
+        }
+    }
+
+    AuthContext authenticate_request(const server::core::metrics::MetricsHttpServer::HttpRequest& request) const {
+        auto unauthorized = [&](std::string message) {
+            AuthContext ctx;
+            ctx.ok = false;
+            ctx.actor = "anonymous";
+            ctx.role = "none";
+            ctx.error_status = "401 Unauthorized";
+            ctx.error_code = "UNAUTHORIZED";
+            ctx.error_message = std::move(message);
+            return ctx;
+        };
+
+        auto forbidden = [&](std::string actor, std::string role) {
+            AuthContext ctx;
+            ctx.ok = false;
+            ctx.actor = std::move(actor);
+            ctx.role = std::move(role);
+            ctx.error_status = "403 Forbidden";
+            ctx.error_code = "FORBIDDEN";
+            ctx.error_message = "role is not allowed";
+            return ctx;
+        };
+
+        auto from_header = [&]() -> std::optional<AuthContext> {
+            const auto user_it = request.headers.find(auth_user_header_name_);
+            if (user_it == request.headers.end()) {
+                return std::nullopt;
+            }
+
+            const std::string actor = trim_ascii(user_it->second);
+            if (actor.empty()) {
+                return unauthorized("identity header is empty");
+            }
+
+            std::string role = "viewer";
+            if (const auto role_it = request.headers.find(auth_role_header_name_); role_it != request.headers.end()) {
+                role = normalize_role(role_it->second);
+            }
+            if (role.empty()) {
+                role = "viewer";
+            }
+            if (!is_supported_role(role)) {
+                return forbidden(actor, role);
+            }
+
+            AuthContext ctx;
+            ctx.ok = true;
+            ctx.actor = actor;
+            ctx.role = role;
+            return ctx;
+        };
+
+        auto from_bearer = [&]() -> std::optional<AuthContext> {
+            const auto auth_it = request.headers.find("authorization");
+            if (auth_it == request.headers.end()) {
+                return std::nullopt;
+            }
+
+            const auto bearer = parse_bearer_token(auth_it->second);
+            if (!bearer) {
+                return unauthorized("authorization header must be Bearer token");
+            }
+            if (auth_bearer_token_.empty()) {
+                return unauthorized("bearer auth is not configured");
+            }
+            if (*bearer != auth_bearer_token_) {
+                return unauthorized("invalid bearer token");
+            }
+
+            if (!is_supported_role(auth_bearer_role_)) {
+                return forbidden(auth_bearer_actor_, auth_bearer_role_);
+            }
+
+            AuthContext ctx;
+            ctx.ok = true;
+            ctx.actor = auth_bearer_actor_;
+            ctx.role = auth_bearer_role_;
+            return ctx;
+        };
+
+        if (auth_mode_ == AdminAuthMode::kOff) {
+            AuthContext ctx;
+            ctx.ok = true;
+            ctx.actor = "anonymous";
+            ctx.role = "viewer";
+            return ctx;
+        }
+
+        if (auth_mode_ == AdminAuthMode::kHeader) {
+            if (auto ctx = from_header()) {
+                return *ctx;
+            }
+            return unauthorized("missing identity header");
+        }
+
+        if (auth_mode_ == AdminAuthMode::kBearer) {
+            if (auto ctx = from_bearer()) {
+                return *ctx;
+            }
+            return unauthorized("missing authorization header");
+        }
+
+        if (auto ctx = from_header()) {
+            return *ctx;
+        }
+        if (auto ctx = from_bearer()) {
+            return *ctx;
+        }
+        return unauthorized("missing credentials");
+    }
+
+    void emit_audit_log(const AuditEvent& event) const {
+        std::ostringstream log;
+        log << "{";
+        log << "\"event\":\"admin_audit\",";
+        log << "\"request_id\":\"admin-" << event.request_id << "\",";
+        log << "\"actor\":\"" << json_escape(event.actor) << "\",";
+        log << "\"role\":\"" << json_escape(event.role) << "\",";
+        log << "\"method\":\"" << json_escape(event.method) << "\",";
+        log << "\"path\":\"" << json_escape(event.path) << "\",";
+        log << "\"resource\":\"" << json_escape(event.resource) << "\",";
+        log << "\"result\":\"" << json_escape(event.result) << "\",";
+        log << "\"status_code\":" << event.status_code << ",";
+        log << "\"latency_ms\":" << event.latency_ms << ",";
+        log << "\"source_ip\":\"" << json_escape(event.source_ip) << "\",";
+        log << "\"timestamp\":" << now_ms();
+        log << "}";
+        corelog::info(log.str());
+    }
+
+    std::string make_instance_metrics_url(const server::state::InstanceRecord& item) const {
+        return "http://" + item.host + ":" + std::to_string(instance_metrics_port_) + "/metrics";
+    }
+
+    std::string make_instance_ready_url(const server::state::InstanceRecord& item) const {
+        return "http://" + item.host + ":" + std::to_string(instance_metrics_port_) + "/readyz";
+    }
+
+    std::string probe_instance_ready_reason(const server::state::InstanceRecord& item) const {
+        const std::string fallback = item.ready ? "ready (registry)" : "not ready (registry)";
+        const auto ready_url = parse_http_url(make_instance_ready_url(item));
+        if (!ready_url) {
+            return fallback;
+        }
+
+        const auto response = http_get_response(*ready_url);
+        if (!response) {
+            return fallback;
+        }
+
+        const std::string reason = trim_ascii(response->body);
+        if (!reason.empty()) {
+            return reason;
+        }
+        return response->status_code == 200 ? "ready" : "not ready";
     }
 
     void init_dependencies() {
@@ -443,14 +887,23 @@ private:
 
             std::unordered_map<std::string, server::state::InstanceRecord> index;
             index.reserve(items.size());
+            std::unordered_map<std::string, InstanceDetailSnapshot> details;
+            details.reserve(items.size());
             for (const auto& item : items) {
                 index[item.instance_id] = item;
+
+                InstanceDetailSnapshot detail;
+                detail.metrics_url = make_instance_metrics_url(item);
+                detail.ready_reason = probe_instance_ready_reason(item);
+                detail.updated_at_ms = now_ms();
+                details[item.instance_id] = std::move(detail);
             }
 
             {
                 std::lock_guard<std::mutex> lock(cache_mutex_);
                 instances_cache_ = std::move(items);
                 instances_index_ = std::move(index);
+                instance_details_index_ = std::move(details);
                 instances_updated_at_ms_ = now_ms();
             }
 
@@ -559,77 +1012,128 @@ private:
     }
 
     std::optional<server::core::metrics::MetricsHttpServer::RouteResponse>
-    handle_route(std::string_view method, std::string_view target) {
-        const std::string path = strip_query(target);
+    handle_route(const server::core::metrics::MetricsHttpServer::HttpRequest& request) {
+        const SplitTarget split = split_target(request.target);
+        const std::string& path = split.path;
+        const bool is_admin_ui = (path == "/admin" || path == "/admin/");
+        const bool is_api = path.starts_with("/api/");
 
-        if (path == "/admin" || path == "/admin/") {
-            if (method != "GET") {
-                return server::core::metrics::MetricsHttpServer::RouteResponse{
-                    "405 Method Not Allowed",
-                    "text/plain; charset=utf-8",
-                    "Method Not Allowed\n"};
-            }
-            return server::core::metrics::MetricsHttpServer::RouteResponse{
-                "200 OK",
-                "text/html; charset=utf-8",
-                admin_ui_html_};
-        }
-
-        if (!path.starts_with("/api/")) {
+        if (!is_admin_ui && !is_api) {
             return std::nullopt;
         }
 
-        http_requests_total_.fetch_add(1, std::memory_order_relaxed);
+        const auto started_at = std::chrono::steady_clock::now();
         const std::uint64_t request_id = request_seq_.fetch_add(1, std::memory_order_relaxed) + 1;
+        const std::string method = request.method.empty() ? std::string("GET") : request.method;
+        const std::string resource = resource_from_path(path);
+
+        const AuthContext auth = authenticate_request(request);
+
+        auto finalize = [&](server::core::metrics::MetricsHttpServer::RouteResponse response)
+            -> std::optional<server::core::metrics::MetricsHttpServer::RouteResponse> {
+            const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - started_at);
+            const std::uint32_t status_code = parse_http_status_code(response.status);
+
+            AuditEvent event;
+            event.request_id = request_id;
+            event.actor = auth.actor;
+            event.role = auth.role;
+            event.method = method;
+            event.path = path;
+            event.resource = resource;
+            event.result = (status_code >= 200 && status_code < 400) ? "ok" : "error";
+            event.status_code = status_code;
+            event.latency_ms = static_cast<std::uint64_t>(elapsed.count());
+            event.source_ip = request.source_ip.empty() ? std::string("unknown") : request.source_ip;
+            emit_audit_log(event);
+
+            return response;
+        };
+
+        if (!auth.ok) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return finalize(json_error(request_id, auth.error_status, auth.error_code, auth.error_message));
+        }
+
+        if (is_admin_ui) {
+            if (method != "GET") {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return finalize(server::core::metrics::MetricsHttpServer::RouteResponse{
+                    "405 Method Not Allowed",
+                    "text/plain; charset=utf-8",
+                    "Method Not Allowed\n"});
+            }
+            return finalize(server::core::metrics::MetricsHttpServer::RouteResponse{
+                "200 OK",
+                "text/html; charset=utf-8",
+                admin_ui_html_});
+        }
+
+        http_requests_total_.fetch_add(1, std::memory_order_relaxed);
 
         if (method != "GET") {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
-            return json_error(
+            return finalize(json_error(
                 request_id,
                 "405 Method Not Allowed",
                 "METHOD_NOT_ALLOWED",
-                "only GET is supported in Phase 1");
+                "only GET is supported in Phase 1"));
+        }
+
+        const QueryParseResult query = parse_common_query_options(split.query);
+        if (!query.ok) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return finalize(json_error(
+                request_id,
+                "400 Bad Request",
+                "BAD_REQUEST",
+                query.error_message,
+                "{" +
+                    std::string("\"parameter\":\"") + json_escape(query.error_param) +
+                    "\",\"value\":\"" + json_escape(query.error_value) + "\"}"));
         }
 
         if (path == "/api/v1/overview") {
             overview_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return handle_overview(request_id);
+            return finalize(handle_overview(request_id, query.options));
         }
 
         if (path == "/api/v1/instances") {
             instances_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return handle_instances(request_id);
+            return finalize(handle_instances(request_id, query.options));
         }
 
         constexpr std::string_view kInstancesPrefix = "/api/v1/instances/";
         if (path.starts_with(kInstancesPrefix)) {
             instances_requests_total_.fetch_add(1, std::memory_order_relaxed);
             const std::string id = std::string(path.substr(kInstancesPrefix.size()));
-            return handle_instance_detail(request_id, id);
+            return finalize(handle_instance_detail(request_id, id, query.options));
         }
 
         constexpr std::string_view kSessionsPrefix = "/api/v1/sessions/";
         if (path.starts_with(kSessionsPrefix)) {
             session_lookup_requests_total_.fetch_add(1, std::memory_order_relaxed);
             const std::string client_id = std::string(path.substr(kSessionsPrefix.size()));
-            return handle_session_lookup(request_id, client_id);
+            return finalize(handle_session_lookup(request_id, client_id, query.options));
         }
 
         if (path == "/api/v1/worker/write-behind") {
             worker_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return handle_worker(request_id);
+            return finalize(handle_worker(request_id, query.options));
         }
 
         if (path == "/api/v1/metrics/links") {
-            return handle_metrics_links(request_id);
+            return finalize(handle_metrics_links(request_id, query.options));
         }
 
         http_errors_total_.fetch_add(1, std::memory_order_relaxed);
-        return json_error(request_id, "404 Not Found", "NOT_FOUND", "endpoint not found");
+        return finalize(json_error(request_id, "404 Not Found", "NOT_FOUND", "endpoint not found"));
     }
 
     server::core::metrics::MetricsHttpServer::RouteResponse
-    handle_overview(std::uint64_t request_id) {
+    handle_overview(std::uint64_t request_id, const QueryOptions& options) {
+        (void)options;
         std::size_t total = 0;
         std::size_t ready = 0;
         std::uint64_t instances_updated_ms = 0;
@@ -658,6 +1162,24 @@ private:
         data << "\"wb_metrics\":{";
         data << "\"configured\":" << bool_json(worker.configured) << ",";
         data << "\"available\":" << bool_json(worker.available);
+        data << "},";
+        data << "\"gateway\":{";
+        data << "\"configured\":true,";
+        data << "\"available\":" << bool_json(redis_available_.load(std::memory_order_relaxed));
+        data << "},";
+        data << "\"server\":{";
+        data << "\"configured\":true,";
+        data << "\"available\":" << bool_json(total > 0) << ",";
+        data << "\"ready_count\":" << ready << ",";
+        data << "\"total_count\":" << total;
+        data << "},";
+        data << "\"wb_worker\":{";
+        data << "\"configured\":" << bool_json(worker.configured) << ",";
+        data << "\"available\":" << bool_json(worker.available);
+        data << "},";
+        data << "\"haproxy\":{";
+        data << "\"configured\":false,";
+        data << "\"available\":false";
         data << "}";
         data << "},";
         data << "\"counts\":{";
@@ -679,7 +1201,7 @@ private:
     }
 
     server::core::metrics::MetricsHttpServer::RouteResponse
-    handle_instances(std::uint64_t request_id) {
+    handle_instances(std::uint64_t request_id, const QueryOptions& options) {
         if (!registry_backend_ || !redis_available_.load(std::memory_order_relaxed)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
@@ -697,12 +1219,54 @@ private:
             updated_ms = instances_updated_at_ms_;
         }
 
+        if (options.timeout_overridden) {
+            const std::uint64_t now = now_ms();
+            const std::uint64_t age = (updated_ms > 0 && now >= updated_ms) ? (now - updated_ms) : now;
+            if (updated_ms == 0 || age > options.timeout_ms) {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return json_error(
+                    request_id,
+                    "504 Gateway Timeout",
+                    "TIMEOUT",
+                    "instances cache is older than timeout_ms",
+                    json_details("timeout_ms", std::to_string(options.timeout_ms)));
+            }
+        }
+
+        std::size_t cursor_index = 0;
+        if (!options.cursor.empty()) {
+            std::uint32_t parsed_cursor = 0;
+            if (!parse_u32_strict(options.cursor, parsed_cursor)) {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return json_error(
+                    request_id,
+                    "400 Bad Request",
+                    "BAD_REQUEST",
+                    "cursor must be a non-negative integer",
+                    json_details("cursor", options.cursor));
+            }
+            cursor_index = static_cast<std::size_t>(parsed_cursor);
+            if (cursor_index > items.size()) {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return json_error(
+                    request_id,
+                    "400 Bad Request",
+                    "BAD_REQUEST",
+                    "cursor is out of range",
+                    json_details("cursor", options.cursor));
+            }
+        }
+
+        const std::size_t remaining = items.size() - cursor_index;
+        const std::size_t take = std::min<std::size_t>(remaining, static_cast<std::size_t>(options.limit));
+        const std::size_t end_index = cursor_index + take;
+
         std::ostringstream data;
         data << "{";
         data << "\"items\":[";
-        for (std::size_t i = 0; i < items.size(); ++i) {
+        for (std::size_t i = cursor_index; i < end_index; ++i) {
             const auto& it = items[i];
-            if (i != 0) {
+            if (i != cursor_index) {
                 data << ",";
             }
             data << "{";
@@ -719,6 +1283,24 @@ private:
             data << "}";
         }
         data << "],";
+        data << "\"paging\":{";
+        data << "\"limit\":" << options.limit << ",";
+        data << "\"cursor\":";
+        if (options.cursor.empty()) {
+            data << "null";
+        } else {
+            data << "\"" << json_escape(options.cursor) << "\"";
+        }
+        data << ",";
+        data << "\"next_cursor\":";
+        if (end_index < items.size()) {
+            data << "\"" << end_index << "\"";
+        } else {
+            data << "null";
+        }
+        data << ",";
+        data << "\"total\":" << items.size();
+        data << "},";
         data << "\"updated_at_ms\":" << updated_ms;
         data << "}";
 
@@ -726,7 +1308,10 @@ private:
     }
 
     server::core::metrics::MetricsHttpServer::RouteResponse
-    handle_instance_detail(std::uint64_t request_id, const std::string& instance_id) {
+    handle_instance_detail(std::uint64_t request_id,
+                           const std::string& instance_id,
+                           const QueryOptions& options) {
+        (void)options;
         if (instance_id.empty() || instance_id.find('/') != std::string::npos) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(request_id, "400 Bad Request", "BAD_REQUEST", "invalid instance id");
@@ -742,10 +1327,14 @@ private:
         }
 
         std::optional<server::state::InstanceRecord> item;
+        std::optional<InstanceDetailSnapshot> detail;
         {
             std::lock_guard<std::mutex> lock(cache_mutex_);
             if (const auto it = instances_index_.find(instance_id); it != instances_index_.end()) {
                 item = it->second;
+            }
+            if (const auto it = instance_details_index_.find(instance_id); it != instance_details_index_.end()) {
+                detail = it->second;
             }
         }
 
@@ -754,6 +1343,11 @@ private:
             return json_error(request_id, "404 Not Found", "NOT_FOUND", "instance not found");
         }
 
+        const std::string metrics_url = detail ? detail->metrics_url : make_instance_metrics_url(*item);
+        const std::string ready_reason = detail
+            ? detail->ready_reason
+            : (item->ready ? std::string("ready (registry)") : std::string("not ready (registry)"));
+
         std::ostringstream data;
         data << "{";
         data << "\"instance_id\":\"" << json_escape(item->instance_id) << "\",";
@@ -761,8 +1355,10 @@ private:
         data << "\"port\":" << item->port << ",";
         data << "\"role\":\"" << json_escape(item->role) << "\",";
         data << "\"ready\":" << bool_json(item->ready) << ",";
+        data << "\"ready_reason\":\"" << json_escape(ready_reason) << "\",";
         data << "\"active_sessions\":" << item->active_sessions << ",";
         data << "\"last_heartbeat_ms\":" << item->last_heartbeat_ms << ",";
+        data << "\"metrics_url\":\"" << json_escape(metrics_url) << "\",";
         data << "\"source\":{";
         data << "\"registry_key\":\"" << json_escape(registry_prefix_ + item->instance_id) << "\"";
         data << "}";
@@ -772,7 +1368,10 @@ private:
     }
 
     server::core::metrics::MetricsHttpServer::RouteResponse
-    handle_session_lookup(std::uint64_t request_id, const std::string& client_id) {
+    handle_session_lookup(std::uint64_t request_id,
+                          const std::string& client_id,
+                          const QueryOptions& options) {
+        (void)options;
         if (client_id.empty() || client_id.find('/') != std::string::npos) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(request_id, "400 Bad Request", "BAD_REQUEST", "invalid client id");
@@ -840,11 +1439,27 @@ private:
     }
 
     server::core::metrics::MetricsHttpServer::RouteResponse
-    handle_worker(std::uint64_t request_id) {
+    handle_worker(std::uint64_t request_id, const QueryOptions& options) {
         WorkerSnapshot snapshot;
         {
             std::lock_guard<std::mutex> lock(cache_mutex_);
             snapshot = worker_cache_;
+        }
+
+        if (options.timeout_overridden) {
+            const std::uint64_t now = now_ms();
+            const std::uint64_t age = (snapshot.updated_at_ms > 0 && now >= snapshot.updated_at_ms)
+                ? (now - snapshot.updated_at_ms)
+                : now;
+            if (snapshot.updated_at_ms == 0 || age > options.timeout_ms) {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return json_error(
+                    request_id,
+                    "504 Gateway Timeout",
+                    "TIMEOUT",
+                    "worker snapshot is older than timeout_ms",
+                    json_details("timeout_ms", std::to_string(options.timeout_ms)));
+            }
         }
 
         if (!snapshot.configured) {
@@ -883,7 +1498,8 @@ private:
     }
 
     server::core::metrics::MetricsHttpServer::RouteResponse
-    handle_metrics_links(std::uint64_t request_id) {
+    handle_metrics_links(std::uint64_t request_id, const QueryOptions& options) {
+        (void)options;
         std::ostringstream data;
         data << "{";
         data << "\"grafana\":{";
@@ -919,12 +1535,14 @@ private:
     json_error(std::uint64_t request_id,
                std::string_view status,
                std::string_view code,
-               std::string_view message) const {
+               std::string_view message,
+               std::string details_json = "{}") const {
         std::ostringstream body;
         body << "{";
         body << "\"error\":{";
         body << "\"code\":\"" << json_escape(code) << "\",";
-        body << "\"message\":\"" << json_escape(message) << "\"";
+        body << "\"message\":\"" << json_escape(message) << "\",";
+        body << "\"details\":" << details_json;
         body << "},";
         body << "\"meta\":{";
         body << "\"request_id\":\"admin-" << request_id << "\",";
@@ -942,6 +1560,7 @@ private:
     std::unique_ptr<server::core::metrics::MetricsHttpServer> http_server_;
 
     std::uint16_t metrics_port_{kDefaultAdminPort};
+    std::uint16_t instance_metrics_port_{kDefaultInstanceMetricsPort};
     std::uint32_t poll_interval_ms_{kDefaultPollIntervalMs};
 
     std::string redis_uri_;
@@ -956,6 +1575,14 @@ private:
     std::string prometheus_base_url_;
     std::string admin_ui_html_;
 
+    AdminAuthMode auth_mode_{AdminAuthMode::kOff};
+    std::string auth_mode_raw_;
+    std::string auth_user_header_name_;
+    std::string auth_role_header_name_;
+    std::string auth_bearer_token_;
+    std::string auth_bearer_actor_;
+    std::string auth_bearer_role_;
+
     std::shared_ptr<server::storage::redis::IRedisClient> redis_;
     std::shared_ptr<server::state::RedisInstanceStateBackend> registry_backend_;
 
@@ -965,6 +1592,7 @@ private:
     mutable std::mutex cache_mutex_;
     std::vector<server::state::InstanceRecord> instances_cache_;
     std::unordered_map<std::string, server::state::InstanceRecord> instances_index_;
+    std::unordered_map<std::string, InstanceDetailSnapshot> instance_details_index_;
     std::uint64_t instances_updated_at_ms_{0};
     WorkerSnapshot worker_cache_;
 
