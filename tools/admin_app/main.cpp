@@ -1,0 +1,940 @@
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <sstream>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include <boost/asio/buffer.hpp>
+#include <boost/asio/buffers_iterator.hpp>
+#include <boost/asio/connect.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/read.hpp>
+#include <boost/asio/streambuf.hpp>
+#include <boost/asio/write.hpp>
+
+#include "server/core/app/app_host.hpp"
+#include "server/core/app/termination_signals.hpp"
+#include "server/core/metrics/build_info.hpp"
+#include "server/core/metrics/http_server.hpp"
+#include "server/core/util/log.hpp"
+#include "server/state/instance_registry.hpp"
+#include "server/storage/redis/client.hpp"
+
+namespace corelog = server::core::log;
+
+namespace {
+
+namespace asio = boost::asio;
+using tcp = asio::ip::tcp;
+
+constexpr std::uint16_t kDefaultAdminPort = 39200;
+constexpr std::uint16_t kDefaultWorkerMetricsPort = 39093;
+constexpr std::uint32_t kDefaultPollIntervalMs = 1000;
+
+struct HttpUrl {
+    std::string host;
+    std::uint16_t port{80};
+    std::string target{"/"};
+};
+
+std::string read_env_string(const char* key, std::string fallback) {
+    if (const char* v = std::getenv(key); v && *v) {
+        return std::string(v);
+    }
+    return fallback;
+}
+
+std::uint16_t read_env_u16(const char* key,
+                           std::uint16_t fallback,
+                           std::uint16_t min_value,
+                           std::uint16_t max_value) {
+    if (const char* v = std::getenv(key); v && *v) {
+        try {
+            const auto parsed = std::stoul(v);
+            if (parsed >= min_value && parsed <= max_value) {
+                return static_cast<std::uint16_t>(parsed);
+            }
+        } catch (...) {
+        }
+        corelog::warn(std::string("admin_app invalid ") + key + "; using fallback");
+    }
+    return fallback;
+}
+
+std::uint32_t read_env_u32(const char* key,
+                           std::uint32_t fallback,
+                           std::uint32_t min_value,
+                           std::uint32_t max_value) {
+    if (const char* v = std::getenv(key); v && *v) {
+        try {
+            const auto parsed = std::stoul(v);
+            if (parsed >= min_value && parsed <= max_value) {
+                return static_cast<std::uint32_t>(parsed);
+            }
+        } catch (...) {
+        }
+        corelog::warn(std::string("admin_app invalid ") + key + "; using fallback");
+    }
+    return fallback;
+}
+
+std::uint64_t now_ms() {
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+    return static_cast<std::uint64_t>(now.count());
+}
+
+std::string bool_json(bool value) {
+    return value ? "true" : "false";
+}
+
+std::string json_escape(std::string_view input) {
+    std::string out;
+    out.reserve(input.size() + 8);
+    for (const char c : input) {
+        switch (c) {
+        case '\\': out += "\\\\"; break;
+        case '"': out += "\\\""; break;
+        case '\n': out += "\\n"; break;
+        case '\r': out += "\\r"; break;
+        case '\t': out += "\\t"; break;
+        default:
+            out.push_back(c);
+            break;
+        }
+    }
+    return out;
+}
+
+std::string strip_query(std::string_view target) {
+    const auto query_pos = target.find('?');
+    if (query_pos == std::string_view::npos) {
+        return std::string(target);
+    }
+    return std::string(target.substr(0, query_pos));
+}
+
+std::string ensure_trailing_slash(std::string value) {
+    if (value.empty()) {
+        return value;
+    }
+    if (!value.ends_with('/')) {
+        value.push_back('/');
+    }
+    return value;
+}
+
+std::optional<HttpUrl> parse_http_url(std::string_view raw) {
+    constexpr std::string_view kPrefix = "http://";
+    if (!raw.starts_with(kPrefix)) {
+        return std::nullopt;
+    }
+
+    std::string_view rest = raw.substr(kPrefix.size());
+    if (rest.empty()) {
+        return std::nullopt;
+    }
+
+    std::string_view host_port = rest;
+    std::string_view target = "/";
+    if (const auto slash = rest.find('/'); slash != std::string_view::npos) {
+        host_port = rest.substr(0, slash);
+        target = rest.substr(slash);
+    }
+
+    if (host_port.empty()) {
+        return std::nullopt;
+    }
+
+    std::string host;
+    std::uint16_t port = 80;
+    if (const auto colon = host_port.rfind(':'); colon != std::string_view::npos) {
+        host = std::string(host_port.substr(0, colon));
+        const auto port_part = host_port.substr(colon + 1);
+        if (host.empty() || port_part.empty()) {
+            return std::nullopt;
+        }
+        try {
+            const auto parsed = std::stoul(std::string(port_part));
+            if (parsed == 0 || parsed > 65535) {
+                return std::nullopt;
+            }
+            port = static_cast<std::uint16_t>(parsed);
+        } catch (...) {
+            return std::nullopt;
+        }
+    } else {
+        host = std::string(host_port);
+    }
+
+    HttpUrl url;
+    url.host = std::move(host);
+    url.port = port;
+    url.target = target.empty() ? "/" : std::string(target);
+    return url;
+}
+
+std::optional<std::string> http_get_text(const HttpUrl& url) {
+    try {
+        asio::io_context io;
+        tcp::resolver resolver(io);
+        auto endpoints = resolver.resolve(url.host, std::to_string(url.port));
+
+        tcp::socket socket(io);
+        asio::connect(socket, endpoints);
+
+        const std::string request =
+            "GET " + url.target + " HTTP/1.1\r\n"
+            "Host: " + url.host + "\r\n"
+            "Connection: close\r\n"
+            "Accept: text/plain\r\n\r\n";
+        asio::write(socket, asio::buffer(request));
+
+        asio::streambuf response;
+        boost::system::error_code ec;
+        while (asio::read(socket, response, asio::transfer_at_least(1), ec)) {
+        }
+        if (ec != asio::error::eof) {
+            return std::nullopt;
+        }
+
+        const std::string raw(asio::buffers_begin(response.data()), asio::buffers_end(response.data()));
+        const auto header_end = raw.find("\r\n\r\n");
+        const auto status_end = raw.find("\r\n");
+        if (header_end == std::string::npos || status_end == std::string::npos) {
+            return std::nullopt;
+        }
+
+        const std::string_view status_line(raw.data(), status_end);
+        if (status_line.find(" 200 ") == std::string_view::npos) {
+            return std::nullopt;
+        }
+
+        return raw.substr(header_end + 4);
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<std::uint64_t> parse_prom_u64(std::string_view metrics_text, std::string_view metric_name) {
+    std::istringstream lines{std::string(metrics_text)};
+    std::string line;
+    while (std::getline(lines, line)) {
+        if (line.empty() || line[0] == '#') {
+            continue;
+        }
+        if (!line.starts_with(metric_name)) {
+            continue;
+        }
+        if (line.size() > metric_name.size()) {
+            const char sep = line[metric_name.size()];
+            if (sep != ' ' && sep != '\t') {
+                continue;
+            }
+        }
+
+        std::istringstream value_stream(line.substr(metric_name.size()));
+        long double value = 0.0L;
+        if (!(value_stream >> value)) {
+            continue;
+        }
+        if (value < 0.0L) {
+            value = 0.0L;
+        }
+        return static_cast<std::uint64_t>(value);
+    }
+    return std::nullopt;
+}
+
+class AdminApp {
+public:
+    int run() {
+        server::core::app::install_termination_signal_handlers();
+
+        load_config();
+        init_dependencies();
+        init_backends();
+
+        poller_running_.store(true, std::memory_order_release);
+        poller_ = std::thread([this]() { poll_loop(); });
+
+        http_server_ = std::make_unique<server::core::metrics::MetricsHttpServer>(
+            metrics_port_,
+            [this]() { return render_metrics(); },
+            [this]() { return app_host_.healthy() && !app_host_.stop_requested(); },
+            [this]() { return app_host_.ready() && app_host_.healthy() && !app_host_.stop_requested(); },
+            server::core::metrics::MetricsHttpServer::LogsCallback{},
+            [this](bool ok) { return app_host_.health_body(ok); },
+            [this](bool ok) { return app_host_.readiness_body(ok); },
+            [this](std::string_view method, std::string_view target) {
+                return handle_route(method, target);
+            });
+        http_server_->start();
+
+        corelog::info("admin_app started on METRICS_PORT=" + std::to_string(metrics_port_));
+
+        while (!app_host_.stop_requested()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+
+        app_host_.set_ready(false);
+        poller_running_.store(false, std::memory_order_release);
+        if (poller_.joinable()) {
+            poller_.join();
+        }
+
+        if (http_server_) {
+            http_server_->stop();
+            http_server_.reset();
+        }
+
+        corelog::info("admin_app stopped");
+        return 0;
+    }
+
+private:
+    struct WorkerSnapshot {
+        bool configured{false};
+        bool available{false};
+        std::uint64_t updated_at_ms{0};
+        std::uint64_t pending{0};
+        std::uint64_t flush_total{0};
+        std::uint64_t flush_ok_total{0};
+        std::uint64_t flush_fail_total{0};
+        std::uint64_t flush_dlq_total{0};
+        std::uint64_t ack_total{0};
+        std::uint64_t ack_fail_total{0};
+        std::uint64_t reclaim_total{0};
+        std::uint64_t reclaim_error_total{0};
+        std::string source_url;
+        std::string last_error;
+    };
+
+    void load_config() {
+        metrics_port_ = read_env_u16("METRICS_PORT", kDefaultAdminPort, 1, 65535);
+        poll_interval_ms_ = read_env_u32("ADMIN_POLL_INTERVAL_MS", kDefaultPollIntervalMs, 100, 60000);
+
+        redis_uri_ = read_env_string("REDIS_URI", "");
+        registry_prefix_ = ensure_trailing_slash(read_env_string("SERVER_REGISTRY_PREFIX", "gateway/instances/"));
+        session_prefix_ = ensure_trailing_slash(read_env_string("GATEWAY_SESSION_PREFIX", "gateway/session/"));
+        registry_ttl_sec_ = read_env_u32("SERVER_REGISTRY_TTL", 30, 1, 3600);
+
+        worker_metrics_raw_url_ = read_env_string(
+            "WB_WORKER_METRICS_URL",
+            std::string("http://127.0.0.1:") + std::to_string(kDefaultWorkerMetricsPort) + "/metrics");
+        worker_metrics_url_ = parse_http_url(worker_metrics_raw_url_);
+
+        grafana_base_url_ = read_env_string("GRAFANA_BASE_URL", "http://127.0.0.1:33000");
+        prometheus_base_url_ = read_env_string("PROMETHEUS_BASE_URL", "http://127.0.0.1:39090");
+    }
+
+    void init_dependencies() {
+        app_host_.declare_dependency("admin_api");
+        app_host_.declare_dependency("redis", server::core::app::AppHost::DependencyRequirement::kOptional);
+        app_host_.declare_dependency("wb_metrics", server::core::app::AppHost::DependencyRequirement::kOptional);
+
+        app_host_.set_dependency_ok("admin_api", true);
+        app_host_.set_dependency_ok("redis", false);
+        app_host_.set_dependency_ok("wb_metrics", false);
+
+        app_host_.set_healthy(true);
+        app_host_.set_ready(true);
+    }
+
+    void init_backends() {
+        if (!redis_uri_.empty()) {
+            server::storage::redis::Options options{};
+            options.pool_max = read_env_u32("REDIS_POOL_MAX", 10, 1, 256);
+            redis_ = server::storage::redis::make_redis_client(redis_uri_, options);
+
+            if (redis_ && redis_->health_check()) {
+                app_host_.set_dependency_ok("redis", true);
+                auto adapter = server::state::make_redis_state_client(redis_);
+                registry_backend_ = std::make_shared<server::state::RedisInstanceStateBackend>(
+                    adapter,
+                    registry_prefix_,
+                    std::chrono::seconds(registry_ttl_sec_));
+                redis_available_.store(true, std::memory_order_relaxed);
+            } else {
+                redis_available_.store(false, std::memory_order_relaxed);
+                app_host_.set_dependency_ok("redis", false);
+                corelog::warn("admin_app redis unavailable; instances/session endpoints will return upstream errors");
+            }
+        } else {
+            corelog::warn("admin_app REDIS_URI not set; instances/session endpoints will return upstream errors");
+        }
+
+        if (!worker_metrics_url_) {
+            corelog::warn("admin_app WB_WORKER_METRICS_URL is invalid; worker endpoint disabled");
+        }
+    }
+
+    void poll_loop() {
+        while (poller_running_.load(std::memory_order_acquire) && !app_host_.stop_requested()) {
+            refresh_instances_cache();
+            refresh_worker_cache();
+            std::this_thread::sleep_for(std::chrono::milliseconds(poll_interval_ms_));
+        }
+    }
+
+    void refresh_instances_cache() {
+        if (!registry_backend_) {
+            return;
+        }
+
+        try {
+            auto items = registry_backend_->list_instances();
+            std::sort(items.begin(), items.end(), [](const auto& lhs, const auto& rhs) {
+                return lhs.instance_id < rhs.instance_id;
+            });
+
+            std::unordered_map<std::string, server::state::InstanceRecord> index;
+            index.reserve(items.size());
+            for (const auto& item : items) {
+                index[item.instance_id] = item;
+            }
+
+            {
+                std::lock_guard<std::mutex> lock(cache_mutex_);
+                instances_cache_ = std::move(items);
+                instances_index_ = std::move(index);
+                instances_updated_at_ms_ = now_ms();
+            }
+
+            redis_available_.store(true, std::memory_order_relaxed);
+            app_host_.set_dependency_ok("redis", true);
+        } catch (const std::exception& ex) {
+            poll_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            redis_available_.store(false, std::memory_order_relaxed);
+            app_host_.set_dependency_ok("redis", false);
+            corelog::warn(std::string("admin_app refresh instances failed: ") + ex.what());
+        } catch (...) {
+            poll_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            redis_available_.store(false, std::memory_order_relaxed);
+            app_host_.set_dependency_ok("redis", false);
+            corelog::warn("admin_app refresh instances failed");
+        }
+    }
+
+    void refresh_worker_cache() {
+        WorkerSnapshot next;
+        next.configured = (worker_metrics_url_.has_value());
+        next.source_url = worker_metrics_raw_url_;
+
+        if (!worker_metrics_url_) {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            worker_cache_ = std::move(next);
+            worker_available_.store(false, std::memory_order_relaxed);
+            app_host_.set_dependency_ok("wb_metrics", false);
+            return;
+        }
+
+        auto text = http_get_text(*worker_metrics_url_);
+        if (!text) {
+            next.available = false;
+            next.last_error = "worker metrics fetch failed";
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            worker_cache_ = std::move(next);
+            worker_available_.store(false, std::memory_order_relaxed);
+            app_host_.set_dependency_ok("wb_metrics", false);
+            return;
+        }
+
+        next.available = true;
+        next.updated_at_ms = now_ms();
+        next.pending = parse_prom_u64(*text, "wb_pending").value_or(0);
+        next.flush_total = parse_prom_u64(*text, "wb_flush_total").value_or(0);
+        next.flush_ok_total = parse_prom_u64(*text, "wb_flush_ok_total").value_or(0);
+        next.flush_fail_total = parse_prom_u64(*text, "wb_flush_fail_total").value_or(0);
+        next.flush_dlq_total = parse_prom_u64(*text, "wb_flush_dlq_total").value_or(0);
+        next.ack_total = parse_prom_u64(*text, "wb_ack_total").value_or(0);
+        next.ack_fail_total = parse_prom_u64(*text, "wb_ack_fail_total").value_or(0);
+        next.reclaim_total = parse_prom_u64(*text, "wb_reclaim_total").value_or(0);
+        next.reclaim_error_total = parse_prom_u64(*text, "wb_reclaim_error_total").value_or(0);
+
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            worker_cache_ = std::move(next);
+        }
+        worker_available_.store(true, std::memory_order_relaxed);
+        app_host_.set_dependency_ok("wb_metrics", true);
+    }
+
+    std::string render_metrics() const {
+        std::ostringstream stream;
+
+        server::core::metrics::append_build_info(stream);
+
+        stream << "# TYPE admin_http_requests_total counter\n";
+        stream << "admin_http_requests_total " << http_requests_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_http_errors_total counter\n";
+        stream << "admin_http_errors_total " << http_errors_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_overview_requests_total counter\n";
+        stream << "admin_overview_requests_total " << overview_requests_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_instances_requests_total counter\n";
+        stream << "admin_instances_requests_total " << instances_requests_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_session_lookup_requests_total counter\n";
+        stream << "admin_session_lookup_requests_total " << session_lookup_requests_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_worker_requests_total counter\n";
+        stream << "admin_worker_requests_total " << worker_requests_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_poll_errors_total counter\n";
+        stream << "admin_poll_errors_total " << poll_errors_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_instances_cached gauge\n";
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            stream << "admin_instances_cached " << instances_cache_.size() << "\n";
+        }
+
+        stream << "# TYPE admin_redis_available gauge\n";
+        stream << "admin_redis_available " << (redis_available_.load(std::memory_order_relaxed) ? 1 : 0) << "\n";
+
+        stream << "# TYPE admin_worker_metrics_available gauge\n";
+        stream << "admin_worker_metrics_available " << (worker_available_.load(std::memory_order_relaxed) ? 1 : 0) << "\n";
+
+        stream << "# TYPE admin_read_only_mode gauge\n";
+        stream << "admin_read_only_mode 1\n";
+
+        stream << app_host_.dependency_metrics_text();
+        return stream.str();
+    }
+
+    std::optional<server::core::metrics::MetricsHttpServer::RouteResponse>
+    handle_route(std::string_view method, std::string_view target) {
+        const std::string path = strip_query(target);
+        if (!path.starts_with("/api/")) {
+            return std::nullopt;
+        }
+
+        http_requests_total_.fetch_add(1, std::memory_order_relaxed);
+        const std::uint64_t request_id = request_seq_.fetch_add(1, std::memory_order_relaxed) + 1;
+
+        if (method != "GET") {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "405 Method Not Allowed",
+                "METHOD_NOT_ALLOWED",
+                "only GET is supported in Phase 1");
+        }
+
+        if (path == "/api/v1/overview") {
+            overview_requests_total_.fetch_add(1, std::memory_order_relaxed);
+            return handle_overview(request_id);
+        }
+
+        if (path == "/api/v1/instances") {
+            instances_requests_total_.fetch_add(1, std::memory_order_relaxed);
+            return handle_instances(request_id);
+        }
+
+        constexpr std::string_view kInstancesPrefix = "/api/v1/instances/";
+        if (path.starts_with(kInstancesPrefix)) {
+            instances_requests_total_.fetch_add(1, std::memory_order_relaxed);
+            const std::string id = std::string(path.substr(kInstancesPrefix.size()));
+            return handle_instance_detail(request_id, id);
+        }
+
+        constexpr std::string_view kSessionsPrefix = "/api/v1/sessions/";
+        if (path.starts_with(kSessionsPrefix)) {
+            session_lookup_requests_total_.fetch_add(1, std::memory_order_relaxed);
+            const std::string client_id = std::string(path.substr(kSessionsPrefix.size()));
+            return handle_session_lookup(request_id, client_id);
+        }
+
+        if (path == "/api/v1/worker/write-behind") {
+            worker_requests_total_.fetch_add(1, std::memory_order_relaxed);
+            return handle_worker(request_id);
+        }
+
+        if (path == "/api/v1/metrics/links") {
+            return handle_metrics_links(request_id);
+        }
+
+        http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+        return json_error(request_id, "404 Not Found", "NOT_FOUND", "endpoint not found");
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    handle_overview(std::uint64_t request_id) {
+        std::size_t total = 0;
+        std::size_t ready = 0;
+        std::uint64_t instances_updated_ms = 0;
+        WorkerSnapshot worker;
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            total = instances_cache_.size();
+            ready = static_cast<std::size_t>(
+                std::count_if(instances_cache_.begin(), instances_cache_.end(), [](const auto& v) { return v.ready; }));
+            instances_updated_ms = instances_updated_at_ms_;
+            worker = worker_cache_;
+        }
+
+        std::ostringstream data;
+        data << "{";
+        data << "\"service\":\"admin_app\",";
+        data << "\"mode\":\"read_only\",";
+        data << "\"healthy\":" << bool_json(app_host_.healthy()) << ",";
+        data << "\"ready\":" << bool_json(app_host_.ready()) << ",";
+        data << "\"stop_requested\":" << bool_json(app_host_.stop_requested()) << ",";
+        data << "\"services\":{";
+        data << "\"redis\":{";
+        data << "\"configured\":" << bool_json(!redis_uri_.empty()) << ",";
+        data << "\"available\":" << bool_json(redis_available_.load(std::memory_order_relaxed));
+        data << "},";
+        data << "\"wb_metrics\":{";
+        data << "\"configured\":" << bool_json(worker.configured) << ",";
+        data << "\"available\":" << bool_json(worker.available);
+        data << "}";
+        data << "},";
+        data << "\"counts\":{";
+        data << "\"instances_total\":" << total << ",";
+        data << "\"instances_ready\":" << ready << ",";
+        data << "\"instances_not_ready\":" << (total >= ready ? (total - ready) : 0);
+        data << "},";
+        data << "\"updated_at\":{";
+        data << "\"instances_ms\":" << instances_updated_ms << ",";
+        data << "\"worker_ms\":" << worker.updated_at_ms;
+        data << "},";
+        data << "\"links\":{";
+        data << "\"instances\":\"/api/v1/instances\",";
+        data << "\"worker\":\"/api/v1/worker/write-behind\"";
+        data << "}";
+        data << "}";
+
+        return json_ok(request_id, data.str());
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    handle_instances(std::uint64_t request_id) {
+        if (!registry_backend_ || !redis_available_.load(std::memory_order_relaxed)) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "UPSTREAM_UNAVAILABLE",
+                "redis registry unavailable");
+        }
+
+        std::vector<server::state::InstanceRecord> items;
+        std::uint64_t updated_ms = 0;
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            items = instances_cache_;
+            updated_ms = instances_updated_at_ms_;
+        }
+
+        std::ostringstream data;
+        data << "{";
+        data << "\"items\":[";
+        for (std::size_t i = 0; i < items.size(); ++i) {
+            const auto& it = items[i];
+            if (i != 0) {
+                data << ",";
+            }
+            data << "{";
+            data << "\"instance_id\":\"" << json_escape(it.instance_id) << "\",";
+            data << "\"host\":\"" << json_escape(it.host) << "\",";
+            data << "\"port\":" << it.port << ",";
+            data << "\"role\":\"" << json_escape(it.role) << "\",";
+            data << "\"ready\":" << bool_json(it.ready) << ",";
+            data << "\"active_sessions\":" << it.active_sessions << ",";
+            data << "\"last_heartbeat_ms\":" << it.last_heartbeat_ms << ",";
+            data << "\"source\":{";
+            data << "\"registry_key\":\"" << json_escape(registry_prefix_ + it.instance_id) << "\"";
+            data << "}";
+            data << "}";
+        }
+        data << "],";
+        data << "\"updated_at_ms\":" << updated_ms;
+        data << "}";
+
+        return json_ok(request_id, data.str());
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    handle_instance_detail(std::uint64_t request_id, const std::string& instance_id) {
+        if (instance_id.empty() || instance_id.find('/') != std::string::npos) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(request_id, "400 Bad Request", "BAD_REQUEST", "invalid instance id");
+        }
+
+        if (!registry_backend_ || !redis_available_.load(std::memory_order_relaxed)) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "UPSTREAM_UNAVAILABLE",
+                "redis registry unavailable");
+        }
+
+        std::optional<server::state::InstanceRecord> item;
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            if (const auto it = instances_index_.find(instance_id); it != instances_index_.end()) {
+                item = it->second;
+            }
+        }
+
+        if (!item) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(request_id, "404 Not Found", "NOT_FOUND", "instance not found");
+        }
+
+        std::ostringstream data;
+        data << "{";
+        data << "\"instance_id\":\"" << json_escape(item->instance_id) << "\",";
+        data << "\"host\":\"" << json_escape(item->host) << "\",";
+        data << "\"port\":" << item->port << ",";
+        data << "\"role\":\"" << json_escape(item->role) << "\",";
+        data << "\"ready\":" << bool_json(item->ready) << ",";
+        data << "\"active_sessions\":" << item->active_sessions << ",";
+        data << "\"last_heartbeat_ms\":" << item->last_heartbeat_ms << ",";
+        data << "\"source\":{";
+        data << "\"registry_key\":\"" << json_escape(registry_prefix_ + item->instance_id) << "\"";
+        data << "}";
+        data << "}";
+
+        return json_ok(request_id, data.str());
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    handle_session_lookup(std::uint64_t request_id, const std::string& client_id) {
+        if (client_id.empty() || client_id.find('/') != std::string::npos) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(request_id, "400 Bad Request", "BAD_REQUEST", "invalid client id");
+        }
+
+        if (!redis_ || !redis_available_.load(std::memory_order_relaxed)) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "UPSTREAM_UNAVAILABLE",
+                "redis session directory unavailable");
+        }
+
+        const std::string key = session_prefix_ + client_id;
+        std::optional<std::string> backend_id;
+        try {
+            backend_id = redis_->get(key);
+        } catch (...) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "UPSTREAM_UNAVAILABLE",
+                "redis session lookup failed");
+        }
+
+        std::optional<server::state::InstanceRecord> backend;
+        if (backend_id && !backend_id->empty()) {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            if (const auto it = instances_index_.find(*backend_id); it != instances_index_.end()) {
+                backend = it->second;
+            }
+        }
+
+        std::ostringstream data;
+        data << "{";
+        data << "\"client_id\":\"" << json_escape(client_id) << "\",";
+        data << "\"backend_instance_id\":";
+        if (backend_id && !backend_id->empty()) {
+            data << "\"" << json_escape(*backend_id) << "\"";
+        } else {
+            data << "null";
+        }
+        data << ",";
+        data << "\"source\":{";
+        data << "\"session_key\":\"" << json_escape(key) << "\"";
+        data << "},";
+        data << "\"backend\":";
+        if (backend) {
+            data << "{";
+            data << "\"instance_id\":\"" << json_escape(backend->instance_id) << "\",";
+            data << "\"host\":\"" << json_escape(backend->host) << "\",";
+            data << "\"port\":" << backend->port << ",";
+            data << "\"role\":\"" << json_escape(backend->role) << "\",";
+            data << "\"ready\":" << bool_json(backend->ready) << ",";
+            data << "\"active_sessions\":" << backend->active_sessions;
+            data << "}";
+        } else {
+            data << "null";
+        }
+        data << "}";
+
+        return json_ok(request_id, data.str());
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    handle_worker(std::uint64_t request_id) {
+        WorkerSnapshot snapshot;
+        {
+            std::lock_guard<std::mutex> lock(cache_mutex_);
+            snapshot = worker_cache_;
+        }
+
+        if (!snapshot.configured) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "UPSTREAM_UNAVAILABLE",
+                "worker metrics url is not configured");
+        }
+
+        if (!snapshot.available) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            const std::string reason = snapshot.last_error.empty()
+                ? std::string("worker metrics unavailable")
+                : snapshot.last_error;
+            return json_error(request_id, "503 Service Unavailable", "UPSTREAM_UNAVAILABLE", reason);
+        }
+
+        std::ostringstream data;
+        data << "{";
+        data << "\"source_url\":\"" << json_escape(snapshot.source_url) << "\",";
+        data << "\"updated_at_ms\":" << snapshot.updated_at_ms << ",";
+        data << "\"pending\":" << snapshot.pending << ",";
+        data << "\"flush_total\":" << snapshot.flush_total << ",";
+        data << "\"flush_ok_total\":" << snapshot.flush_ok_total << ",";
+        data << "\"flush_fail_total\":" << snapshot.flush_fail_total << ",";
+        data << "\"flush_dlq_total\":" << snapshot.flush_dlq_total << ",";
+        data << "\"ack_total\":" << snapshot.ack_total << ",";
+        data << "\"ack_fail_total\":" << snapshot.ack_fail_total << ",";
+        data << "\"reclaim_total\":" << snapshot.reclaim_total << ",";
+        data << "\"reclaim_error_total\":" << snapshot.reclaim_error_total;
+        data << "}";
+
+        return json_ok(request_id, data.str());
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    handle_metrics_links(std::uint64_t request_id) {
+        std::ostringstream data;
+        data << "{";
+        data << "\"grafana\":{";
+        data << "\"base_url\":\"" << json_escape(grafana_base_url_) << "\",";
+        data << "\"dashboards\":[\"/\"]";
+        data << "},";
+        data << "\"prometheus\":{";
+        data << "\"base_url\":\"" << json_escape(prometheus_base_url_) << "\",";
+        data << "\"queries\":[\"chat_session_active\",\"wb_pending\"]";
+        data << "}";
+        data << "}";
+        return json_ok(request_id, data.str());
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    json_ok(std::uint64_t request_id, std::string data_json) const {
+        std::ostringstream body;
+        body << "{";
+        body << "\"data\":" << data_json << ",";
+        body << "\"meta\":{";
+        body << "\"request_id\":\"admin-" << request_id << "\",";
+        body << "\"generated_at_ms\":" << now_ms();
+        body << "}";
+        body << "}";
+
+        return server::core::metrics::MetricsHttpServer::RouteResponse{
+            "200 OK",
+            "application/json; charset=utf-8",
+            body.str()};
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
+    json_error(std::uint64_t request_id,
+               std::string_view status,
+               std::string_view code,
+               std::string_view message) const {
+        std::ostringstream body;
+        body << "{";
+        body << "\"error\":{";
+        body << "\"code\":\"" << json_escape(code) << "\",";
+        body << "\"message\":\"" << json_escape(message) << "\"";
+        body << "},";
+        body << "\"meta\":{";
+        body << "\"request_id\":\"admin-" << request_id << "\",";
+        body << "\"generated_at_ms\":" << now_ms();
+        body << "}";
+        body << "}";
+
+        return server::core::metrics::MetricsHttpServer::RouteResponse{
+            std::string(status),
+            "application/json; charset=utf-8",
+            body.str()};
+    }
+
+    server::core::app::AppHost app_host_{"admin_app"};
+    std::unique_ptr<server::core::metrics::MetricsHttpServer> http_server_;
+
+    std::uint16_t metrics_port_{kDefaultAdminPort};
+    std::uint32_t poll_interval_ms_{kDefaultPollIntervalMs};
+
+    std::string redis_uri_;
+    std::string registry_prefix_;
+    std::string session_prefix_;
+    std::uint32_t registry_ttl_sec_{30};
+
+    std::string worker_metrics_raw_url_;
+    std::optional<HttpUrl> worker_metrics_url_;
+
+    std::string grafana_base_url_;
+    std::string prometheus_base_url_;
+
+    std::shared_ptr<server::storage::redis::IRedisClient> redis_;
+    std::shared_ptr<server::state::RedisInstanceStateBackend> registry_backend_;
+
+    std::thread poller_;
+    std::atomic<bool> poller_running_{false};
+
+    mutable std::mutex cache_mutex_;
+    std::vector<server::state::InstanceRecord> instances_cache_;
+    std::unordered_map<std::string, server::state::InstanceRecord> instances_index_;
+    std::uint64_t instances_updated_at_ms_{0};
+    WorkerSnapshot worker_cache_;
+
+    std::atomic<bool> redis_available_{false};
+    std::atomic<bool> worker_available_{false};
+
+    std::atomic<std::uint64_t> http_requests_total_{0};
+    std::atomic<std::uint64_t> http_errors_total_{0};
+    std::atomic<std::uint64_t> overview_requests_total_{0};
+    std::atomic<std::uint64_t> instances_requests_total_{0};
+    std::atomic<std::uint64_t> session_lookup_requests_total_{0};
+    std::atomic<std::uint64_t> worker_requests_total_{0};
+    std::atomic<std::uint64_t> poll_errors_total_{0};
+    std::atomic<std::uint64_t> request_seq_{0};
+};
+
+} // namespace
+
+int main() {
+    try {
+        AdminApp app;
+        return app.run();
+    } catch (const std::exception& ex) {
+        corelog::error(std::string("admin_app exception: ") + ex.what());
+        return 1;
+    } catch (...) {
+        corelog::error("admin_app unknown exception");
+        return 1;
+    }
+}

@@ -11,6 +11,7 @@ option(BUILD_GATEWAY_APP "Build gateway_app" ON)
 
 option(BUILD_SERVER_TESTS "Build server tests" ON)
 option(BUILD_WRITE_BEHIND_TOOLS "Build write-behind helper tools" ON)
+option(BUILD_ADMIN_APP "Build admin management app" ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -152,6 +153,39 @@ if (_PQXX_TARGET)
 else()
   message(WARNING "libpqxx not found ? wb_worker/wb_dlq_replayer/wb_check will fail to link")
 endif()
+endif()
+
+if (BUILD_ADMIN_APP)
+  add_executable(admin_app tools/admin_app/main.cpp)
+  target_link_libraries(admin_app PRIVATE server_core)
+  if (TARGET server_storage_redis)
+    target_link_libraries(admin_app PRIVATE server_storage_redis)
+  endif()
+  if (TARGET server_state)
+    target_link_libraries(admin_app PRIVATE server_state)
+  endif()
+
+  if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+    # Ensure local execution works without manually extending PATH.
+    add_custom_command(TARGET admin_app POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+              $<TARGET_RUNTIME_DLLS:admin_app>
+              $<TARGET_FILE_DIR:admin_app>
+      COMMAND_EXPAND_LISTS)
+
+    # Copy release bin first (contains hiredis.dll required by some debug import chains).
+    add_custom_command(TARGET admin_app POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+              "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/bin"
+              "$<TARGET_FILE_DIR:admin_app>")
+
+    # Some transitive runtime DLLs (e.g. OpenSSL legacy/zlib chain) are not
+    # always surfaced via imported target metadata; mirror vcpkg bin for safety.
+    add_custom_command(TARGET admin_app POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E copy_directory
+              "${CMAKE_BINARY_DIR}/vcpkg_installed/x64-windows/$<$<CONFIG:Debug>:debug/>bin"
+              "$<TARGET_FILE_DIR:admin_app>")
+  endif()
 endif()
 
 # migrations runner (requires libpqxx)

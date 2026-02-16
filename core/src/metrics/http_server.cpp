@@ -18,14 +18,16 @@ MetricsHttpServer::MetricsHttpServer(unsigned short port,
                                      StatusCallback ready_callback,
                                      LogsCallback logs_callback,
                                      StatusBodyCallback health_body_callback,
-                                     StatusBodyCallback ready_body_callback)
+                                     StatusBodyCallback ready_body_callback,
+                                     RouteCallback route_callback)
     : port_(port)
     , callback_(std::move(metrics_callback))
     , health_callback_(std::move(health_callback))
     , ready_callback_(std::move(ready_callback))
     , logs_callback_(std::move(logs_callback))
     , health_body_callback_(std::move(health_body_callback))
-    , ready_body_callback_(std::move(ready_body_callback)) {
+    , ready_body_callback_(std::move(ready_body_callback))
+    , route_callback_(std::move(route_callback)) {
     io_context_ = std::make_shared<asio::io_context>();
     acceptor_ = std::make_shared<tcp::acceptor>(*io_context_, tcp::endpoint(tcp::v4(), port_));
 }
@@ -68,8 +70,10 @@ void MetricsHttpServer::do_accept() {
                     boost::system::error_code read_ec;
                     asio::read_until(*sock, request_buf, "\r\n\r\n", read_ec);
                     if (read_ec && read_ec != asio::error::eof) {
-                        boost::system::error_code ec;
-                        sock->close(ec);
+                        try {
+                            sock->close();
+                        } catch (...) {
+                        }
                         return;
                     }
 
@@ -124,9 +128,22 @@ void MetricsHttpServer::do_accept() {
                             body = ok ? "ready\n" : "not ready\n";
                         }
                     } else {
-                        status = "404 Not Found";
-                        content_type = "text/plain; charset=utf-8";
-                        body = "Not Found\r\n";
+                        bool handled_custom = false;
+                        if (route_callback_) {
+                            if (auto custom = route_callback_(method, target)) {
+                                handled_custom = true;
+                                status = custom->status.empty() ? "200 OK" : std::move(custom->status);
+                                content_type = custom->content_type.empty()
+                                    ? "text/plain; charset=utf-8"
+                                    : std::move(custom->content_type);
+                                body = std::move(custom->body);
+                            }
+                        }
+                        if (!handled_custom) {
+                            status = "404 Not Found";
+                            content_type = "text/plain; charset=utf-8";
+                            body = "Not Found\r\n";
+                        }
                     }
 
                     std::string hdr = "HTTP/1.1 " + status + "\r\nContent-Type: " + content_type +
@@ -137,22 +154,34 @@ void MetricsHttpServer::do_accept() {
                         bufs.emplace_back(asio::buffer(body));
                     }
                     asio::write(*sock, bufs);
-                    boost::system::error_code ec;
-                    sock->shutdown(tcp::socket::shutdown_both, ec);
-                    if (ec) {
-                        ec.clear();
+                    try {
+                        sock->shutdown(tcp::socket::shutdown_both);
+                    } catch (...) {
                     }
-                    sock->close(ec);
+                    try {
+                        sock->close();
+                    } catch (...) {
+                    }
                 } catch (const std::exception& e) {
                     corelog::error(std::string("MetricsHttpServer request handling exception: ") + e.what());
-                    boost::system::error_code ec;
-                    sock->shutdown(tcp::socket::shutdown_both, ec);
-                    sock->close(ec);
+                    try {
+                        sock->shutdown(tcp::socket::shutdown_both);
+                    } catch (...) {
+                    }
+                    try {
+                        sock->close();
+                    } catch (...) {
+                    }
                 } catch (...) {
                     corelog::error("MetricsHttpServer request handling unknown exception");
-                    boost::system::error_code ec;
-                    sock->shutdown(tcp::socket::shutdown_both, ec);
-                    sock->close(ec);
+                    try {
+                        sock->shutdown(tcp::socket::shutdown_both);
+                    } catch (...) {
+                    }
+                    try {
+                        sock->close();
+                    } catch (...) {
+                    }
                 }
             });
         }
