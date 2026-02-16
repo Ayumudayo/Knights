@@ -83,6 +83,7 @@
       cursor: pointer;
     }
     .btn:hover { background: #ffffff33; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
     .chip {
       border-radius: 999px;
       padding: 4px 10px;
@@ -356,7 +357,23 @@
       </article>
 
       <article class="panel col-12">
-        <div class="panel-head"><h2>Instances</h2><span id="instances-chip" class="pill">unknown</span></div>
+        <div class="panel-head">
+          <h2>Instances</h2>
+          <div class="row-right">
+            <label class="chip">Limit
+              <select id="instances-limit" style="margin-left:4px;border:none;background:transparent;color:inherit;">
+                <option value="20">20</option>
+                <option value="50">50</option>
+                <option value="100" selected>100</option>
+                <option value="200">200</option>
+              </select>
+            </label>
+            <button id="instances-next" type="button" class="btn" disabled>Next</button>
+            <button id="instances-reset" type="button" class="btn">Reset</button>
+            <span id="instances-page" class="chip">page 1</span>
+            <span id="instances-chip" class="pill">unknown</span>
+          </div>
+        </div>
         <div class="panel-body">
           <div class="muted">Source: <span class="mono">gateway/instances/*</span></div>
           <div style="overflow-x:auto;margin-top:8px;">
@@ -421,6 +438,10 @@
       workerError: document.getElementById('worker-error'),
       instancesBody: document.getElementById('instances-body'),
       instanceDetail: document.getElementById('instance-detail'),
+      instancesLimit: document.getElementById('instances-limit'),
+      instancesNext: document.getElementById('instances-next'),
+      instancesReset: document.getElementById('instances-reset'),
+      instancesPage: document.getElementById('instances-page'),
       instancesChip: document.getElementById('instances-chip'),
       instancesError: document.getElementById('instances-error'),
       sessionForm: document.getElementById('session-form'),
@@ -438,6 +459,11 @@
       authMode: 'unknown',
       selectedInstanceId: null,
       instancesById: {},
+      instancesLimit: 100,
+      instancesCursor: null,
+      instancesNextCursor: null,
+      instancesPage: 1,
+      instancesTotal: null,
     };
 
     function setChip(node, text, kind) {
@@ -478,6 +504,14 @@
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    function readInt(v, fallback) {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n <= 0) {
+        return fallback;
+      }
+      return Math.floor(n);
     }
 
     async function apiGet(path) {
@@ -600,13 +634,16 @@
       state.instancesById = {};
       if (!Array.isArray(items)) {
         dom.instancesBody.innerHTML = '<tr><td colspan="7" class="muted">No instance data</td></tr>';
-        dom.instanceDetail.textContent = 'Select an instance to see detail.';
+        if (!state.selectedInstanceId) {
+          dom.instanceDetail.textContent = 'Select an instance to see detail.';
+        }
         return;
       }
       if (items.length === 0) {
         dom.instancesBody.innerHTML = '<tr><td colspan="7" class="muted">No instances currently registered</td></tr>';
-        state.selectedInstanceId = null;
-        dom.instanceDetail.textContent = 'No registered instance available.';
+        if (!state.selectedInstanceId) {
+          dom.instanceDetail.textContent = 'No registered instance available.';
+        }
         return;
       }
 
@@ -614,11 +651,6 @@
         if (item && item.instance_id) {
           state.instancesById[item.instance_id] = item;
         }
-      }
-
-      if (state.selectedInstanceId && !state.instancesById[state.selectedInstanceId]) {
-        state.selectedInstanceId = null;
-        dom.instanceDetail.textContent = 'Selected instance is no longer available.';
       }
 
       dom.instancesBody.innerHTML = items.map((it) => {
@@ -638,6 +670,36 @@
           '<td class="mono">' + safeText((it.source && it.source.registry_key) || '-') + '</td>' +
           '</tr>';
       }).join('');
+    }
+
+    function updateInstancesPaging(paging) {
+      const limit = readInt(paging && paging.limit, state.instancesLimit);
+      state.instancesLimit = limit;
+      if (String(dom.instancesLimit.value) !== String(limit)) {
+        dom.instancesLimit.value = String(limit);
+      }
+
+      const cursor = paging && paging.cursor !== null && paging.cursor !== undefined
+        ? String(paging.cursor)
+        : null;
+      state.instancesCursor = cursor;
+      state.instancesNextCursor = paging && paging.next_cursor !== null && paging.next_cursor !== undefined
+        ? String(paging.next_cursor)
+        : null;
+      state.instancesTotal = readInt(paging && paging.total, 0);
+
+      let pageNo = 1;
+      if (cursor !== null) {
+        const offset = Number(cursor);
+        if (Number.isFinite(offset) && offset >= 0 && limit > 0) {
+          pageNo = Math.floor(offset / limit) + 1;
+        }
+      }
+      state.instancesPage = pageNo;
+
+      const totalText = state.instancesTotal > 0 ? (' / total ' + fmtNum(state.instancesTotal)) : '';
+      dom.instancesPage.textContent = 'page ' + pageNo + totalText;
+      dom.instancesNext.disabled = !state.instancesNextCursor;
     }
 
     function renderInstanceDetail(data) {
@@ -725,15 +787,22 @@
     }
 
     async function refreshInstances() {
-      const res = await apiGet('/api/v1/instances');
+      let path = '/api/v1/instances?limit=' + encodeURIComponent(String(state.instancesLimit));
+      if (state.instancesCursor) {
+        path += '&cursor=' + encodeURIComponent(state.instancesCursor);
+      }
+      const res = await apiGet(path);
       if (!res.ok) {
         applyAuthError('Instances', res);
         setChip(dom.instancesChip, 'degraded', 'warn');
         dom.instancesError.innerHTML = asError('Instances: ' + res.code + ' - ' + res.message);
         renderInstances([]);
+        dom.instancesNext.disabled = true;
         return false;
       }
-      renderInstances((res.data && res.data.items) || []);
+      const data = res.data || {};
+      renderInstances(data.items || []);
+      updateInstancesPaging(data.paging || {});
 
       if (state.selectedInstanceId) {
         await loadInstanceDetail(state.selectedInstanceId);
@@ -842,6 +911,27 @@
         return;
       }
       loadInstanceDetail(instanceId);
+    });
+
+    dom.instancesLimit.addEventListener('change', () => {
+      state.instancesLimit = readInt(dom.instancesLimit.value, 100);
+      state.instancesCursor = null;
+      state.instancesNextCursor = null;
+      refreshAll();
+    });
+
+    dom.instancesNext.addEventListener('click', () => {
+      if (!state.instancesNextCursor) {
+        return;
+      }
+      state.instancesCursor = state.instancesNextCursor;
+      refreshAll();
+    });
+
+    dom.instancesReset.addEventListener('click', () => {
+      state.instancesCursor = null;
+      state.instancesNextCursor = null;
+      refreshAll();
     });
 
     refreshAll();
