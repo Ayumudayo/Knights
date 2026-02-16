@@ -84,6 +84,10 @@ def main() -> int:
         html = body.decode("utf-8", errors="replace")
         if "Knights Admin Console" not in html:
             raise RuntimeError("/admin missing expected UI title")
+        if 'id="audit-trend"' not in html:
+            raise RuntimeError("/admin missing audit trend container")
+        if "HTTP 5xx" not in html:
+            raise RuntimeError("/admin missing HTTP 5xx overview card label")
 
         overview = load_json("/api/v1/overview")
         data = overview.get("data", {})
@@ -114,6 +118,10 @@ def main() -> int:
         audit_trend = data.get("audit_trend", {})
         if "step_ms" not in audit_trend or "max_points" not in audit_trend:
             raise RuntimeError("overview.audit_trend missing step_ms/max_points")
+        if not isinstance(audit_trend["step_ms"], int) or audit_trend["step_ms"] <= 0:
+            raise RuntimeError("overview.audit_trend.step_ms expected positive int")
+        if not isinstance(audit_trend["max_points"], int) or audit_trend["max_points"] <= 0:
+            raise RuntimeError("overview.audit_trend.max_points expected positive int")
         points = audit_trend.get("points")
         if not isinstance(points, list):
             raise RuntimeError("overview.audit_trend.points expected list")

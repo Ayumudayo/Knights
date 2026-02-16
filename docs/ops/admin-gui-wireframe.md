@@ -45,6 +45,9 @@ MVP 네비게이션:
   - `admin_http_errors_total`
   - `admin_http_server_errors_total`
   - `admin_http_unauthorized_total`, `admin_http_forbidden_total`
+- 감사 트렌드 패널 (sparkline)
+  - total / 5xx / 401 / 403 카드별 최근 변화량(delta) + tick peak 표시
+  - 모바일(좁은 화면)에서는 1열 스택으로 가독성 유지
 
 API 매핑:
 
