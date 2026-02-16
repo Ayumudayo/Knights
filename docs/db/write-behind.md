@@ -71,6 +71,7 @@
   - `WB_DLQ_STREAM=session_events_dlq`(옵션)
   - `WB_DLQ_ON_ERROR=1`(에러 시 DLQ로 포워드; 0이면 비활성)
   - `WB_ACK_ON_ERROR=1`(에러 시에도 ACK; 0이면 PEL에 남겨 재시도 유도)
+  - `WB_DB_RECONNECT_BASE_MS=500`, `WB_DB_RECONNECT_MAX_MS=30000`(DB 재연결 지수 백오프)
   - `WB_RECLAIM_ENABLED=1`, `WB_RECLAIM_INTERVAL_MS`, `WB_RECLAIM_MIN_IDLE_MS`, `WB_RECLAIM_COUNT`
 - 공통
   - `DB_URI`, `REDIS_URI`
@@ -127,6 +128,7 @@
   - pending/flush: `wb_pending`, `wb_flush_*`
   - reclaim: `wb_reclaim_*`
   - ack: `wb_ack_*`
+  - db/backoff/drop: `wb_db_unavailable_total`, `wb_db_reconnect_backoff_ms_last`, `wb_error_drop_total`
 
 ## 모니터링
 - 레이턴시 p50/p95, 배치 크기, 커밋율, 실패율, 재시도/펜딩 길이, DLQ 길이

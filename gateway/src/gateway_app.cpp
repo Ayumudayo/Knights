@@ -1,8 +1,8 @@
 #include "gateway/gateway_app.hpp"
 
 #include <cstdlib>
+#include <cstdint>
 #include <chrono>
-#include <filesystem>
 #include <mutex>
 #include <stdexcept>
 #include <string>
@@ -20,7 +20,6 @@
 #include <boost/asio/ip/tcp.hpp>
 
 #include "gateway/gateway_connection.hpp"
-#include "server/core/util/paths.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/metrics/build_info.hpp"
 #include "server/storage/redis/client.hpp"
@@ -35,10 +34,50 @@ constexpr const char* kEnvGatewayId = "GATEWAY_ID";
 constexpr const char* kEnvRedisUri = "REDIS_URI";
 constexpr const char* kEnvServerRegistryPrefix = "SERVER_REGISTRY_PREFIX";
 constexpr const char* kEnvServerRegistryTtl = "SERVER_REGISTRY_TTL";
+constexpr const char* kEnvGatewayBackendConnectTimeoutMs = "GATEWAY_BACKEND_CONNECT_TIMEOUT_MS";
+constexpr const char* kEnvGatewayBackendSendQueueMaxBytes = "GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES";
 constexpr const char* kDefaultGatewayListen = "0.0.0.0:6000";
 constexpr const char* kDefaultGatewayId = "gateway-default";
 constexpr const char* kDefaultRedisUri = "tcp://127.0.0.1:6379";
 constexpr const char* kDefaultServerRegistryPrefix = "gateway/instances/";
+constexpr std::uint32_t kDefaultBackendConnectTimeoutMs = 5000;
+constexpr std::size_t kDefaultBackendSendQueueMaxBytes = 256 * 1024;
+
+std::uint32_t parse_env_u32_bounded(const char* key,
+                                    std::uint32_t fallback,
+                                    std::uint32_t min_value,
+                                    std::uint32_t max_value,
+                                    const char* warning_message) {
+    if (const char* value = std::getenv(key); value && *value) {
+        try {
+            const auto parsed = std::stoull(value);
+            if (parsed >= min_value && parsed <= max_value) {
+                return static_cast<std::uint32_t>(parsed);
+            }
+        } catch (...) {
+        }
+        server::core::log::warn(warning_message);
+    }
+    return fallback;
+}
+
+std::size_t parse_env_size_bounded(const char* key,
+                                   std::size_t fallback,
+                                   std::size_t min_value,
+                                   std::size_t max_value,
+                                   const char* warning_message) {
+    if (const char* value = std::getenv(key); value && *value) {
+        try {
+            const auto parsed = std::stoull(value);
+            if (parsed >= min_value && parsed <= max_value) {
+                return static_cast<std::size_t>(parsed);
+            }
+        } catch (...) {
+        }
+        server::core::log::warn(warning_message);
+    }
+    return fallback;
+}
 
 std::pair<std::string, std::uint16_t> parse_listen(std::string_view value, std::uint16_t fallback_port) {
     if (value.empty()) {
@@ -83,14 +122,21 @@ GatewayApp::BackendSession::BackendSession(GatewayApp& app,
                                             std::string client_id,
                                             std::string backend_instance_id,
                                             bool sticky_hit,
-                                            std::weak_ptr<GatewayConnection> connection)
+                                            std::weak_ptr<GatewayConnection> connection,
+                                            std::size_t send_queue_max_bytes,
+                                            std::chrono::milliseconds connect_timeout)
     : app_(app)
     , session_id_(std::move(session_id))
     , client_id_(std::move(client_id))
     , backend_instance_id_(std::move(backend_instance_id))
     , sticky_hit_(sticky_hit)
     , connection_(std::move(connection))
-    , socket_(app.io_) {
+    , socket_(app.io_)
+    , connect_timer_(app.io_)
+    , send_queue_max_bytes_(send_queue_max_bytes > 0 ? send_queue_max_bytes : kDefaultBackendSendQueueMaxBytes)
+    , connect_timeout_(connect_timeout > std::chrono::milliseconds{0}
+                           ? connect_timeout
+                           : std::chrono::milliseconds{kDefaultBackendConnectTimeoutMs}) {
 }
 
 GatewayApp::BackendSession::~BackendSession() {
@@ -108,20 +154,44 @@ void GatewayApp::BackendSession::do_connect(const std::string& host, std::uint16
     
     resolver->async_resolve(host, std::to_string(port),
         [self, this, resolver](const boost::system::error_code& ec, boost::asio::ip::tcp::resolver::results_type results) {
+            if (closed_.load(std::memory_order_relaxed)) {
+                return;
+            }
+
             if (ec) {
+                app_.record_backend_resolve_fail();
                 server::core::log::error("BackendSession resolve failed: " + ec.message());
                 if (auto conn = connection_.lock()) {
                     conn->handle_backend_close("resolve failed");
+                } else {
+                    close();
                 }
                 return;
             }
+
+            connect_timer_.expires_after(connect_timeout_);
+            connect_timer_.async_wait([self, this](const boost::system::error_code& timer_ec) {
+                if (timer_ec == boost::asio::error::operation_aborted) {
+                    return;
+                }
+                on_connect_timeout();
+            });
             
             boost::asio::async_connect(socket_, results,
                 [self, this](const boost::system::error_code& ec, const boost::asio::ip::tcp::endpoint& /*endpoint*/) {
+                    (void)connect_timer_.cancel();
+
+                    if (closed_.load(std::memory_order_relaxed)) {
+                        return;
+                    }
+
                     if (ec) {
+                        app_.record_backend_connect_fail();
                         server::core::log::error("BackendSession connect failed: " + ec.message());
                         if (auto conn = connection_.lock()) {
                             conn->handle_backend_close("connect failed");
+                        } else {
+                            close();
                         }
                         return;
                     }
@@ -142,13 +212,69 @@ void GatewayApp::BackendSession::do_connect(const std::string& host, std::uint16
         });
 }
 
-void GatewayApp::BackendSession::send(std::vector<std::uint8_t> payload) {
-    std::lock_guard<std::mutex> lock(send_mutex_);
-    if (closed_) return;
+void GatewayApp::BackendSession::on_connect_timeout() {
+    bool expected = false;
+    if (!closed_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        return;
+    }
 
-    write_queue_.push_back(std::move(payload));
-    if (connected_ && !write_in_progress_) {
-        do_write();
+    app_.record_backend_connect_timeout();
+    server::core::log::warn(
+        "BackendSession connect timeout after " + std::to_string(connect_timeout_.count()) + "ms"
+    );
+
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        write_queue_.clear();
+        queued_bytes_ = 0;
+        connected_ = false;
+        write_in_progress_ = false;
+    }
+
+    boost::system::error_code ignored;
+    if (socket_.is_open()) {
+        socket_.cancel(ignored);
+        socket_.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ignored);
+        socket_.close(ignored);
+    }
+
+    if (auto conn = connection_.lock()) {
+        conn->handle_backend_close("connect timeout");
+    }
+}
+
+void GatewayApp::BackendSession::send(std::vector<std::uint8_t> payload) {
+    bool overflow = false;
+
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        if (closed_) {
+            return;
+        }
+
+        const auto payload_bytes = payload.size();
+        if (payload_bytes > send_queue_max_bytes_ ||
+            queued_bytes_ > (send_queue_max_bytes_ - payload_bytes)) {
+            overflow = true;
+        } else {
+            queued_bytes_ += payload_bytes;
+            write_queue_.push_back(std::move(payload));
+            if (connected_ && !write_in_progress_) {
+                do_write();
+            }
+        }
+    }
+
+    if (overflow) {
+        app_.record_backend_send_queue_overflow();
+        server::core::log::warn(
+            "BackendSession send queue overflow: max_bytes=" + std::to_string(send_queue_max_bytes_)
+        );
+        if (auto conn = connection_.lock()) {
+            conn->handle_backend_close("backend send queue overflow");
+        } else {
+            close();
+        }
     }
 }
 
@@ -165,12 +291,21 @@ void GatewayApp::BackendSession::do_write() {
     boost::asio::async_write(socket_, boost::asio::buffer(msg),
         [self, this](const boost::system::error_code& ec, std::size_t /*bytes_transferred*/) {
             if (ec) {
-                close();
+                app_.record_backend_write_error();
+                if (auto conn = connection_.lock()) {
+                    conn->handle_backend_close("backend write failed");
+                } else {
+                    close();
+                }
                 return;
             }
 
             std::lock_guard<std::mutex> lock(send_mutex_);
-            write_queue_.pop_front();
+            if (!write_queue_.empty()) {
+                const auto sent = write_queue_.front().size();
+                queued_bytes_ = queued_bytes_ >= sent ? (queued_bytes_ - sent) : 0;
+                write_queue_.pop_front();
+            }
             if (!write_queue_.empty()) {
                 do_write();
             } else {
@@ -210,6 +345,16 @@ void GatewayApp::BackendSession::on_read(const boost::system::error_code& ec, st
 void GatewayApp::BackendSession::close() {
     bool expected = false;
     if (!closed_.compare_exchange_strong(expected, true)) return;
+
+    (void)connect_timer_.cancel();
+
+    {
+        std::lock_guard<std::mutex> lock(send_mutex_);
+        write_queue_.clear();
+        queued_bytes_ = 0;
+        connected_ = false;
+        write_in_progress_ = false;
+    }
 
     boost::system::error_code ignored;
     if (socket_.is_open()) {
@@ -260,6 +405,32 @@ GatewayApp::GatewayApp()
         }
         stream << "# TYPE gateway_connections_total counter\n";
         stream << "gateway_connections_total " << connections_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_backend_resolve_fail_total counter\n";
+        stream << "gateway_backend_resolve_fail_total "
+               << backend_resolve_fail_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_backend_connect_fail_total counter\n";
+        stream << "gateway_backend_connect_fail_total "
+               << backend_connect_fail_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_backend_connect_timeout_total counter\n";
+        stream << "gateway_backend_connect_timeout_total "
+               << backend_connect_timeout_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_backend_write_error_total counter\n";
+        stream << "gateway_backend_write_error_total "
+               << backend_write_error_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_backend_send_queue_overflow_total counter\n";
+        stream << "gateway_backend_send_queue_overflow_total "
+               << backend_send_queue_overflow_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_backend_connect_timeout_ms gauge\n";
+        stream << "gateway_backend_connect_timeout_ms " << backend_connect_timeout_ms_ << "\n";
+
+        stream << "# TYPE gateway_backend_send_queue_max_bytes gauge\n";
+        stream << "gateway_backend_send_queue_max_bytes " << backend_send_queue_max_bytes_ << "\n";
 
         stream << app_host_.dependency_metrics_text();
         return stream.str();
@@ -383,7 +554,9 @@ GatewayApp::BackendSessionPtr GatewayApp::create_backend_session(const std::stri
         client_id,
         selected->record.instance_id,
         selected->sticky_hit,
-        std::move(connection)
+        std::move(connection),
+        backend_send_queue_max_bytes_,
+        std::chrono::milliseconds{backend_connect_timeout_ms_}
     );
 
     server::core::log::info(
@@ -498,8 +671,26 @@ void GatewayApp::configure_gateway() {
         gateway_id_ = kDefaultGatewayId;
     }
 
+    backend_connect_timeout_ms_ = parse_env_u32_bounded(
+        kEnvGatewayBackendConnectTimeoutMs,
+        kDefaultBackendConnectTimeoutMs,
+        100,
+        60000,
+        "GatewayApp invalid GATEWAY_BACKEND_CONNECT_TIMEOUT_MS; using default"
+    );
+
+    backend_send_queue_max_bytes_ = parse_env_size_bounded(
+        kEnvGatewayBackendSendQueueMaxBytes,
+        kDefaultBackendSendQueueMaxBytes,
+        1024,
+        16 * 1024 * 1024,
+        "GatewayApp invalid GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES; using default"
+    );
+
     server::core::log::info("GatewayApp configured: gateway_id=" + gateway_id_
-        + " listen=" + listen_host_ + ":" + std::to_string(listen_port_));
+        + " listen=" + listen_host_ + ":" + std::to_string(listen_port_)
+        + " backend_connect_timeout_ms=" + std::to_string(backend_connect_timeout_ms_)
+        + " backend_send_queue_max_bytes=" + std::to_string(backend_send_queue_max_bytes_));
 }
 
 void GatewayApp::configure_infrastructure() {

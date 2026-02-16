@@ -47,8 +47,15 @@ class TokenAuthenticator : public gateway::auth::IAuthenticator {
 | `SERVER_REGISTRY_PREFIX` | Instance Registry key prefix (server_app과 동일) | `gateway/instances/` |
 | `SERVER_REGISTRY_TTL` | Instance Registry TTL seconds | `30` |
 | `METRICS_PORT` | `/metrics` HTTP 포트 | `6001` |
+| `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS` | backend connect timeout(ms) | `5000` |
+| `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES` | backend 전송 대기 큐 상한 바이트 | `262144` |
 | `ALLOW_ANONYMOUS` | 익명 로그인 허용(1/0) | `1` |
 | `AUTH_PROVIDER` / `AUTH_ENDPOINT` | 외부 인증 연동(옵션) | 빈 값 |
+
+주요 gateway 메트릭:
+- `gateway_sessions_active`, `gateway_connections_total`
+- `gateway_backend_resolve_fail_total`, `gateway_backend_connect_fail_total`, `gateway_backend_connect_timeout_total`
+- `gateway_backend_write_error_total`, `gateway_backend_send_queue_overflow_total`
 
 자세한 옵션은 `docs/configuration.md` 와 `docs/ops/gateway-and-lb.md` 를 참고하세요.
 

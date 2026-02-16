@@ -29,6 +29,8 @@ Client --TCP--> HAProxy --TCP--> Gateway --TCP--> server_app
 | `GATEWAY_ID` | Presence/로그 태그 | `gateway-default` |
 | `REDIS_URI` | Instance Registry/SessionDirectory Redis | `tcp://127.0.0.1:6379` |
 | `METRICS_PORT` | `/metrics` 포트 | `6001` |
+| `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS` | backend connect timeout(ms) | `5000` |
+| `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES` | backend 전송 대기 큐 상한 바이트 | `262144` |
 | `ALLOW_ANONYMOUS`, `AUTH_PROVIDER` | 인증 정책 | `1`, 빈 값 |
 
 ### 2.3 운영 팁
@@ -83,7 +85,8 @@ listen stats
 | Multi-region | Redis, RDS 를 region 별로 두고, Gateway/Edge LB(예: HAProxy)를 각 region 에 배치. 전역 라우팅은 외부 L7(LB or Anycast) 에서 처리 |
 
 ## 5. 모니터링
-- Gateway 로그: 인증 실패, backend 선택/연결 실패, Pub/Sub lag
+- Gateway 로그: 인증 실패, backend 선택/연결 실패, Pub/Sub lag, send queue overflow
+- Gateway metrics: `gateway_backend_resolve_fail_total`, `gateway_backend_connect_fail_total`, `gateway_backend_connect_timeout_total`, `gateway_backend_write_error_total`, `gateway_backend_send_queue_overflow_total`
 - HAProxy 로그/통계: 프런트/백엔드 에러율, 다운된 Gateway 백엔드 수
 
 ## 6. 장애 시나리오 대응 요약

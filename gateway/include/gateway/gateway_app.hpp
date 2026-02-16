@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -12,6 +13,7 @@
 #include <deque>
 
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/steady_timer.hpp>
 
 #include "gateway/auth/authenticator.hpp"
 #include "server/core/app/app_host.hpp"
@@ -44,7 +46,9 @@ public:
                        std::string client_id,
                        std::string backend_instance_id,
                        bool sticky_hit,
-                       std::weak_ptr<GatewayConnection> connection);
+                       std::weak_ptr<GatewayConnection> connection,
+                       std::size_t send_queue_max_bytes,
+                       std::chrono::milliseconds connect_timeout);
         ~BackendSession();
 
         void connect(const std::string& host, std::uint16_t port);
@@ -57,6 +61,7 @@ public:
         void do_read();
         void on_read(const boost::system::error_code& ec, std::size_t bytes_transferred);
         void do_write();
+        void on_connect_timeout();
 
         GatewayApp& app_;
         std::string session_id_;
@@ -65,11 +70,15 @@ public:
         bool sticky_hit_{false};
         std::weak_ptr<GatewayConnection> connection_;
         boost::asio::ip::tcp::socket socket_;
+        boost::asio::steady_timer connect_timer_;
         std::array<std::uint8_t, 8192> buffer_;
         std::atomic<bool> closed_{false};
         
         std::mutex send_mutex_;
         std::deque<std::vector<std::uint8_t>> write_queue_;
+        std::size_t queued_bytes_{0};
+        std::size_t send_queue_max_bytes_{256 * 1024};
+        std::chrono::milliseconds connect_timeout_{5000};
         bool connected_{false};
         bool write_in_progress_{false};
     };
@@ -83,6 +92,26 @@ public:
 
     void record_connection_accept() {
         connections_total_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void record_backend_resolve_fail() {
+        backend_resolve_fail_total_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void record_backend_connect_fail() {
+        backend_connect_fail_total_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void record_backend_connect_timeout() {
+        backend_connect_timeout_total_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void record_backend_write_error() {
+        backend_write_error_total_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    void record_backend_send_queue_overflow() {
+        backend_send_queue_overflow_total_.fetch_add(1, std::memory_order_relaxed);
     }
 
     BackendSessionPtr create_backend_session(const std::string& client_id,
@@ -121,9 +150,16 @@ public:
     std::unordered_map<std::string, SessionState> sessions_;
 
     std::atomic<std::uint64_t> connections_total_{0};
+    std::atomic<std::uint64_t> backend_resolve_fail_total_{0};
+    std::atomic<std::uint64_t> backend_connect_fail_total_{0};
+    std::atomic<std::uint64_t> backend_connect_timeout_total_{0};
+    std::atomic<std::uint64_t> backend_write_error_total_{0};
+    std::atomic<std::uint64_t> backend_send_queue_overflow_total_{0};
 
     std::string boot_id_;
     std::uint16_t metrics_port_{6001};
+    std::uint32_t backend_connect_timeout_ms_{5000};
+    std::size_t backend_send_queue_max_bytes_{256 * 1024};
 
      // State & Storage
      std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;

@@ -48,6 +48,7 @@ pwsh scripts/check_observability.ps1
 ### server_app
 - Build: `knights_build_info{git_hash=...,git_describe=...,build_time_utc=...} 1`
 - Sessions: `chat_session_active` (gauge), `chat_session_started_total`, `chat_session_stopped_total`
+- Session timeout: `chat_session_timeout_total`, `chat_session_write_timeout_total` (counters)
 - Frames: `chat_frame_total`, `chat_frame_error_total`, `chat_frame_payload_*`
 - Dispatch: `chat_dispatch_total`, `chat_dispatch_unknown_total`, `chat_dispatch_exception_total`
 - Dispatch latency:
@@ -66,10 +67,25 @@ pwsh scripts/check_observability.ps1
 - Build: `knights_build_info{...} 1`
 - `gateway_sessions_active` (gauge)
 - `gateway_connections_total` (counter)
+- Backend reliability:
+  - `gateway_backend_resolve_fail_total` (counter)
+  - `gateway_backend_connect_fail_total` (counter)
+  - `gateway_backend_connect_timeout_total` (counter)
+  - `gateway_backend_write_error_total` (counter)
+  - `gateway_backend_send_queue_overflow_total` (counter)
+- Backend guardrail config:
+  - `gateway_backend_connect_timeout_ms` (gauge)
+  - `gateway_backend_send_queue_max_bytes` (gauge)
 
 ### wb_worker
 - Build: `knights_build_info{...} 1`
 - Backlog: `wb_pending` (gauge)
+- DB reconnect config/backoff:
+  - `wb_db_reconnect_base_ms`, `wb_db_reconnect_max_ms` (gauges)
+  - `wb_db_reconnect_backoff_ms_last` (gauge)
+- DB availability/drop signals:
+  - `wb_db_unavailable_total` (counter)
+  - `wb_error_drop_total` (counter)
 - Flush: `wb_flush_total`, `wb_flush_ok_total`, `wb_flush_fail_total`, `wb_flush_dlq_total` (counters)
 - Batch/Latency: `wb_flush_batch_size_last` (gauge), `wb_flush_commit_ms_last` (gauge)
 

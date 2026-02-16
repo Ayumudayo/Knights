@@ -4,11 +4,14 @@
 #include <thread>
 #include <chrono>
 #include <cstdlib>
+#include <algorithm>
 #include <vector>
 #include <optional>
 #include <sstream>
 #include <atomic>
 #include <cstdint>
+#include <limits>
+#include <random>
 
 #include "server/storage/redis/client.hpp"
 #include "server/core/util/log.hpp"
@@ -48,6 +51,9 @@ struct WorkerConfig {
 
     std::uint16_t metrics_port = 0;
 
+    long long db_reconnect_base_ms = 500;
+    long long db_reconnect_max_ms = 30000;
+
     static WorkerConfig Load() {
         WorkerConfig cfg;
         // .env 파일 로드 (기존 환경변수 덮어쓰기)
@@ -62,6 +68,18 @@ struct WorkerConfig {
         if (const char* v = std::getenv("METRICS_PORT")) {
             auto n = std::strtoul(v, nullptr, 10);
             if (n > 0 && n <= 65535) cfg.metrics_port = static_cast<std::uint16_t>(n);
+        }
+
+        if (const char* v = std::getenv("WB_DB_RECONNECT_BASE_MS")) {
+            auto n = std::strtoul(v, nullptr, 10);
+            if (n >= 100 && n <= 60000) cfg.db_reconnect_base_ms = static_cast<long long>(n);
+        }
+        if (const char* v = std::getenv("WB_DB_RECONNECT_MAX_MS")) {
+            auto n = std::strtoul(v, nullptr, 10);
+            if (n >= 1000 && n <= 300000) cfg.db_reconnect_max_ms = static_cast<long long>(n);
+        }
+        if (cfg.db_reconnect_max_ms < cfg.db_reconnect_base_ms) {
+            cfg.db_reconnect_max_ms = cfg.db_reconnect_base_ms;
         }
 
         if (const char* v = std::getenv("WB_BATCH_MAX_EVENTS")) {
@@ -155,7 +173,9 @@ public:
         // Readiness requires both Redis and DB to function.
         app_host_.declare_dependency("redis");
         app_host_.declare_dependency("db");
-        app_host_.set_ready(true);
+        app_host_.set_dependency_ok("redis", false);
+        app_host_.set_dependency_ok("db", false);
+        app_host_.set_ready(false);
 
         if (config_.db_uri.empty()) {
             std::cerr << "WB worker: DB_URI not set" << std::endl;
@@ -164,6 +184,12 @@ public:
         if (config_.redis_uri.empty()) {
             std::cerr << "WB worker: REDIS_URI not set" << std::endl;
             return 2;
+        }
+
+        if (config_.ack_on_error && !config_.dlq_on_error) {
+            server::core::log::warn(
+                "WB worker configured with WB_ACK_ON_ERROR=1 and WB_DLQ_ON_ERROR=0; failed events may be dropped"
+            );
         }
 
         // Redis 연결
@@ -194,6 +220,7 @@ public:
 
         // 메인 루프 시작
         Loop();
+        app_host_.set_ready(false);
         return 0;
     }
 
@@ -205,6 +232,7 @@ private:
                 return true;
             }
             app_host_.set_dependency_ok("db", false);
+            wb_db_unavailable_total_.fetch_add(1, std::memory_order_relaxed);
             return false;
         }
 
@@ -225,6 +253,7 @@ private:
             std::cerr << "DB connection attempt failed: " << e.what() << std::endl;
         }
         app_host_.set_dependency_ok("db", false);
+        wb_db_unavailable_total_.fetch_add(1, std::memory_order_relaxed);
         return false;
     }
 
@@ -275,6 +304,28 @@ private:
         return ok;
     }
 
+    void ResetDbReconnectBackoff() {
+        db_reconnect_attempt_ = 0;
+        wb_db_reconnect_backoff_ms_last_.store(0, std::memory_order_relaxed);
+    }
+
+    void SleepDbReconnectBackoff() {
+        const auto capped_attempt = std::min<std::uint32_t>(db_reconnect_attempt_, 16);
+        const auto base = static_cast<std::uint64_t>(std::max<long long>(1, config_.db_reconnect_base_ms));
+        const auto cap = static_cast<std::uint64_t>(std::max<long long>(base, config_.db_reconnect_max_ms));
+        const auto exp = std::min<std::uint64_t>(cap, base * (1ull << capped_attempt));
+
+        std::uniform_int_distribution<std::uint64_t> dist(0, exp);
+        const auto delay = dist(rng_);
+
+        wb_db_reconnect_backoff_ms_last_.store(delay, std::memory_order_relaxed);
+        std::this_thread::sleep_for(std::chrono::milliseconds(delay));
+
+        if (db_reconnect_attempt_ < std::numeric_limits<std::uint32_t>::max()) {
+            ++db_reconnect_attempt_;
+        }
+    }
+
     void Loop() {
         auto last_flush = std::chrono::steady_clock::now();
         auto last_pending_log = std::chrono::steady_clock::now();
@@ -288,9 +339,13 @@ private:
         while (!app_host_.stop_requested()) {
             // DB 연결 확인 (끊어졌으면 재연결 시도)
             if (!EnsureDbConnection()) {
-                std::this_thread::sleep_for(std::chrono::seconds(1));
+                app_host_.set_ready(false);
+                SleepDbReconnectBackoff();
                 continue;
             }
+
+            ResetDbReconnectBackoff();
+            app_host_.set_ready(true);
 
             // 0. Pending reclaim (PEL)
             {
@@ -449,7 +504,9 @@ private:
                     }
 
                     if (!acked && config_.ack_on_error) {
-                        (void)Ack(e.id);
+                        if (Ack(e.id)) {
+                            wb_error_drop_total_.fetch_add(1, std::memory_order_relaxed);
+                        }
                     }
                 }
             }
@@ -574,6 +631,10 @@ private:
     std::atomic<std::uint64_t> wb_reclaim_error_total_{0};
     std::atomic<std::uint64_t> wb_reclaim_deleted_total_{0};
 
+    std::atomic<std::uint64_t> wb_db_unavailable_total_{0};
+    std::atomic<std::uint64_t> wb_error_drop_total_{0};
+    std::atomic<std::uint64_t> wb_db_reconnect_backoff_ms_last_{0};
+
     std::atomic<std::uint64_t> wb_ack_total_{0};
     std::atomic<std::uint64_t> wb_ack_fail_total_{0};
 
@@ -587,6 +648,9 @@ private:
     std::atomic<std::uint64_t> wb_flush_commit_ms_sum_{0};
     std::atomic<std::uint64_t> wb_flush_commit_ms_count_{0};
 
+    std::uint32_t db_reconnect_attempt_{0};
+    mutable std::mt19937_64 rng_{std::random_device{}()};
+
     std::string RenderMetrics() const {
         std::ostringstream stream;
 
@@ -599,6 +663,11 @@ private:
         stream << "wb_batch_max_bytes " << config_.batch_max_bytes << "\n";
         stream << "# TYPE wb_batch_delay_ms gauge\n";
         stream << "wb_batch_delay_ms " << config_.batch_delay_ms << "\n";
+
+        stream << "# TYPE wb_db_reconnect_base_ms gauge\n";
+        stream << "wb_db_reconnect_base_ms " << config_.db_reconnect_base_ms << "\n";
+        stream << "# TYPE wb_db_reconnect_max_ms gauge\n";
+        stream << "wb_db_reconnect_max_ms " << config_.db_reconnect_max_ms << "\n";
 
         stream << "# TYPE wb_reclaim_enabled gauge\n";
         stream << "wb_reclaim_enabled " << (config_.reclaim_enabled ? 1 : 0) << "\n";
@@ -620,6 +689,15 @@ private:
         stream << "wb_reclaim_error_total " << wb_reclaim_error_total_.load(std::memory_order_relaxed) << "\n";
         stream << "# TYPE wb_reclaim_deleted_total counter\n";
         stream << "wb_reclaim_deleted_total " << wb_reclaim_deleted_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_db_unavailable_total counter\n";
+        stream << "wb_db_unavailable_total " << wb_db_unavailable_total_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE wb_db_reconnect_backoff_ms_last gauge\n";
+        stream << "wb_db_reconnect_backoff_ms_last "
+               << wb_db_reconnect_backoff_ms_last_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_error_drop_total counter\n";
+        stream << "wb_error_drop_total " << wb_error_drop_total_.load(std::memory_order_relaxed) << "\n";
 
         stream << "# TYPE wb_ack_total counter\n";
         stream << "wb_ack_total " << wb_ack_total_.load(std::memory_order_relaxed) << "\n";
