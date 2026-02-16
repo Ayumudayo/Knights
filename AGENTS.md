@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-Generated: 2026-02-16
-Commit: b9d2dd7
+Generated: 2026-02-17
+Commit: e38c7e4
 Branch: Huge-Refactor
 
 ## Overview
@@ -45,15 +45,19 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 | `server::app::MetricsServer` | class | `server/src/app/metrics_server.cpp` | server_app `/metrics` endpoint |
 | `gateway::GatewayApp` | class | `gateway/include/gateway/gateway_app.hpp` | 게이트웨이 라이프사이클/백엔드 선택 |
 | `gateway::GatewayApp::run` | method | `gateway/src/gateway_app.cpp` | 게이트웨이 메인 루프(리스너/메트릭 포함) |
+| `gateway::GatewayApp::BackendSession` | class | `gateway/include/gateway/gateway_app.hpp` | backend 연결/브리지 세션(connect timeout + bounded send queue) |
 | `gateway::GatewayConnection` | class | `gateway/include/gateway/gateway_connection.hpp` | 클라이언트<->백엔드 브리지 |
 | `WbWorker` | class | `tools/wb_worker/main.cpp` | Redis Streams -> Postgres write-behind |
+| `WbWorker::SleepDbReconnectBackoff` | method | `tools/wb_worker/main.cpp` | DB 장애 시 지수 백오프(+jitter) 재연결 대기 |
 
 ## Key Flows
 - Client -> Stack: `haproxy`(TCP) -> `gateway_app` -> `server_app`.
 - Gateway routing: sticky(`SessionDirectory`) -> least-connections(`InstanceRecord.active_sessions`) backend selection.
+- Gateway backend guardrail: `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS`, `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES`로 connect 지연/송신 큐 폭주를 제한.
 - Distributed fanout: `server_app` can `psubscribe` to `${REDIS_CHANNEL_PREFIX}fanout:*` for room broadcasts.
 - Chat hook plugin(실험): `MSG_CHAT_SEND` 경로에 hot-reload 가능한 플러그인 체인을 적용(파일명 순서; cache-copy + 선택적 lock/sentinel).
 - Streams -> DB: `wb_emit`(`XADD`) -> `wb_worker`(`XREADGROUP`) -> Postgres `session_events`.
+- wb_worker readiness/recovery: Redis+DB 의존성 정상화 전 `ready=false`, DB 장애 시 `WB_DB_RECONNECT_BASE_MS`/`WB_DB_RECONNECT_MAX_MS` 기반 지수 백오프 재연결.
 - Metrics: each service exposes Prometheus text format on `/metrics` (ports wired in `docker/stack/docker-compose.yml`).
 
 ## Where To Look
@@ -62,11 +66,11 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 | Build presets / 옵션 | `CMakeLists.txt`, `CMakePresets.json` | `BUILD_*` 옵션, Windows(vcpkg) vs Linux(docker) 흐름 |
 | Windows 빌드 | `scripts/build.ps1` | vcpkg bootstrap + preset configure/build |
 | Docker 풀스택 | `docker/stack/docker-compose.yml`, `scripts/deploy_docker.ps1` | `observability` profile 포함 |
-| Observability | `docker/observability/prometheus/prometheus.yml`, `docker/observability/grafana/dashboards/` | Grafana provisioning은 `docker/observability/grafana/provisioning/` |
+| Observability | `docker/observability/prometheus/prometheus.yml`, `docker/observability/grafana/dashboards/`, `docs/ops/observability.md` | Grafana provisioning은 `docker/observability/grafana/provisioning/`; gateway/wb_worker 신규 하드닝 메트릭 포함 |
 | 서버 런타임 메트릭 | `core/include/server/core/runtime_metrics.hpp`, `server/src/app/metrics_server.cpp` | `/metrics` 텍스트 포맷 노출 |
 | Chat hook plugin | `server/src/chat/chat_hook_plugin_*.{hpp,cpp}`, `server/plugins/` | 설정: `docs/configuration.md`, `server/README.md` |
-| 게이트웨이 라우팅/세션 | `gateway/src/gateway_app.cpp`, `gateway/src/gateway_connection.cpp` | Redis Instance Registry + SessionDirectory |
-| Write-behind 워커 | `tools/wb_worker/main.cpp` | Redis Streams -> Postgres + `/metrics`(옵션) |
+| 게이트웨이 라우팅/세션 | `gateway/src/gateway_app.cpp`, `gateway/src/gateway_connection.cpp`, `gateway/README.md` | Redis Instance Registry + SessionDirectory + backend connect timeout/send queue guardrail |
+| Write-behind 워커 | `tools/wb_worker/main.cpp`, `tools/wb_worker/README.md`, `docs/db/write-behind.md` | Redis Streams -> Postgres + `/metrics`(옵션) + DB reconnect backoff/readiness/drop visibility |
 | DB 마이그레이션 | `tools/migrations/runner.cpp`, `tools/migrations/*.sql` | `CREATE INDEX CONCURRENTLY`는 트랜잭션 밖 |
 | 프로토콜 코드 생성 | `core/protocol/system_opcodes.json`, `tools/gen_opcodes.py`, `protocol/wire_map.json`, `tools/gen_wire_codec.py` | 생성 대상: `core/include/server/core/protocol/system_opcodes.hpp`, `core/include/server/wire/codec.hpp` |
 | Opcode 문서/검증 | `tools/gen_opcode_docs.py`, `docs/protocol/opcodes.md` | system/game 전체 16-bit 중복 검증 + CI 체크 |
@@ -77,6 +81,8 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 ```powershell
 # Windows dev build
 pwsh scripts/build.ps1 -Config Debug -Target server_app
+pwsh scripts/build.ps1 -Config Debug -Target gateway_app
+pwsh scripts/build.ps1 -Config Debug -Target wb_worker
 
 # Full stack (Docker) + Observability
 pwsh scripts/run_full_stack_observability.ps1
@@ -109,6 +115,9 @@ python tools/gen_opcode_docs.py --check
 ## Notes
 - Docker 이미지: `knights-base:latest`(기반) -> `knights-app:local`(앱). `docker/stack`은 `observability` profile로 exporters/Prometheus/Grafana를 포함.
 - Dispatch latency quantile(p95/p99)는 최근 구간에 샘플이 없으면 NaN이 나올 수 있음(정상). 트래픽 주입 후 확인.
+- Gateway 하드닝 기본값: `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS=5000`, `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES=262144`; 관련 장애 카운터는 `gateway_backend_*` 메트릭으로 노출.
+- wb_worker는 Redis/DB 의존성 정상화 전 `ready=false`를 유지하고, DB 재연결 시 지수 백오프(+jitter)를 사용한다.
+- `WB_ACK_ON_ERROR=1` + `WB_DLQ_ON_ERROR=0` 조합은 실패 이벤트 유실을 유발할 수 있으므로 운영에서 주의(관측: `wb_error_drop_total`).
 - `prometheus/prometheus.yml`는 단일 job 샘플 구성(legacy)이며, 표준은 `docker/observability/prometheus/prometheus.yml`.
 - `Sapphire/`는 참고용으로 동봉된 별도 프로젝트이며, Knights의 런타임/빌드 대상으로 취급하지 않는다.
 - clangd/LSP 정밀 진단이 필요하면 `pwsh scripts/configure_windows_ninja.ps1`로 `build-windows-ninja/compile_commands.json`를 생성한 뒤, repo root에 `compile_commands.json`를 두면 된다(파일은 `.gitignore` 처리됨).
