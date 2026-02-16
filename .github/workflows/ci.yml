@@ -134,6 +134,10 @@ jobs:
         run: |
           python3 tests/python/test_load_balancing.py
 
+      - name: Smoke Test (Cross-Instance Whisper)
+        run: |
+          python3 tests/python/verify_whisper_cross_instance.py
+
       - name: Verify Plugin Metrics
         run: |
           python3 - <<'PY'
