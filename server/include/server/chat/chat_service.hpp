@@ -254,6 +254,7 @@ private:
     std::shared_ptr<server::core::storage::IConnectionPool> db_pool_{};
     std::shared_ptr<server::storage::redis::IRedisClient> redis_{};
     std::string gateway_id_{"gw-default"};
+    bool redis_pubsub_enabled_{false};
 
     std::unique_ptr<HookPluginState> hook_plugin_{};
     
@@ -275,6 +276,7 @@ private:
     // --- 내부 헬퍼 메서드 ---
 
     bool write_behind_enabled() const;
+    bool pubsub_enabled();
     std::string generate_uuid_v4();
     std::string get_or_create_session_uuid(Session& s);
     

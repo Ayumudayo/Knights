@@ -236,14 +236,15 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         }
 
         // 로컬 세션들에게 메시지 전송
-        if (targets.empty()) { 
+        std::vector<std::uint8_t> broadcast_body(bytes.begin(), bytes.end());
+        if (targets.empty()) {
             // 방에 혼자 있는 경우 자신에게만 에코
-            session_sp->async_send(game_proto::MSG_CHAT_BROADCAST, std::vector<std::uint8_t>(bytes.begin(), bytes.end()), proto::FLAG_SELF); 
-        } else { 
-            for (auto& t : targets) { 
-                auto f = (t.get() == session_sp.get()) ? proto::FLAG_SELF : 0; 
-                t->async_send(game_proto::MSG_CHAT_BROADCAST, std::vector<std::uint8_t>(bytes.begin(), bytes.end()), f); 
-            } 
+            session_sp->async_send(game_proto::MSG_CHAT_BROADCAST, broadcast_body, proto::FLAG_SELF);
+        } else {
+            for (auto& t : targets) {
+                auto f = (t.get() == session_sp.get()) ? proto::FLAG_SELF : 0;
+                t->async_send(game_proto::MSG_CHAT_BROADCAST, broadcast_body, f);
+            }
         }
 
         // 사용자 프레즌스 heartbeat TTL을 갱신한다.
@@ -262,21 +263,19 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
 
         // Redis Pub/Sub 팬아웃(옵션)을 수행한다.
         // 다른 서버 인스턴스에 접속한 사용자들에게도 메시지를 전달하기 위함입니다.
-        if (redis_) {
+        if (redis_ && pubsub_enabled()) {
             try {
-                if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
-                    static std::atomic<std::uint64_t> publish_total{0};
-                    std::string channel = presence_.prefix + std::string("fanout:room:") + current_room;
-                    std::string payload(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-                    std::string message;
-                    message.reserve(3 + gateway_id_.size() + payload.size());
-                    message.append("gw=").append(gateway_id_);
-                    message.push_back('\n');
-                    message.append(payload);
-                    redis_->publish(channel, std::move(message));
-                    auto n = ++publish_total;
-                    corelog::info(std::string("metric=publish_total value=") + std::to_string(n) + " room=" + current_room);
-                }
+                static std::atomic<std::uint64_t> publish_total{0};
+                std::string channel = presence_.prefix + std::string("fanout:room:") + current_room;
+                std::string payload(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+                std::string message;
+                message.reserve(3 + gateway_id_.size() + payload.size());
+                message.append("gw=").append(gateway_id_);
+                message.push_back('\n');
+                message.append(payload);
+                redis_->publish(channel, std::move(message));
+                auto n = ++publish_total;
+                corelog::info(std::string("metric=publish_total value=") + std::to_string(n) + " room=" + current_room);
             } catch (...) {}
         }
 

@@ -621,22 +621,21 @@ std::optional<GatewayApp::SelectedBackend> GatewayApp::select_best_server(const 
     }
 
     // 2) 신규 선택: least-connections(active_sessions) 기반.
-    std::vector<server::state::InstanceRecord> candidates;
-    candidates.reserve(instances.size());
-    std::copy_if(instances.begin(), instances.end(), std::back_inserter(candidates), [](const auto& rec) {
-        return rec.ready && !rec.instance_id.empty() && !rec.host.empty() && rec.port > 0;
-    });
-    if (candidates.empty()) {
+    const server::state::InstanceRecord* selected = nullptr;
+    for (const auto& rec : instances) {
+        if (!rec.ready || rec.instance_id.empty() || rec.host.empty() || rec.port == 0) {
+            continue;
+        }
+        if (selected == nullptr || rec.active_sessions < selected->active_sessions) {
+            selected = &rec;
+        }
+    }
+
+    if (selected == nullptr) {
         return std::nullopt;
     }
 
-    std::sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
-        return a.active_sessions < b.active_sessions;
-    });
-
-    // 가장 부하가 적은 서버를 선택한다.
-    const auto& selected = candidates.front();
-    return SelectedBackend{selected, false};
+    return SelectedBackend{*selected, false};
 }
 
 void GatewayApp::on_backend_connected(const std::string& client_id,

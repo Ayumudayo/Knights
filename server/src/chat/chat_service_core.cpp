@@ -97,6 +97,10 @@ ChatService::ChatService(boost::asio::io_context& io,
         presence_.prefix = prefix;
     }
 
+    if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
+        redis_pubsub_enabled_ = true;
+    }
+
     // 환경 변수 읽기 헬퍼 함수
     const auto read_env = [](const char* primary, const char* secondary = nullptr) -> const char* {
         if (primary) {
@@ -289,6 +293,17 @@ bool ChatService::write_behind_enabled() const {
     return write_behind_.enabled && static_cast<bool>(redis_);
 }
 
+bool ChatService::pubsub_enabled() {
+    if (redis_pubsub_enabled_) {
+        return true;
+    }
+    if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
+        redis_pubsub_enabled_ = true;
+        return true;
+    }
+    return false;
+}
+
 // UUID v4 생성 (난수 기반)
 std::string ChatService::generate_uuid_v4() {
     std::array<unsigned char, 16> b{};
@@ -448,18 +463,34 @@ void ChatService::send_rooms_list(Session& s) {
         redis_available = true;
         std::vector<std::string> redis_rooms_list;
         redis_->smembers("rooms:active", redis_rooms_list);
+
+        std::vector<std::string> password_keys;
+        password_keys.reserve(redis_rooms_list.size());
+        for (const auto& r : redis_rooms_list) {
+            password_keys.push_back("room:password:" + r);
+        }
+
+        std::vector<std::optional<std::string>> password_values;
+        const bool password_batch_loaded = !password_keys.empty()
+            && redis_->mget(password_keys, password_values)
+            && password_values.size() == password_keys.size();
         
         bool lobby_found = false;
-            
-        for (const auto& r : redis_rooms_list) {
+
+        for (std::size_t i = 0; i < redis_rooms_list.size(); ++i) {
+            const auto& r = redis_rooms_list[i];
             if (r == "lobby") lobby_found = true;
             
             std::vector<std::string> users;
             redis_->smembers("room:users:" + r, users);
             
             bool locked = false;
-            auto pw = redis_->get("room:password:" + r);
-            if (pw.has_value()) locked = true;
+            if (password_batch_loaded) {
+                locked = password_values[i].has_value();
+            } else {
+                auto pw = redis_->get("room:password:" + r);
+                locked = pw.has_value();
+            }
             
             redis_rooms.push_back({r, users.size(), locked});
         }
@@ -552,15 +583,13 @@ void ChatService::broadcast_refresh(const std::string& room) {
     broadcast_refresh_local(room);
 
     // 2. Redis Pub/Sub으로 다른 서버에 전파
-    if (redis_) {
+    if (redis_ && pubsub_enabled()) {
         try {
-            if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
-                // fanout:refresh:<room> 채널 사용
-                std::string channel = presence_.prefix + std::string("fanout:refresh:") + room;
-                // Payload는 gwid만 있으면 됨 (self-echo 방지용)
-                std::string message = "gw=" + gateway_id_;
-                redis_->publish(channel, std::move(message));
-            }
+            // fanout:refresh:<room> 채널 사용
+            std::string channel = presence_.prefix + std::string("fanout:refresh:") + room;
+            // Payload는 gwid만 있으면 됨 (self-echo 방지용)
+            std::string message = "gw=" + gateway_id_;
+            redis_->publish(channel, std::move(message));
         } catch (...) {}
     }
 }
@@ -656,18 +685,34 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         redis_available = true;
         std::vector<std::string> active_rooms;
         redis_->smembers("rooms:active", active_rooms);
+
+        std::vector<std::string> password_keys;
+        password_keys.reserve(active_rooms.size());
+        for (const auto& r : active_rooms) {
+            password_keys.push_back("room:password:" + r);
+        }
+
+        std::vector<std::optional<std::string>> password_values;
+        const bool password_batch_loaded = !password_keys.empty()
+            && redis_->mget(password_keys, password_values)
+            && password_values.size() == password_keys.size();
         std::string room_list_str;
         for (const auto& r : active_rooms) room_list_str += r + ", ";
         bool lobby_found = false;
-        for (const auto& r : active_rooms) {
+        for (std::size_t i = 0; i < active_rooms.size(); ++i) {
+            const auto& r = active_rooms[i];
             if (r == "lobby") lobby_found = true;
             
             std::vector<std::string> users;
             redis_->smembers("room:users:" + r, users);
             
             bool locked = false;
-            auto pw = redis_->get("room:password:" + r);
-            if (pw.has_value()) locked = true;
+            if (password_batch_loaded) {
+                locked = password_values[i].has_value();
+            } else {
+                auto pw = redis_->get("room:password:" + r);
+                locked = pw.has_value();
+            }
             
             redis_rooms.push_back({r, users.size(), locked});
         }
@@ -1287,20 +1332,18 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
 
     if (targets.empty()) {
         bool routed_remote = false;
-        if (redis_) {
+        if (redis_ && pubsub_enabled()) {
             try {
-                if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
-                    notice.set_outgoing(false);
-                    std::string incoming_bytes;
-                    if (notice.SerializeToString(&incoming_bytes)) {
-                        std::string message;
-                        message.reserve(3 + gateway_id_.size() + 1 + incoming_bytes.size());
-                        message.append("gw=").append(gateway_id_);
-                        message.push_back('\n');
-                        message.append(incoming_bytes);
-                        const std::string channel = presence_.prefix + std::string("fanout:whisper");
-                        routed_remote = redis_->publish(channel, std::move(message));
-                    }
+                notice.set_outgoing(false);
+                std::string incoming_bytes;
+                if (notice.SerializeToString(&incoming_bytes)) {
+                    std::string message;
+                    message.reserve(3 + gateway_id_.size() + 1 + incoming_bytes.size());
+                    message.append("gw=").append(gateway_id_);
+                    message.push_back('\n');
+                    message.append(incoming_bytes);
+                    const std::string channel = presence_.prefix + std::string("fanout:whisper");
+                    routed_remote = redis_->publish(channel, std::move(message));
                 }
             } catch (...) {}
         }
