@@ -86,6 +86,8 @@ public:
         virtual bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) = 0;
         virtual bool scan_keys(const std::string& pattern, std::vector<std::string>& keys) = 0;
         virtual std::optional<std::string> get(const std::string& key) = 0;
+        virtual bool mget(const std::vector<std::string>& keys,
+                          std::vector<std::optional<std::string>>& out) = 0;
         virtual bool del(const std::string& key) = 0;
     };
 

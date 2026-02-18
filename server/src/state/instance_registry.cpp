@@ -218,6 +218,15 @@ public:
         return client_->get(key);
     }
 
+    bool mget(const std::vector<std::string>& keys,
+              std::vector<std::optional<std::string>>& out) override {
+        if (!client_) {
+            out.clear();
+            return false;
+        }
+        return client_->mget(keys, out);
+    }
+
     bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override {
         if (!client_) {
             return false;
@@ -304,10 +313,21 @@ bool RedisInstanceStateBackend::reload_cache_from_backend() const {
     if (!client_->scan_keys(key_prefix_ + "*", keys)) {
         return false;
     }
+    std::vector<std::optional<std::string>> payloads;
+    const bool batch_loaded = !keys.empty()
+        && client_->mget(keys, payloads)
+        && payloads.size() == keys.size();
+
     std::unordered_map<std::string, InstanceRecord> next;
     next.reserve(keys.size());
-    for (const auto& key : keys) {
-        auto payload = client_->get(key);
+    for (std::size_t i = 0; i < keys.size(); ++i) {
+        const auto& key = keys[i];
+        std::optional<std::string> payload;
+        if (batch_loaded) {
+            payload = std::move(payloads[i]);
+        } else {
+            payload = client_->get(key);
+        }
         if (!payload || payload->empty()) {
             continue;
         }
