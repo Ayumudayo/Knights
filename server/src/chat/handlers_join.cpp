@@ -268,8 +268,10 @@ void ChatService::on_join(ChatService::NetSession& s, std::span<const std::uint8
         
         // 로비와 해당 방에 있는 다른 유저들에게 새로고침 알림 전송
         broadcast_refresh("lobby");
-        broadcast_refresh(room_to_join);
-        if (!previous_room.empty() && previous_room != room_to_join) {
+        if (room_to_join != "lobby") {
+            broadcast_refresh(room_to_join);
+        }
+        if (!previous_room.empty() && previous_room != room_to_join && previous_room != "lobby") {
             broadcast_refresh(previous_room);
         }
     })) {

@@ -199,7 +199,7 @@ void ChatService::on_leave(ChatService::NetSession& s, std::span<const std::uint
 
         // 로비와 해당 방에 있는 다른 유저들에게 새로고침 알림 전송
         broadcast_refresh("lobby");
-        if (!room_to_leave.empty()) {
+        if (!room_to_leave.empty() && room_to_leave != "lobby") {
             broadcast_refresh(room_to_leave);
         }
 

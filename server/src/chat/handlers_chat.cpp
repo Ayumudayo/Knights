@@ -77,8 +77,6 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
 
     auto session_sp = s.shared_from_this();
     if (!job_queue_.TryPush([this, session_sp, room = std::move(room), text = std::move(text)]() mutable {
-        corelog::info(std::string("CHAT_SEND: room=") + (room.empty()?"(empty)":room) + ", text=" + text);
-        
         // /refresh는 상태 스냅샷을 강제로 다시 받게 하는 관리 명령이다.
         // 클라이언트 상태가 꼬였을 때 유용합니다.
         // 예: 네트워크 끊김 후 재접속 시 UI 갱신용
@@ -274,7 +272,9 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 message.append(bytes);
                 redis_->publish(channel, std::move(message));
                 auto n = ++publish_total;
-                corelog::info(std::string("metric=publish_total value=") + std::to_string(n) + " room=" + current_room);
+                if ((n & 1023ULL) == 0) {
+                    corelog::debug(std::string("metric=publish_total value=") + std::to_string(n) + " room=" + current_room);
+                }
             } catch (...) {}
         }
 

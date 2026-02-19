@@ -613,6 +613,7 @@ void ChatService::broadcast_refresh(const std::string& room) {
 void ChatService::send_room_users(Session& s, const std::string& target) {
     std::vector<std::string> names;
     bool allow = true;
+
     {
         std::lock_guard<std::mutex> lk(state_.mu);
         auto itroom = state_.rooms.find(target);
@@ -633,36 +634,41 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
                 }
             }
         }
-        
+
         if (is_locked && !is_member) {
             allow = false;
-        } else {
-            // Redis에서 전체 사용자 목록 조회 (분산 환경 지원)
-            if (redis_) {
-                std::vector<std::string> redis_users;
-                if (redis_->smembers("room:users:" + target, redis_users)) {
-                    names = std::move(redis_users);
-                }
-            }
-            // Redis가 없거나 실패한 경우 로컬 상태를 fallback으로 사용
-            if (names.empty() && itroom != state_.rooms.end()) {
-                 for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
-                    if (auto p = wit->lock()) {
-                        auto itu = state_.user.find(p.get());
-                        std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest");
-                        names.push_back(std::move(name));
-                        ++wit;
-                    } else {
-                        wit = itroom->second.erase(wit);
-                    }
-                }
-            }
         }
     }
 
     if (!allow) {
         send_system_notice(s, "room is locked");
         return;
+    }
+
+    // Redis에서 전체 사용자 목록 조회 (분산 환경 지원)
+    if (redis_) {
+        std::vector<std::string> redis_users;
+        if (redis_->smembers("room:users:" + target, redis_users)) {
+            names = std::move(redis_users);
+        }
+    }
+
+    // Redis가 없거나 실패한 경우 로컬 상태를 fallback으로 사용
+    if (names.empty()) {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        auto itroom = state_.rooms.find(target);
+        if (itroom != state_.rooms.end()) {
+            for (auto wit = itroom->second.begin(); wit != itroom->second.end(); ) {
+                if (auto p = wit->lock()) {
+                    auto itu = state_.user.find(p.get());
+                    std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest");
+                    names.push_back(std::move(name));
+                    ++wit;
+                } else {
+                    wit = itroom->second.erase(wit);
+                }
+            }
+        }
     }
 
     server::wire::v1::RoomUsers pb;
@@ -1267,9 +1273,9 @@ void ChatService::deliver_remote_whisper(const std::vector<std::uint8_t>& body) 
         target->async_send(game_proto::MSG_WHISPER_BROADCAST, incoming, 0);
     }
 
-    corelog::info("[whisper] sender=" + notice.sender() +
-                  " target=" + notice.recipient() +
-                  " status=remote_delivered count=" + std::to_string(targets.size()));
+    corelog::debug("[whisper] sender=" + notice.sender() +
+                   " target=" + notice.recipient() +
+                   " status=remote_delivered count=" + std::to_string(targets.size()));
 }
 
 // 귓속말(1:1 채팅)을 처리합니다.
@@ -1308,7 +1314,7 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
     if (target_user == sender) {
         send_system_notice(*session_sp, "cannot whisper to yourself");
         send_whisper_result(*session_sp, false, "cannot whisper to yourself");
-        corelog::info("[whisper] sender=" + sender + " target=" + target_user + " status=self_target");
+        corelog::debug("[whisper] sender=" + sender + " target=" + target_user + " status=self_target");
         return;
     }
 
@@ -1343,7 +1349,7 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
     if (targets.empty() && ineligible_found) {
         send_system_notice(*session_sp, "user cannot receive whispers (login required): " + target_user);
         send_whisper_result(*session_sp, false, "recipient not eligible");
-        corelog::info("[whisper] sender=" + sender + " target=" + target_user + " status=recipient_guest");
+        corelog::debug("[whisper] sender=" + sender + " target=" + target_user + " status=recipient_guest");
         return;
     }
 
@@ -1385,13 +1391,13 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
         if (!routed_remote) {
             send_system_notice(*session_sp, "user not found: " + target_user);
             send_whisper_result(*session_sp, false, "user not found");
-            corelog::info("[whisper] sender=" + sender + " target=" + target_user + " status=not_found");
+            corelog::debug("[whisper] sender=" + sender + " target=" + target_user + " status=not_found");
             return;
         }
 
         send_outgoing();
         send_whisper_result(*session_sp, true, "");
-        corelog::info("[whisper] sender=" + sender + " target=" + target_user + " status=remote_routed");
+        corelog::debug("[whisper] sender=" + sender + " target=" + target_user + " status=remote_routed");
         return;
     }
 
