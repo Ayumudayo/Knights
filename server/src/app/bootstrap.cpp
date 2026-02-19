@@ -155,6 +155,7 @@ int run_server(int argc, char** argv) {
     server::state::InstanceRecord registry_record{};
     bool registry_registered = false;
     server::core::app::AppHost app_host{"server_app"};
+    app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kBootstrapping);
 
     try {
 #if defined(_WIN32)
@@ -170,6 +171,7 @@ int run_server(int argc, char** argv) {
         ServerConfig config;
         if (!config.load(argc, argv)) {
             corelog::error("Failed to load configuration");
+            app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
             return 1;
         }
 
@@ -248,6 +250,7 @@ int run_server(int argc, char** argv) {
             db_pool = server::storage::postgres::make_connection_pool(config.db_uri.c_str(), popts);
             if (!db_pool || !db_pool->health_check()) {
                 corelog::error("DB health check failed; please verify DB_URI.");
+                app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
                 return 2;
             }
             corelog::info("DB connection pool initialised.");
@@ -411,6 +414,7 @@ int run_server(int argc, char** argv) {
 
         // Readiness is computed from base readiness + dependency probes.
         app_host.set_ready(true);
+        app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kRunning);
 
         if (registry_registered && registry_backend) {
             registry_record.last_heartbeat_ms = static_cast<std::uint64_t>(
@@ -613,6 +617,7 @@ int run_server(int argc, char** argv) {
         }
 
         app_host.set_ready(false);
+        app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kStopped);
 
         // 정리 작업
         if (registry_registered && registry_backend) {
@@ -628,6 +633,7 @@ int run_server(int argc, char** argv) {
 
     } catch (const std::exception& ex) {
         corelog::error(std::string("server_app exception: ") + ex.what());
+        app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
         services::clear();
         return 1;
     }

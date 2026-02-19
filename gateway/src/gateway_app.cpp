@@ -422,6 +422,7 @@ const std::string& GatewayApp::BackendConnection::session_id() const {
 GatewayApp::GatewayApp()
     : hive_(std::make_shared<server::core::net::Hive>(io_))
     , authenticator_(std::make_shared<auth::NoopAuthenticator>()) {
+    app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kBootstrapping);
     
     configure_gateway();
 
@@ -483,6 +484,7 @@ GatewayApp::GatewayApp()
         stream << "gateway_backend_send_queue_max_bytes " << backend_send_queue_max_bytes_ << "\n";
 
         stream << app_host_.dependency_metrics_text();
+        stream << app_host_.lifecycle_metrics_text();
         return stream.str();
     });
 
@@ -496,6 +498,7 @@ GatewayApp::~GatewayApp() {
 int GatewayApp::run() {
     start_listener();
     app_host_.set_ready(true);
+    app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kRunning);
     start_infrastructure_probe();
     app_host_.install_asio_termination_signals(io_, {});
 
@@ -504,6 +507,7 @@ int GatewayApp::run() {
 
     stop_infrastructure_probe();
     app_host_.set_ready(false);
+    app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kStopped);
     server::core::log::info("GatewayApp stopped");
     return 0;
 }

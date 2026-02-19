@@ -86,6 +86,28 @@ target_link_libraries(core_general_tests PRIVATE
 )
 gtest_discover_tests(core_general_tests)
 
+add_executable(core_public_api_smoke
+    core/public_api_smoke.cpp
+)
+target_include_directories(core_public_api_smoke PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+)
+target_link_libraries(core_public_api_smoke PRIVATE
+    server_core
+)
+add_test(NAME CorePublicApiSmoke COMMAND core_public_api_smoke)
+
+add_executable(core_public_api_headers_compile
+    core/public_api_headers_compile.cpp
+)
+target_include_directories(core_public_api_headers_compile PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+)
+target_link_libraries(core_public_api_headers_compile PRIVATE
+    server_core
+)
+add_test(NAME CorePublicApiHeadersCompile COMMAND core_public_api_headers_compile)
+
 add_executable(server_general_tests
     server/test_server_chat.cpp
     ${CMAKE_SOURCE_DIR}/server/src/chat/chat_service_core.cpp

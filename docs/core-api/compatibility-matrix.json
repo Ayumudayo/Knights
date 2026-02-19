@@ -1,0 +1,65 @@
+{
+  "api_version": "1.0.0",
+  "stable_headers": [
+    {
+      "path": "server/core/api/version.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/app/app_host.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/build_info.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/concurrent/task_scheduler.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/config/options.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/metrics/build_info.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/metrics/http_server.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/net/dispatcher.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/net/hive.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/protocol/packet.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/protocol/protocol_errors.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/protocol/protocol_flags.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/protocol/system_opcodes.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/util/log.hpp",
+      "compatibility": "stable"
+    },
+    {
+      "path": "server/core/util/paths.hpp",
+      "compatibility": "stable"
+    }
+  ]
+}

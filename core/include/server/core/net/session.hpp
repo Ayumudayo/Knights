@@ -107,6 +107,8 @@ public:
      */
     std::string remote_ip() const;
 
+private:
+
     asio::ip::tcp::socket socket_;
     asio::strand<asio::any_io_executor> strand_;
     Dispatcher& dispatcher_;

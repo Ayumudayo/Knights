@@ -19,6 +19,33 @@ namespace server::core::app {
 
 namespace corelog = server::core::log;
 
+namespace {
+
+constexpr std::uint8_t to_phase_code(AppHost::LifecyclePhase phase) noexcept {
+    return static_cast<std::uint8_t>(phase);
+}
+
+AppHost::LifecyclePhase from_phase_code(std::uint8_t phase) noexcept {
+    switch (phase) {
+    case to_phase_code(AppHost::LifecyclePhase::kInit):
+        return AppHost::LifecyclePhase::kInit;
+    case to_phase_code(AppHost::LifecyclePhase::kBootstrapping):
+        return AppHost::LifecyclePhase::kBootstrapping;
+    case to_phase_code(AppHost::LifecyclePhase::kRunning):
+        return AppHost::LifecyclePhase::kRunning;
+    case to_phase_code(AppHost::LifecyclePhase::kStopping):
+        return AppHost::LifecyclePhase::kStopping;
+    case to_phase_code(AppHost::LifecyclePhase::kStopped):
+        return AppHost::LifecyclePhase::kStopped;
+    case to_phase_code(AppHost::LifecyclePhase::kFailed):
+        return AppHost::LifecyclePhase::kFailed;
+    default:
+        return AppHost::LifecyclePhase::kFailed;
+    }
+}
+
+} // namespace
+
 struct AppHost::DependencyRegistry {
     struct Entry {
         std::string name;
@@ -57,13 +84,45 @@ AppHost::~AppHost() {
 }
 
 bool AppHost::request_stop() noexcept {
-    return !stop_requested_.exchange(true, std::memory_order_acq_rel);
+    const bool first = !stop_requested_.exchange(true, std::memory_order_acq_rel);
+    if (first) {
+        set_lifecycle_phase(LifecyclePhase::kStopping);
+    }
+    return first;
 }
 
 bool AppHost::stop_requested() const noexcept {
     // 로컬 플래그와 프로세스 전역 termination 플래그를 함께 본다.
     // 이렇게 하면 비-asio 루프/다른 모듈에서도 동일한 종료 신호를 공유할 수 있다.
     return stop_requested_.load(std::memory_order_relaxed) || termination_signal_received();
+}
+
+void AppHost::set_lifecycle_phase(LifecyclePhase phase) noexcept {
+    lifecycle_phase_.store(to_phase_code(phase), std::memory_order_relaxed);
+}
+
+AppHost::LifecyclePhase AppHost::lifecycle_phase() const noexcept {
+    const auto code = lifecycle_phase_.load(std::memory_order_relaxed);
+    return from_phase_code(code);
+}
+
+const char* AppHost::lifecycle_phase_name(LifecyclePhase phase) noexcept {
+    switch (phase) {
+    case LifecyclePhase::kInit:
+        return "init";
+    case LifecyclePhase::kBootstrapping:
+        return "bootstrapping";
+    case LifecyclePhase::kRunning:
+        return "running";
+    case LifecyclePhase::kStopping:
+        return "stopping";
+    case LifecyclePhase::kStopped:
+        return "stopped";
+    case LifecyclePhase::kFailed:
+        return "failed";
+    default:
+        return "failed";
+    }
 }
 
 void AppHost::set_healthy(bool healthy) noexcept {
@@ -222,6 +281,19 @@ std::string AppHost::dependency_metrics_text() const {
     // 전체 집계 지표를 함께 노출해 알람 규칙을 단순화한다.
     out << "# TYPE knights_dependencies_ok gauge\n";
     out << "knights_dependencies_ok " << (dependencies_ok() ? 1 : 0) << "\n";
+    return out.str();
+}
+
+std::string AppHost::lifecycle_metrics_text() const {
+    std::ostringstream out;
+
+    const auto phase = lifecycle_phase();
+    out << "# TYPE knights_lifecycle_phase_code gauge\n";
+    out << "knights_lifecycle_phase_code " << static_cast<unsigned>(to_phase_code(phase)) << "\n";
+
+    out << "# TYPE knights_lifecycle_phase gauge\n";
+    out << "knights_lifecycle_phase{phase=\"" << lifecycle_phase_name(phase) << "\"} 1\n";
+
     return out.str();
 }
 

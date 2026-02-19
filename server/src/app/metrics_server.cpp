@@ -262,6 +262,7 @@ std::string render_metrics() {
 
     if (const auto host = services::get<server::core::app::AppHost>()) {
         stream << host->dependency_metrics_text();
+        stream << host->lifecycle_metrics_text();
     }
 
     stream << std::setfill(' ') << std::dec << std::nouppercase;

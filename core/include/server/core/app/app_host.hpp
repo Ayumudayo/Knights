@@ -31,6 +31,15 @@ namespace server::core::app {
  */
 class AppHost {
 public:
+    enum class LifecyclePhase : std::uint8_t {
+        kInit = 0,
+        kBootstrapping = 1,
+        kRunning = 2,
+        kStopping = 3,
+        kStopped = 4,
+        kFailed = 5,
+    };
+
     enum class DependencyRequirement : std::uint8_t {
         kRequired,
         kOptional,
@@ -53,6 +62,25 @@ public:
      * @return 정지 요청이 들어왔으면 true
      */
     bool stop_requested() const noexcept;
+
+    /**
+     * @brief 서비스 라이프사이클 단계를 갱신합니다.
+     * @param phase 새로운 라이프사이클 단계
+     */
+    void set_lifecycle_phase(LifecyclePhase phase) noexcept;
+
+    /**
+     * @brief 현재 서비스 라이프사이클 단계를 조회합니다.
+     * @return 현재 라이프사이클 단계
+     */
+    LifecyclePhase lifecycle_phase() const noexcept;
+
+    /**
+     * @brief 라이프사이클 단계 enum을 노출용 문자열로 변환합니다.
+     * @param phase 변환할 라이프사이클 단계
+     * @return Prometheus label에 사용할 phase 이름
+     */
+    static const char* lifecycle_phase_name(LifecyclePhase phase) noexcept;
 
     /**
      * @brief `/healthz` 기준의 프로세스 건강 상태를 설정합니다.
@@ -125,6 +153,12 @@ public:
     std::string dependency_metrics_text() const;
 
     /**
+     * @brief 라이프사이클 상태를 Prometheus 텍스트 포맷으로 직렬화합니다.
+     * @return lifecycle 메트릭 텍스트
+     */
+    std::string lifecycle_metrics_text() const;
+
+    /**
      * @brief admin HTTP 서버를 시작합니다.
      * @param port 수신 포트
      * @param metrics_callback `/metrics` 본문 생성 콜백
@@ -166,6 +200,7 @@ private:
 
     std::string name_;
     std::atomic<bool> stop_requested_{false};
+    std::atomic<std::uint8_t> lifecycle_phase_{static_cast<std::uint8_t>(LifecyclePhase::kInit)};
     std::atomic<bool> healthy_{true};
     std::atomic<bool> startup_ready_{false};
     std::atomic<bool> deps_ok_{true};

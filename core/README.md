@@ -93,3 +93,9 @@ int main() {
 - **Async Logger Enqueue 최적화**: 내부 큐 삽입 경로를 move-friendly하게 조정해 로그 라인 enqueue 시 불필요한 문자열 복사를 줄였습니다.
 - **Heartbeat**: `Session`은 설정된 주기마다 자동으로 `MSG_PING`을 전송하여 연결 상태를 확인합니다.
 - **Gather-Write**: 여러 개의 작은 패킷을 보낼 때 `gather-write`를 사용하여 시스템 콜 비용을 줄였습니다.
+
+## API 문서
+- API 경계/분류: `docs/core-api-boundary.md`
+- API 개요: `docs/core-api/overview.md`
+- 호환성 정책: `docs/core-api/compatibility-policy.md`
+- 빠른 시작: `docs/core-api/quickstart.md`

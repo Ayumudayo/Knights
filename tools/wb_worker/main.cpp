@@ -168,6 +168,7 @@ public:
     explicit WbWorker(WorkerConfig config) : config_(std::move(config)) {}
 
     int Run() {
+        app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kBootstrapping);
         server::core::app::install_termination_signal_handlers();
 
         // Readiness requires both Redis and DB to function.
@@ -179,10 +180,12 @@ public:
 
         if (config_.db_uri.empty()) {
             std::cerr << "WB worker: DB_URI not set" << std::endl;
+            app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
             return 2;
         }
         if (config_.redis_uri.empty()) {
             std::cerr << "WB worker: REDIS_URI not set" << std::endl;
+            app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
             return 2;
         }
 
@@ -197,6 +200,7 @@ public:
         redis_ = server::storage::redis::make_redis_client(config_.redis_uri, ropts);
         if (!redis_ || !redis_->health_check()) {
             std::cerr << "WB worker: Redis health check failed" << std::endl;
+            app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
             return 3;
         }
         app_host_.set_dependency_ok("redis", true);
@@ -217,10 +221,12 @@ public:
         }
 
         app_host_.start_admin_http(config_.metrics_port, [this]() { return RenderMetrics(); });
+        app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kRunning);
 
         // 메인 루프 시작
         Loop();
         app_host_.set_ready(false);
+        app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kStopped);
         return 0;
     }
 
@@ -726,6 +732,7 @@ private:
         stream << "wb_flush_commit_ms_count " << wb_flush_commit_ms_count_.load(std::memory_order_relaxed) << "\n";
 
         stream << app_host_.dependency_metrics_text();
+        stream << app_host_.lifecycle_metrics_text();
 
         return stream.str();
     }

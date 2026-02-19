@@ -34,12 +34,15 @@
 - 과거에는 `.env` 로딩 유틸을 두었으나, 현재 `server_app`/`gateway_app`은 실행 환경에서 주입된 환경 변수를 사용한다.
 - `metrics` 서브시스템은 Counter/Gauge/Histogram을 정의하고, `server_app`·`gateway_app`이 `/metrics` HTTP 엔드포인트를 노출한다.
 - Gateway/Server 모두 동일 metrics 등록 경로를 사용하므로, Prometheus exporter를 공통으로 재사용한다.
+- `AppHost`는 공통 lifecycle phase(`init -> bootstrapping -> running -> stopping -> stopped|failed`)를 관리하고,
+  `knights_lifecycle_phase`, `knights_lifecycle_phase_code` 메트릭으로 현재 단계를 노출한다.
 
 ## 3. 실행 흐름
 1. `.env` 로드 → `ServiceRegistry` 초기화 → DbWorkerPool/Redis/Write-behind/TaskScheduler를 등록한다.
 2. `core::net::Session`은 wire decoder로 opcode를 구문 분석한 뒤 Dispatcher에 넘기고, Dispatcher는 ServiceRegistry에서 필요한 핸들러를 찾는다.
 3. 백그라운드 작업은 `DbWorkerPool::enqueue`로 큐잉되고, Worker 스레드에서 실행된다.
 4. `TaskScheduler`는 health check, presence TTL 정리, metrics 플러시, registry heartbeat 작업을 주기적으로 수행한다.
+5. 프로세스 lifecycle은 `AppHost` phase 전이로 표준화되며, readiness/health와 분리되어 운영 상태 추적에 사용된다.
 
 ## 4. 향후 확장 항목
 | 항목 | 상태 | 메모 |
