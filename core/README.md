@@ -90,5 +90,6 @@ int main() {
 
 ## 최신 변경 사항 (Recent Changes)
 - **Async Logging**: `log::info`, `log::error` 등이 이제 비동기로 동작하여 성능 저하를 최소화합니다.
+- **Async Logger Enqueue 최적화**: 내부 큐 삽입 경로를 move-friendly하게 조정해 로그 라인 enqueue 시 불필요한 문자열 복사를 줄였습니다.
 - **Heartbeat**: `Session`은 설정된 주기마다 자동으로 `MSG_PING`을 전송하여 연결 상태를 확인합니다.
 - **Gather-Write**: 여러 개의 작은 패킷을 보낼 때 `gather-write`를 사용하여 시스템 콜 비용을 줄였습니다.

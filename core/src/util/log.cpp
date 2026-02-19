@@ -40,6 +40,7 @@ class AsyncLogger {
 public:
     // 로그 메시지를 큐에 넣고 워커 스레드를 깨웁니다.
     // 이 함수는 메인 로직 스레드에서 호출되므로 최대한 빨리 리턴해야 합니다.
+    // 값 전달을 받아 호출자가 rvalue를 넘기면 큐 삽입 시 move 경로를 그대로 활용합니다.
     void push(std::string msg) {
         {
             std::lock_guard<std::mutex> lock(mutex_);

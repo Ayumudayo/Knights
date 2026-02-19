@@ -118,6 +118,7 @@ max_over_time(wb_pending[5m])
 - p95/p99가 NaN: 최근 rate window에 샘플이 없으면 정상적으로 NaN이 나올 수 있다. (트래픽 주입 후 재확인)
 - No data: `/metrics` 엔드포인트(Host port mapping)와 Prometheus Targets를 먼저 확인한다.
 - redis/postgres exporter down: `docker/stack/docker-compose.yml`의 `observability` profile이 올라왔는지 확인한다.
+- chat 상세 로그가 기대보다 적음: 최신 서버 경로에서는 고빈도 로그(`CHAT_SEND` 본문, whisper 상태, publish 카운트)가 노이즈 절감을 위해 `debug` 또는 샘플링으로 조정되어 기본 `info`에서 보이지 않을 수 있다.
 
 ## 6. Tracing (Roadmap)
 

@@ -103,6 +103,7 @@ void GatewayConnection::on_read(const std::uint8_t* data, std::size_t length) {
         return;
     }
 
+    // 호출자 측 임시 vector 생성을 피하고 BackendConnection 큐에서 1회 복사로 마무리한다.
     send_to_backend(data, length);
 }
 

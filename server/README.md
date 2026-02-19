@@ -29,6 +29,9 @@
 
 - **Opcode 라우팅**: 패킷의 Opcode에 따라 적절한 핸들러로 분기합니다.
 - **Snapshot + Redis Cache**: 방 입장 시 최근 메시지를 Redis(LIST/LRU)에서 우선 조회하여 빠르게 로딩하고, 부족하면 DB에서 가져옵니다.
+- **Refresh Fanout Dedup**: join/leave 처리에서 `lobby` 대상 중복 `broadcast_refresh`를 제거해 불필요한 fanout 신호를 줄입니다.
+- **RoomUsers Lock Scope 개선**: `send_room_users`는 lock 구간에서 권한/멤버십만 확인하고, Redis 조회(`SMEMBERS`)는 lock 밖에서 수행해 경쟁 구간을 줄입니다.
+- **Chat Hot-path 로그 노이즈 절감**: `CHAT_SEND` 본문 로그를 제거하고, pub/sub publish 카운트 로그는 샘플링(1024건마다) + `debug` 레벨로 축소합니다. whisper 상태 로그도 `debug`로 내려 운영 로그 볼륨을 낮춥니다.
 - **Write-behind**: `WRITE_BEHIND_ENABLED=1` 설정 시, 중요한 이벤트(채팅 등)를 Redis Streams에 먼저 기록하고, 별도의 워커(`wb_worker`)가 이를 DB에 반영하여 쓰기 성능을 최적화합니다.
 - **Instance Registry**: 서버 시작 시 자신의 주소(Host/Port)를 Redis에 등록하고 주기적으로 Heartbeat를 갱신합니다. 로드 밸런서(`gateway`)는 이를 통해 활성 서버 목록을 파악합니다.
 - **Metrics**: `/metrics` 엔드포인트(HTTP)를 통해 Prometheus 호환 지표를 노출합니다.

@@ -273,6 +273,7 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 redis_->publish(channel, std::move(message));
                 auto n = ++publish_total;
                 if ((n & 1023ULL) == 0) {
+                    // 핫패스 로그 부하를 낮추기 위해 1024건마다 샘플링해서 남긴다.
                     corelog::debug(std::string("metric=publish_total value=") + std::to_string(n) + " room=" + current_room);
                 }
             } catch (...) {}

@@ -294,6 +294,7 @@ void GatewayApp::BackendConnection::send(const std::uint8_t* data, std::size_t l
         return;
     }
 
+    // 브리지 read 버퍼를 바로 큐에 복사해 caller의 중간 임시 payload vector를 줄인다.
     bool overflow = false;
 
     {
