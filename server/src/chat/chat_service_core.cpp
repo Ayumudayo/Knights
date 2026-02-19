@@ -465,15 +465,23 @@ void ChatService::send_rooms_list(Session& s) {
         redis_->smembers("rooms:active", redis_rooms_list);
 
         std::vector<std::string> password_keys;
+        std::vector<std::string> user_count_keys;
         password_keys.reserve(redis_rooms_list.size());
+        user_count_keys.reserve(redis_rooms_list.size());
         for (const auto& r : redis_rooms_list) {
             password_keys.push_back("room:password:" + r);
+            user_count_keys.push_back("room:users:" + r);
         }
 
         std::vector<std::optional<std::string>> password_values;
         const bool password_batch_loaded = !password_keys.empty()
             && redis_->mget(password_keys, password_values)
             && password_values.size() == password_keys.size();
+
+        std::vector<std::size_t> user_counts;
+        const bool users_count_batch_loaded = !user_count_keys.empty()
+            && redis_->scard_many(user_count_keys, user_counts)
+            && user_counts.size() == user_count_keys.size();
         
         bool lobby_found = false;
 
@@ -481,12 +489,16 @@ void ChatService::send_rooms_list(Session& s) {
             const auto& r = redis_rooms_list[i];
             if (r == "lobby") lobby_found = true;
 
-            const std::string users_key = "room:users:" + r;
             std::size_t users_count = 0;
-            if (!redis_->scard(users_key, users_count)) {
-                std::vector<std::string> users;
-                redis_->smembers(users_key, users);
-                users_count = users.size();
+            if (users_count_batch_loaded) {
+                users_count = user_counts[i];
+            } else {
+                const auto& users_key = user_count_keys[i];
+                if (!redis_->scard(users_key, users_count)) {
+                    std::vector<std::string> users;
+                    redis_->smembers(users_key, users);
+                    users_count = users.size();
+                }
             }
             
             bool locked = false;
@@ -696,28 +708,39 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         redis_->smembers("rooms:active", active_rooms);
 
         std::vector<std::string> password_keys;
+        std::vector<std::string> user_count_keys;
         password_keys.reserve(active_rooms.size());
+        user_count_keys.reserve(active_rooms.size());
         for (const auto& r : active_rooms) {
             password_keys.push_back("room:password:" + r);
+            user_count_keys.push_back("room:users:" + r);
         }
 
         std::vector<std::optional<std::string>> password_values;
         const bool password_batch_loaded = !password_keys.empty()
             && redis_->mget(password_keys, password_values)
             && password_values.size() == password_keys.size();
-        std::string room_list_str;
-        for (const auto& r : active_rooms) room_list_str += r + ", ";
+
+        std::vector<std::size_t> user_counts;
+        const bool users_count_batch_loaded = !user_count_keys.empty()
+            && redis_->scard_many(user_count_keys, user_counts)
+            && user_counts.size() == user_count_keys.size();
+
         bool lobby_found = false;
         for (std::size_t i = 0; i < active_rooms.size(); ++i) {
             const auto& r = active_rooms[i];
             if (r == "lobby") lobby_found = true;
 
-            const std::string users_key = "room:users:" + r;
             std::size_t users_count = 0;
-            if (!redis_->scard(users_key, users_count)) {
-                std::vector<std::string> users;
-                redis_->smembers(users_key, users);
-                users_count = users.size();
+            if (users_count_batch_loaded) {
+                users_count = user_counts[i];
+            } else {
+                const auto& users_key = user_count_keys[i];
+                if (!redis_->scard(users_key, users_count)) {
+                    std::vector<std::string> users;
+                    redis_->smembers(users_key, users);
+                    users_count = users.size();
+                }
             }
             
             bool locked = false;

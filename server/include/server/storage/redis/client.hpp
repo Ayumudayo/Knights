@@ -43,6 +43,11 @@ public:
 
     // Set: 멤버 수 조회 (SCARD)
     virtual bool scard(const std::string& key, std::size_t& out) = 0;
+
+    // Set: 멤버 수 다중 조회 (batched SCARD)
+    // out.size() 는 keys.size() 와 동일해야 합니다.
+    virtual bool scard_many(const std::vector<std::string>& keys,
+                            std::vector<std::size_t>& out) = 0;
     
     // 키 삭제
     virtual bool del(const std::string& key) = 0;

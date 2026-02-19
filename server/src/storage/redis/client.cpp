@@ -95,6 +95,46 @@ public:
         }
     }
 
+    bool scard_many(const std::vector<std::string>& keys, std::vector<std::size_t>& out) override {
+        try {
+            out.clear();
+            if (keys.empty()) {
+                return true;
+            }
+
+            static constexpr const char* kScardManyScript =
+                "local out = {} for i=1,#KEYS do out[i]=redis.call('SCARD', KEYS[i]) end return out";
+
+            std::vector<long long> raw_counts;
+            raw_counts.reserve(keys.size());
+            const std::vector<std::string> args;
+            redis_->eval(kScardManyScript,
+                         keys.begin(),
+                         keys.end(),
+                         args.begin(),
+                         args.end(),
+                         std::back_inserter(raw_counts));
+            if (raw_counts.size() != keys.size()) {
+                out.clear();
+                return false;
+            }
+
+            out.reserve(raw_counts.size());
+            for (const auto count : raw_counts) {
+                out.push_back(count > 0 ? static_cast<std::size_t>(count) : 0u);
+            }
+            return true;
+        } catch (const std::exception& e) {
+            server::core::log::warn(std::string("Redis SCARD many failed: ") + e.what());
+            out.clear();
+            return false;
+        } catch (...) {
+            server::core::log::warn("Redis SCARD many failed: unknown");
+            out.clear();
+            return false;
+        }
+    }
+
     bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override {
         try { redis_->setex(key, static_cast<long long>(ttl_sec), value); return true; } catch (const std::exception& e) { server::core::log::warn(std::string("Redis SETEX failed: ") + e.what()); return false; } catch (...) { server::core::log::warn("Redis SETEX failed: unknown"); return false; }
     }
@@ -533,6 +573,7 @@ public:
     bool srem(const std::string& key, const std::string& member) override { (void)key; (void)member; return true; }
     bool smembers(const std::string& key, std::vector<std::string>& out) override { (void)key; out.clear(); return true; }
     bool scard(const std::string& key, std::size_t& out) override { (void)key; out = 0; return true; }
+    bool scard_many(const std::vector<std::string>& keys, std::vector<std::size_t>& out) override { out.assign(keys.size(), 0); return true; }
     bool setex(const std::string& key, const std::string& value, unsigned int ttl_sec) override { (void)key; (void)value; (void)ttl_sec; return true; }
     bool publish(const std::string& channel, const std::string& message) override { (void)channel; (void)message; return true; }
     bool start_psubscribe(const std::string& pattern, std::function<void(const std::string&, const std::string&)> on_message) override { (void)pattern; (void)on_message; return true; }

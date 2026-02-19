@@ -131,6 +131,10 @@ public:
     bool srem(const std::string&, const std::string&) override { return true; }
     bool smembers(const std::string&, std::vector<std::string>&) override { return true; }
     bool scard(const std::string&, std::size_t& out) override { out = 0; return true; }
+    bool scard_many(const std::vector<std::string>& keys, std::vector<std::size_t>& out) override {
+        out.assign(keys.size(), 0);
+        return true;
+    }
     
     bool del(const std::string& key) override { return true; }
     
