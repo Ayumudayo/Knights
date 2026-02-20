@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 
+SESSION_STATUS = {"any", "authenticated", "in_room", "admin"}
+PROCESSING_PLACE = {"inline", "worker", "room_strand"}
+TRANSPORT_MASK = {"none", "tcp", "udp", "both"}
+DELIVERY_CLASS = {"reliable_ordered", "reliable", "unreliable_sequenced"}
+
+
 def parse_id(v: Any) -> int:
     if isinstance(v, int):
         return v
@@ -72,6 +78,14 @@ def parse_opcodes(spec: dict):
     seen_ids = set()
     seen_names = set()
     out = []
+
+    def parse_policy_token(raw: Any, default_value: str, valid_set: set[str], field_name: str, opcode_name: str) -> str:
+        token = str(default_value if raw is None else raw).strip().lower()
+        if token not in valid_set:
+            valid = ", ".join(sorted(valid_set))
+            raise ValueError(f"invalid {field_name} for {opcode_name}: '{token}' (valid: {valid})")
+        return token
+
     for it in items:
         name = str(it.get("name", "")).strip()
         if not name:
@@ -84,6 +98,15 @@ def parse_opcodes(spec: dict):
         desc = str(it.get("desc", ""))
         group = str(it.get("group", "")).strip()
         direction = str(it.get("dir", "")).strip()
+
+        required_state = parse_policy_token(it.get("required_state"), "any", SESSION_STATUS, "required_state", name)
+        processing_place = parse_policy_token(it.get("processing_place"), "inline", PROCESSING_PLACE, "processing_place", name)
+        transport = parse_policy_token(it.get("transport"), "tcp", TRANSPORT_MASK, "transport", name)
+        delivery = parse_policy_token(it.get("delivery"), "reliable_ordered", DELIVERY_CLASS, "delivery", name)
+
+        channel = parse_id(it.get("channel", 0))
+        if not (0 <= channel <= 0xFF):
+            raise ValueError(f"channel out of range [0..255]: {name}={channel}")
 
         if require_group:
             if not group:
@@ -110,6 +133,11 @@ def parse_opcodes(spec: dict):
             "desc": desc,
             "group": group,
             "dir": direction,
+            "required_state": required_state,
+            "processing_place": processing_place,
+            "transport": transport,
+            "delivery": delivery,
+            "channel": channel,
         })
 
     if require_group:
@@ -155,24 +183,40 @@ def render_spec_md(spec_path: Path, title: str) -> str:
                 lines.append("")
                 lines.append(escape_md(gdesc))
             lines.append("")
-            lines.append("| ID | Name | Dir | Desc |")
-            lines.append("|---:|------|:---:|------|")
+            lines.append("| ID | Name | Dir | State | Place | Transport | Delivery | Channel | Desc |")
+            lines.append("|---:|------|:---:|:-----:|:-----:|:---------:|:--------:|-------:|------|")
             for o in by_group[gname]:
                 oid = f"0x{o['id']:04X}"
                 name = escape_md(o["name"])
                 direction = escape_md(o.get("dir", ""))
+                required_state = escape_md(str(o.get("required_state", "")))
+                processing_place = escape_md(str(o.get("processing_place", "")))
+                transport = escape_md(str(o.get("transport", "")))
+                delivery = escape_md(str(o.get("delivery", "")))
+                channel = int(o.get("channel", 0))
                 desc = escape_md(o.get("desc", ""))
-                lines.append(f"| {oid} | `{name}` | `{direction}` | {desc} |")
+                lines.append(
+                    f"| {oid} | `{name}` | `{direction}` | `{required_state}` | `{processing_place}` | "
+                    f"`{transport}` | `{delivery}` | {channel} | {desc} |"
+                )
             lines.append("")
     else:
-        lines.append("| ID | Name | Dir | Desc |")
-        lines.append("|---:|------|:---:|------|")
+        lines.append("| ID | Name | Dir | State | Place | Transport | Delivery | Channel | Desc |")
+        lines.append("|---:|------|:---:|:-----:|:-----:|:---------:|:--------:|-------:|------|")
         for o in opcodes:
             oid = f"0x{o['id']:04X}"
             name = escape_md(o["name"])
             direction = escape_md(o.get("dir", ""))
+            required_state = escape_md(str(o.get("required_state", "")))
+            processing_place = escape_md(str(o.get("processing_place", "")))
+            transport = escape_md(str(o.get("transport", "")))
+            delivery = escape_md(str(o.get("delivery", "")))
+            channel = int(o.get("channel", 0))
             desc = escape_md(o.get("desc", ""))
-            lines.append(f"| {oid} | `{name}` | `{direction}` | {desc} |")
+            lines.append(
+                f"| {oid} | `{name}` | `{direction}` | `{required_state}` | `{processing_place}` | "
+                f"`{transport}` | `{delivery}` | {channel} | {desc} |"
+            )
         lines.append("")
 
     return "\n".join(lines)

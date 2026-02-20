@@ -43,29 +43,29 @@
 
 ## 2.1 프로토콜 소스 확장
 
-- [ ] `core/protocol/system_opcodes.json`에 정책 필드 추가
-- [ ] `server/protocol/game_opcodes.json`에 정책 필드 추가
+- [x] `core/protocol/system_opcodes.json`에 정책 필드 추가
+- [x] `server/protocol/game_opcodes.json`에 정책 필드 추가
 
 ## 2.2 생성기 확장
 
-- [ ] `tools/gen_opcodes.py`가 정책 필드를 읽어 코드 생성하도록 확장
-- [ ] 기본값 자동 주입 로직 추가(legacy 정의 호환)
-- [ ] 정책 스키마 검증 에러 메시지 정비
+- [x] `tools/gen_opcodes.py`가 정책 필드를 읽어 코드 생성하도록 확장
+- [x] 기본값 자동 주입 로직 추가(legacy 정의 호환)
+- [x] 정책 스키마 검증 에러 메시지 정비
 
 ## 2.3 산출물/문서 생성
 
-- [ ] `core/include/server/core/protocol/system_opcodes.hpp` 재생성
-- [ ] `server/include/server/protocol/game_opcodes.hpp` 재생성
-- [ ] `tools/gen_opcode_docs.py` 반영 및 `docs/protocol/opcodes.md` 갱신
+- [x] `core/include/server/core/protocol/system_opcodes.hpp` 재생성
+- [x] `server/include/server/protocol/game_opcodes.hpp` 재생성
+- [x] `tools/gen_opcode_docs.py` 반영 및 `docs/protocol/opcodes.md` 갱신
 
 ## 2.4 검증
 
-- [ ] opcode 생성 체크 명령 통과 (`python tools/gen_opcode_docs.py --check`)
-- [ ] 기존 빌드/테스트 회귀 없음 확인
+- [x] opcode 생성 체크 명령 통과 (`python tools/gen_opcode_docs.py --check`)
+- [x] 기존 빌드/테스트 회귀 없음 확인
 
 완료 기준:
 
-- [ ] 런타임 동작 변화 없이 policy metadata만 추가됨
+- [x] 런타임 동작 변화 없이 policy metadata만 추가됨
 
 ---
 

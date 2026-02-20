@@ -10,6 +10,7 @@ HEADER_TEMPLATE = """// 자동 생성 파일: tools/gen_opcodes.py에 의해 생
 #pragma once
 #include <cstdint>
 #include <string_view>
+#include "server/core/protocol/opcode_policy.hpp"
 
 namespace {ns} {{
 {body}
@@ -29,6 +30,45 @@ inline constexpr std::string_view opcode_name( std::uint16_t id ) noexcept
   }}
 }}
 """.lstrip("\n")
+
+POLICY_FUNC_TEMPLATE = """
+
+inline constexpr server::core::protocol::OpcodePolicy opcode_policy( std::uint16_t id ) noexcept
+{{
+  switch( id )
+  {{
+{cases}
+    default: return server::core::protocol::default_opcode_policy();
+  }}
+}}
+""".lstrip("\n")
+
+SESSION_STATUS_MAP = {
+    "any": "server::core::protocol::SessionStatus::kAny",
+    "authenticated": "server::core::protocol::SessionStatus::kAuthenticated",
+    "in_room": "server::core::protocol::SessionStatus::kInRoom",
+    "admin": "server::core::protocol::SessionStatus::kAdmin",
+}
+
+PROCESSING_PLACE_MAP = {
+    "inline": "server::core::protocol::ProcessingPlace::kInline",
+    "worker": "server::core::protocol::ProcessingPlace::kWorker",
+    "room_strand": "server::core::protocol::ProcessingPlace::kRoomStrand",
+}
+
+TRANSPORT_MASK_MAP = {
+    "none": "server::core::protocol::TransportMask::kNone",
+    "tcp": "server::core::protocol::TransportMask::kTcp",
+    "udp": "server::core::protocol::TransportMask::kUdp",
+    "both": "server::core::protocol::TransportMask::kBoth",
+}
+
+DELIVERY_CLASS_MAP = {
+    "reliable_ordered": "server::core::protocol::DeliveryClass::kReliableOrdered",
+    "reliable": "server::core::protocol::DeliveryClass::kReliable",
+    "unreliable_sequenced": "server::core::protocol::DeliveryClass::kUnreliableSequenced",
+}
+
 
 def parse_id(v: Any) -> int:
     if isinstance(v, int):
@@ -80,6 +120,15 @@ def parse_groups(data: dict):
 
     return order, by_name
 
+
+def parse_policy_token(raw: Any, default_value: str, mapping: dict[str, str], field_name: str, opcode_name: str) -> str:
+    token = str(default_value if raw is None else raw).strip().lower()
+    if token not in mapping:
+        valid = ", ".join(sorted(mapping.keys()))
+        raise ValueError(f"invalid {field_name} for {opcode_name}: '{token}' (valid: {valid})")
+    return mapping[token]
+
+
 def main():
     if len(sys.argv) != 3:
         print("usage: gen_opcodes.py <opcodes.json> <out_header>")
@@ -124,13 +173,37 @@ def main():
                     f" [0x{g['id_min']:04X}..0x{g['id_max']:04X}]"
                 )
 
+        required_state = parse_policy_token(it.get("required_state"), "any", SESSION_STATUS_MAP, "required_state", name)
+        processing_place = parse_policy_token(
+            it.get("processing_place"), "inline", PROCESSING_PLACE_MAP, "processing_place", name
+        )
+        transport = parse_policy_token(it.get("transport"), "tcp", TRANSPORT_MASK_MAP, "transport", name)
+        delivery = parse_policy_token(it.get("delivery"), "reliable_ordered", DELIVERY_CLASS_MAP, "delivery", name)
+
+        channel = parse_id(it.get("channel", 0))
+        if not (0 <= channel <= 0xFF):
+            raise ValueError(f"channel out of range [0..255]: {name}={channel}")
+
         if name in seen_names:
             raise ValueError(f"중복 name: {name}")
         if val in seen_ids:
             raise ValueError(f"중복 id: 0x{val:04X}")
         seen_names.add(name)
         seen_ids.add(val)
-        parsed.append((val, name, desc, group, direction))
+        parsed.append(
+            (
+                val,
+                name,
+                desc,
+                group,
+                direction,
+                required_state,
+                processing_place,
+                transport,
+                delivery,
+                channel,
+            )
+        )
 
     def fmt_desc(desc: str, direction: str) -> str:
         d = str(desc)
@@ -141,7 +214,7 @@ def main():
     if require_group:
         parsed.sort(key=lambda x: (group_index[x[3]], x[0]))
         by_group = {g: [] for g in group_order}
-        for val, name, desc, group, direction in parsed:
+        for val, name, desc, group, direction, _required_state, _processing_place, _transport, _delivery, _channel in parsed:
             by_group[group].append((val, name, desc, direction))
 
         lines = []
@@ -156,18 +229,41 @@ def main():
             lines.append("")
     else:
         parsed.sort(key=lambda x: x[0])
-        lines = [LINE_TEMPLATE.format(name=name, value=val, desc=fmt_desc(desc, direction)) for val, name, desc, _group, direction in parsed]
+        lines = [
+            LINE_TEMPLATE.format(name=name, value=val, desc=fmt_desc(desc, direction))
+            for val, name, desc, _group, direction, _required_state, _processing_place, _transport, _delivery, _channel in parsed
+        ]
 
     # Keep opcode_name() stable and sorted by numeric id.
     cases_src = sorted(parsed, key=lambda x: x[0])
-    case_lines = [f"    case 0x{val:04X}: return \"{name}\";" for val, name, _desc, _group, _direction in cases_src]
+    case_lines = [
+        f"    case 0x{val:04X}: return \"{name}\";"
+        for val, name, _desc, _group, _direction, _required_state, _processing_place, _transport, _delivery, _channel in cases_src
+    ]
     cases = "\n".join(case_lines)
-    body = "\n".join(lines) + "\n\n" + NAME_FUNC_TEMPLATE.format(cases=cases)
+
+    policy_case_lines = [
+        (
+            f"    case 0x{val:04X}: return server::core::protocol::OpcodePolicy"
+            f"{{{required_state}, {processing_place}, {transport}, {delivery}, {channel}}};"
+        )
+        for val, _name, _desc, _group, _direction, required_state, processing_place, transport, delivery, channel in cases_src
+    ]
+    policy_cases = "\n".join(policy_case_lines)
+
+    body = (
+        "\n".join(lines)
+        + "\n\n"
+        + NAME_FUNC_TEMPLATE.format(cases=cases)
+        + "\n"
+        + POLICY_FUNC_TEMPLATE.format(cases=policy_cases)
+    )
     text = HEADER_TEMPLATE.format(ns=ns, body=body)
 
     out_header.parent.mkdir(parents=True, exist_ok=True)
     out_header.write_text(text + "\n", encoding="utf-8")
     print(f"[gen_opcodes] generated {out_header}")
+
 
 if __name__ == "__main__":
     sys.exit(main())

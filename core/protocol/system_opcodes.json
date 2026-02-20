@@ -14,28 +14,48 @@
             "dir": "s2c",
             "name": "MSG_HELLO",
             "id": "0x0001",
-            "desc": "버전/서버 정보"
+            "desc": "버전/서버 정보",
+            "required_state": "any",
+            "processing_place": "inline",
+            "transport": "tcp",
+            "delivery": "reliable_ordered",
+            "channel": 0
         },
         {
             "group": "system",
             "dir": "c2s",
             "name": "MSG_PING",
             "id": "0x0002",
-            "desc": "heartbeat ping"
+            "desc": "heartbeat ping",
+            "required_state": "any",
+            "processing_place": "inline",
+            "transport": "tcp",
+            "delivery": "reliable_ordered",
+            "channel": 0
         },
         {
             "group": "system",
             "dir": "c2s",
             "name": "MSG_PONG",
             "id": "0x0003",
-            "desc": "heartbeat pong"
+            "desc": "heartbeat pong",
+            "required_state": "any",
+            "processing_place": "inline",
+            "transport": "tcp",
+            "delivery": "reliable_ordered",
+            "channel": 0
         },
         {
             "group": "system",
             "dir": "s2c",
             "name": "MSG_ERR",
             "id": "0x0004",
-            "desc": "에러 응답"
+            "desc": "에러 응답",
+            "required_state": "any",
+            "processing_place": "inline",
+            "transport": "tcp",
+            "delivery": "reliable_ordered",
+            "channel": 0
         }
     ]
 }

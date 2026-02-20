@@ -2,6 +2,7 @@
 #pragma once
 #include <cstdint>
 #include <string_view>
+#include "server/core/protocol/opcode_policy.hpp"
 
 namespace server::core::protocol {
 // === system (0x0001..0x000F): core/system frames
@@ -20,6 +21,18 @@ inline constexpr std::string_view opcode_name( std::uint16_t id ) noexcept
     case 0x0003: return "MSG_PONG";
     case 0x0004: return "MSG_ERR";
     default: return std::string_view{};
+  }
+}
+
+inline constexpr server::core::protocol::OpcodePolicy opcode_policy( std::uint16_t id ) noexcept
+{
+  switch( id )
+  {
+    case 0x0001: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
+    case 0x0002: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
+    case 0x0003: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
+    case 0x0004: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
+    default: return server::core::protocol::default_opcode_policy();
   }
 }
 
