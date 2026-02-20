@@ -233,6 +233,10 @@ bool GatewayConnection::try_finish_handshake() {
         return true;
     }
 
+    if (auto udp_bind_ticket = app_.make_udp_bind_ticket_frame(session_id_)) {
+        async_send(std::move(*udp_bind_ticket));
+    }
+
     (void)handshake_timer_.cancel();
 
     // Forward the raw bytes exactly as received (transparent proxy).

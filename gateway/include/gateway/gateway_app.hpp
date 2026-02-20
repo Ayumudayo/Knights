@@ -6,13 +6,17 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <span>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <unordered_map>
 #include <vector>
 #include <deque>
 
 #include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/steady_timer.hpp>
 
 #include "gateway/auth/authenticator.hpp"
@@ -39,6 +43,13 @@ public:
     struct SelectedBackend {
         server::state::InstanceRecord record;
         bool sticky_hit{false};
+    };
+
+    struct UdpBindTicket {
+        std::string session_id;
+        std::uint64_t nonce{0};
+        std::uint64_t expires_unix_ms{0};
+        std::string token;
     };
 
     /**
@@ -137,27 +148,27 @@ public:
     void stop();
 
     void record_connection_accept() {
-        connections_total_.fetch_add(1, std::memory_order_relaxed);
+        (void)connections_total_.fetch_add(1, std::memory_order_relaxed);
     }
 
     void record_backend_resolve_fail() {
-        backend_resolve_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        (void)backend_resolve_fail_total_.fetch_add(1, std::memory_order_relaxed);
     }
 
     void record_backend_connect_fail() {
-        backend_connect_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        (void)backend_connect_fail_total_.fetch_add(1, std::memory_order_relaxed);
     }
 
     void record_backend_connect_timeout() {
-        backend_connect_timeout_total_.fetch_add(1, std::memory_order_relaxed);
+        (void)backend_connect_timeout_total_.fetch_add(1, std::memory_order_relaxed);
     }
 
     void record_backend_write_error() {
-        backend_write_error_total_.fetch_add(1, std::memory_order_relaxed);
+        (void)backend_write_error_total_.fetch_add(1, std::memory_order_relaxed);
     }
 
     void record_backend_send_queue_overflow() {
-        backend_send_queue_overflow_total_.fetch_add(1, std::memory_order_relaxed);
+        (void)backend_send_queue_overflow_total_.fetch_add(1, std::memory_order_relaxed);
     }
 
     /**
@@ -188,6 +199,13 @@ public:
     /** @brief 익명 로그인 허용 여부를 반환합니다. */
     bool allow_anonymous() const noexcept { return allow_anonymous_; }
 
+    /**
+     * @brief 세션용 UDP bind ticket을 발급하고 TCP 응답 프레임을 생성합니다.
+     * @param session_id gateway 내부 세션 ID
+     * @return 생성된 `MSG_UDP_BIND_RES` 프레임, 발급 불가 시 std::nullopt
+     */
+    std::optional<std::vector<std::uint8_t>> make_udp_bind_ticket_frame(const std::string& session_id);
+
     boost::asio::io_context io_;
     std::shared_ptr<server::core::net::Hive> hive_;
     std::shared_ptr<server::core::net::TransportListener> listener_;
@@ -205,12 +223,52 @@ public:
      void configure_gateway();
      void configure_infrastructure();
      void start_listener();
+     void start_udp_listener();
+     void stop_udp_listener();
+     void do_udp_receive();
+
+     struct ParsedUdpBindRequest {
+         std::string session_id;
+         std::uint64_t nonce{0};
+         std::uint64_t expires_unix_ms{0};
+         std::string token;
+     };
+
+     std::vector<std::uint8_t> make_udp_bind_res_frame(std::uint16_t code,
+                                                        const UdpBindTicket& ticket,
+                                                        std::string_view message,
+                                                        std::uint32_t seq = 0) const;
+     std::vector<std::uint8_t> make_udp_bind_res_frame(std::uint16_t code,
+                                                        std::string_view session_id,
+                                                        std::uint64_t nonce,
+                                                        std::uint64_t expires_unix_ms,
+                                                        std::string_view token,
+                                                        std::string_view message,
+                                                        std::uint32_t seq = 0) const;
+     bool parse_udp_bind_req(std::span<const std::uint8_t> payload, ParsedUdpBindRequest& out) const;
+     std::uint16_t apply_udp_bind_request(const ParsedUdpBindRequest& req,
+                                          const boost::asio::ip::udp::endpoint& endpoint,
+                                          UdpBindTicket& applied_ticket,
+                                          std::string& message);
+     std::string make_udp_bind_token(std::string_view session_id,
+                                     std::uint64_t nonce,
+                                     std::uint64_t expires_unix_ms) const;
+     void send_udp_datagram(std::vector<std::uint8_t> frame,
+                            const boost::asio::ip::udp::endpoint& endpoint);
 
      void start_infrastructure_probe();
      void stop_infrastructure_probe();
 
     struct SessionState {
         BackendConnectionPtr session;
+        std::string client_id;
+        bool udp_bound{false};
+        boost::asio::ip::udp::endpoint udp_endpoint;
+        std::uint64_t udp_nonce{0};
+        std::uint64_t udp_expires_unix_ms{0};
+        std::string udp_token;
+        std::uint32_t udp_last_seq{0};
+        bool udp_last_seq_initialized{false};
     };
     std::mutex session_mutex_;
     std::unordered_map<std::string, SessionState> sessions_;
@@ -226,6 +284,13 @@ public:
     std::uint16_t metrics_port_{6001};
     std::uint32_t backend_connect_timeout_ms_{5000};
     std::size_t backend_send_queue_max_bytes_{256 * 1024};
+    std::string udp_listen_host_;
+    std::uint16_t udp_listen_port_{0};
+    std::string udp_bind_secret_;
+    std::uint32_t udp_bind_ttl_ms_{5000};
+    std::unique_ptr<boost::asio::ip::udp::socket> udp_socket_;
+    boost::asio::ip::udp::endpoint udp_remote_endpoint_;
+    std::array<std::uint8_t, 2048> udp_read_buffer_{};
 
      // State & Storage
      std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
@@ -235,6 +300,14 @@ public:
 
      std::atomic<bool> infra_probe_stop_{false};
      std::thread infra_probe_thread_;
+     std::atomic<std::uint64_t> udp_packets_total_{0};
+     std::atomic<std::uint64_t> udp_receive_error_total_{0};
+     std::atomic<std::uint64_t> udp_bind_ticket_issued_total_{0};
+     std::atomic<std::uint64_t> udp_bind_success_total_{0};
+     std::atomic<std::uint64_t> udp_bind_reject_total_{0};
+     std::atomic<std::uint64_t> udp_forward_total_{0};
+     std::atomic<std::uint64_t> udp_replay_drop_total_{0};
+     std::atomic<bool> udp_enabled_{false};
   };
 
  } // namespace gateway

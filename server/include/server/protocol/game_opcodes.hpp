@@ -8,6 +8,8 @@ namespace server::protocol {
 // === auth (0x0010..0x001F): login/auth
 static constexpr std::uint16_t MSG_LOGIN_REQ            = 0x0010; // [c2s] 로그인 요청
 static constexpr std::uint16_t MSG_LOGIN_RES            = 0x0011; // [s2c] 로그인 응답
+static constexpr std::uint16_t MSG_UDP_BIND_REQ         = 0x0012; // [c2s] UDP 바인딩 요청
+static constexpr std::uint16_t MSG_UDP_BIND_RES         = 0x0013; // [s2c] UDP 바인딩 응답/티켓
 
 // === chat (0x0100..0x01FF): room chat
 static constexpr std::uint16_t MSG_CHAT_SEND            = 0x0100; // [c2s] 채팅 전송
@@ -33,6 +35,8 @@ inline constexpr std::string_view opcode_name( std::uint16_t id ) noexcept
   {
     case 0x0010: return "MSG_LOGIN_REQ";
     case 0x0011: return "MSG_LOGIN_RES";
+    case 0x0012: return "MSG_UDP_BIND_REQ";
+    case 0x0013: return "MSG_UDP_BIND_RES";
     case 0x0100: return "MSG_CHAT_SEND";
     case 0x0101: return "MSG_CHAT_BROADCAST";
     case 0x0102: return "MSG_JOIN_ROOM";
@@ -56,6 +60,8 @@ inline constexpr server::core::protocol::OpcodePolicy opcode_policy( std::uint16
   {
     case 0x0010: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
     case 0x0011: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
+    case 0x0012: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kUdp, server::core::protocol::DeliveryClass::kReliable, 0};
+    case 0x0013: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kBoth, server::core::protocol::DeliveryClass::kReliable, 0};
     case 0x0100: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAuthenticated, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
     case 0x0101: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAny, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};
     case 0x0102: return server::core::protocol::OpcodePolicy{server::core::protocol::SessionStatus::kAuthenticated, server::core::protocol::ProcessingPlace::kInline, server::core::protocol::TransportMask::kTcp, server::core::protocol::DeliveryClass::kReliableOrdered, 0};

@@ -2,6 +2,7 @@
 
 #include <cstdlib>
 #include <cstdint>
+#include <cstring>
 #include <chrono>
 #include <mutex>
 #include <stdexcept>
@@ -15,14 +16,23 @@
 #include <iomanip>
 #include <sstream>
 #include <type_traits>
+#include <vector>
+
+#include <openssl/crypto.h>
+#include <openssl/hmac.h>
 
 #include <boost/asio/connect.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/write.hpp>
 #include <boost/asio/ip/tcp.hpp>
 
 #include "gateway/gateway_connection.hpp"
+#include "server/core/protocol/packet.hpp"
+#include "server/core/protocol/protocol_errors.hpp"
+#include "server/core/protocol/system_opcodes.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/metrics/build_info.hpp"
+#include "server/protocol/game_opcodes.hpp"
 #include "server/storage/redis/client.hpp"
 #include "server/state/instance_registry.hpp"
 
@@ -44,12 +54,96 @@ constexpr const char* kEnvServerRegistryTtl = "SERVER_REGISTRY_TTL";
 constexpr const char* kEnvGatewayBackendConnectTimeoutMs = "GATEWAY_BACKEND_CONNECT_TIMEOUT_MS";
 constexpr const char* kEnvGatewayBackendSendQueueMaxBytes = "GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES";
 constexpr const char* kEnvAllowAnonymous = "ALLOW_ANONYMOUS";
+constexpr const char* kEnvGatewayUdpListen = "GATEWAY_UDP_LISTEN";
+constexpr const char* kEnvGatewayUdpBindSecret = "GATEWAY_UDP_BIND_SECRET";
+constexpr const char* kEnvGatewayUdpBindTtlMs = "GATEWAY_UDP_BIND_TTL_MS";
 constexpr const char* kDefaultGatewayListen = "0.0.0.0:6000";
 constexpr const char* kDefaultGatewayId = "gateway-default";
 constexpr const char* kDefaultRedisUri = "tcp://127.0.0.1:6379";
 constexpr const char* kDefaultServerRegistryPrefix = "gateway/instances/";
 constexpr std::uint32_t kDefaultBackendConnectTimeoutMs = 5000;
 constexpr std::size_t kDefaultBackendSendQueueMaxBytes = 256 * 1024;
+constexpr std::uint32_t kDefaultUdpBindTtlMs = 5000;
+
+std::uint64_t unix_time_ms() {
+    const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+    return static_cast<std::uint64_t>(now.count());
+}
+
+void write_be64(std::uint64_t value, std::vector<std::uint8_t>& out) {
+    out.push_back(static_cast<std::uint8_t>((value >> 56) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 48) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 40) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 32) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 24) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 16) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>((value >> 8) & 0xFFu));
+    out.push_back(static_cast<std::uint8_t>(value & 0xFFu));
+}
+
+bool read_be64(std::span<const std::uint8_t>& in, std::uint64_t& out) {
+    if (in.size() < 8) {
+        return false;
+    }
+
+    out = (static_cast<std::uint64_t>(in[0]) << 56)
+        | (static_cast<std::uint64_t>(in[1]) << 48)
+        | (static_cast<std::uint64_t>(in[2]) << 40)
+        | (static_cast<std::uint64_t>(in[3]) << 32)
+        | (static_cast<std::uint64_t>(in[4]) << 24)
+        | (static_cast<std::uint64_t>(in[5]) << 16)
+        | (static_cast<std::uint64_t>(in[6]) << 8)
+        | static_cast<std::uint64_t>(in[7]);
+    in = in.subspan(8);
+    return true;
+}
+
+std::string to_hex(std::span<const std::uint8_t> bytes) {
+    static constexpr char kHex[] = "0123456789abcdef";
+    std::string out;
+    out.resize(bytes.size() * 2);
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        out[2 * i] = kHex[(bytes[i] >> 4) & 0x0F];
+        out[2 * i + 1] = kHex[bytes[i] & 0x0F];
+    }
+    return out;
+}
+
+std::string make_bind_signing_input(std::string_view session_id,
+                                    std::uint64_t nonce,
+                                    std::uint64_t expires_unix_ms) {
+    return std::string(session_id)
+        + "|" + std::to_string(nonce)
+        + "|" + std::to_string(expires_unix_ms);
+}
+
+std::string hmac_sha256_hex(std::string_view secret, std::string_view message) {
+    unsigned int digest_len = 0;
+    unsigned char digest[EVP_MAX_MD_SIZE]{};
+
+    const auto* result = HMAC(EVP_sha256(),
+                              secret.data(),
+                              static_cast<int>(secret.size()),
+                              reinterpret_cast<const unsigned char*>(message.data()),
+                              message.size(),
+                              digest,
+                              &digest_len);
+    if (result == nullptr || digest_len == 0) {
+        return {};
+    }
+    return to_hex(std::span<const std::uint8_t>(digest, digest_len));
+}
+
+bool secure_equals(std::string_view lhs, std::string_view rhs) {
+    if (lhs.size() != rhs.size()) {
+        return false;
+    }
+    if (lhs.empty()) {
+        return true;
+    }
+    return CRYPTO_memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
+}
 
 template <typename T>
 T parse_env_integral_bounded(const char* key,
@@ -430,6 +524,11 @@ GatewayApp::GatewayApp()
     boot_id_ = make_boot_id();
     server::core::log::info("GatewayApp boot_id=" + boot_id_);
 
+    if (udp_listen_port_ != 0 && udp_bind_secret_.empty()) {
+        udp_bind_secret_ = boot_id_;
+        server::core::log::warn("GatewayApp GATEWAY_UDP_BIND_SECRET not set; using boot_id derived secret");
+    }
+
     configure_infrastructure();
 
     // Redis is required for backend discovery and sticky routing.
@@ -484,6 +583,35 @@ GatewayApp::GatewayApp()
         stream << "# TYPE gateway_backend_send_queue_max_bytes gauge\n";
         stream << "gateway_backend_send_queue_max_bytes " << backend_send_queue_max_bytes_ << "\n";
 
+        stream << "# TYPE gateway_udp_enabled gauge\n";
+        stream << "gateway_udp_enabled " << (udp_enabled_.load(std::memory_order_relaxed) ? 1 : 0) << "\n";
+
+        stream << "# TYPE gateway_udp_packets_total counter\n";
+        stream << "gateway_udp_packets_total " << udp_packets_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_udp_receive_error_total counter\n";
+        stream << "gateway_udp_receive_error_total " << udp_receive_error_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_udp_bind_ticket_issued_total counter\n";
+        stream << "gateway_udp_bind_ticket_issued_total "
+               << udp_bind_ticket_issued_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_udp_bind_success_total counter\n";
+        stream << "gateway_udp_bind_success_total "
+               << udp_bind_success_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_udp_bind_reject_total counter\n";
+        stream << "gateway_udp_bind_reject_total "
+               << udp_bind_reject_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_udp_forward_total counter\n";
+        stream << "gateway_udp_forward_total "
+               << udp_forward_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE gateway_udp_replay_drop_total counter\n";
+        stream << "gateway_udp_replay_drop_total "
+               << udp_replay_drop_total_.load(std::memory_order_relaxed) << "\n";
+
         stream << app_host_.dependency_metrics_text();
         stream << app_host_.lifecycle_metrics_text();
         return stream.str();
@@ -498,6 +626,7 @@ GatewayApp::~GatewayApp() {
 
 int GatewayApp::run() {
     start_listener();
+    start_udp_listener();
     app_host_.set_ready(true);
     app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kRunning);
     start_infrastructure_probe();
@@ -522,6 +651,8 @@ void GatewayApp::stop() {
     if (listener_) {
         listener_->stop();
     }
+
+    stop_udp_listener();
 
     {
         std::lock_guard<std::mutex> lock(session_mutex_);
@@ -623,7 +754,10 @@ GatewayApp::BackendConnectionPtr GatewayApp::create_backend_connection(const std
 
     {
         std::lock_guard<std::mutex> lock(session_mutex_);
-        sessions_[session_id] = SessionState{session};
+        SessionState state{};
+        state.session = session;
+        state.client_id = client_id;
+        sessions_[session_id] = std::move(state);
     }
 
     return session;
@@ -642,6 +776,225 @@ void GatewayApp::close_backend_connection(const std::string& session_id) {
     if (session) {
         session->close();
     }
+}
+
+std::string GatewayApp::make_udp_bind_token(std::string_view session_id,
+                                            std::uint64_t nonce,
+                                            std::uint64_t expires_unix_ms) const {
+    if (udp_bind_secret_.empty()) {
+        return {};
+    }
+
+    const auto signing_input = make_bind_signing_input(session_id, nonce, expires_unix_ms);
+    return hmac_sha256_hex(udp_bind_secret_, signing_input);
+}
+
+std::vector<std::uint8_t> GatewayApp::make_udp_bind_res_frame(std::uint16_t code,
+                                                               const UdpBindTicket& ticket,
+                                                               std::string_view message,
+                                                               std::uint32_t seq) const {
+    return make_udp_bind_res_frame(
+        code,
+        ticket.session_id,
+        ticket.nonce,
+        ticket.expires_unix_ms,
+        ticket.token,
+        message,
+        seq
+    );
+}
+
+std::vector<std::uint8_t> GatewayApp::make_udp_bind_res_frame(std::uint16_t code,
+                                                               std::string_view session_id,
+                                                               std::uint64_t nonce,
+                                                               std::uint64_t expires_unix_ms,
+                                                               std::string_view token,
+                                                               std::string_view message,
+                                                               std::uint32_t seq) const {
+    namespace proto = server::core::protocol;
+
+    std::vector<std::uint8_t> payload;
+    payload.reserve(2 + 2 + session_id.size() + 8 + 8 + 2 + token.size() + 2 + message.size());
+
+    std::array<std::uint8_t, 2> code_buf{};
+    proto::write_be16(code, code_buf.data());
+    payload.insert(payload.end(), code_buf.begin(), code_buf.end());
+
+    proto::write_lp_utf8(payload, session_id);
+    write_be64(nonce, payload);
+    write_be64(expires_unix_ms, payload);
+    proto::write_lp_utf8(payload, token);
+    proto::write_lp_utf8(payload, message);
+
+    proto::PacketHeader header{};
+    header.length = static_cast<std::uint16_t>(payload.size());
+    header.msg_id = server::protocol::MSG_UDP_BIND_RES;
+    header.flags = 0;
+    header.seq = seq;
+    header.utc_ts_ms32 = static_cast<std::uint32_t>(unix_time_ms() & 0xFFFFFFFFu);
+
+    std::vector<std::uint8_t> frame(proto::k_header_bytes + payload.size());
+    proto::encode_header(header, frame.data());
+    if (!payload.empty()) {
+        std::memcpy(frame.data() + proto::k_header_bytes, payload.data(), payload.size());
+    }
+    return frame;
+}
+
+std::optional<std::vector<std::uint8_t>> GatewayApp::make_udp_bind_ticket_frame(const std::string& session_id) {
+    if (udp_listen_port_ == 0) {
+        return std::nullopt;
+    }
+
+    if (udp_bind_secret_.empty()) {
+        return std::nullopt;
+    }
+
+    UdpBindTicket ticket{};
+    {
+        std::lock_guard<std::mutex> lock(session_mutex_);
+        auto it = sessions_.find(session_id);
+        if (it == sessions_.end()) {
+            return std::nullopt;
+        }
+
+        std::random_device rd;
+        const std::uint64_t nonce = (static_cast<std::uint64_t>(rd()) << 32) ^ static_cast<std::uint64_t>(rd());
+        const std::uint64_t expires_unix_ms = unix_time_ms() + static_cast<std::uint64_t>(udp_bind_ttl_ms_);
+        const std::string token = make_udp_bind_token(session_id, nonce, expires_unix_ms);
+        if (token.empty()) {
+            return std::nullopt;
+        }
+
+        it->second.udp_nonce = nonce;
+        it->second.udp_expires_unix_ms = expires_unix_ms;
+        it->second.udp_token = token;
+        it->second.udp_bound = false;
+        it->second.udp_endpoint = {};
+        it->second.udp_last_seq = 0;
+        it->second.udp_last_seq_initialized = false;
+
+        ticket.session_id = session_id;
+        ticket.nonce = nonce;
+        ticket.expires_unix_ms = expires_unix_ms;
+        ticket.token = token;
+    }
+
+    (void)udp_bind_ticket_issued_total_.fetch_add(1, std::memory_order_relaxed);
+    return make_udp_bind_res_frame(0, ticket, "issued");
+}
+
+bool GatewayApp::parse_udp_bind_req(std::span<const std::uint8_t> payload, ParsedUdpBindRequest& out) const {
+    namespace proto = server::core::protocol;
+
+    std::span<const std::uint8_t> in = payload;
+    std::string session_id;
+    if (!proto::read_lp_utf8(in, session_id)) {
+        return false;
+    }
+
+    std::uint64_t nonce = 0;
+    if (!read_be64(in, nonce)) {
+        return false;
+    }
+
+    std::uint64_t expires_unix_ms = 0;
+    if (!read_be64(in, expires_unix_ms)) {
+        return false;
+    }
+
+    std::string token;
+    if (!proto::read_lp_utf8(in, token)) {
+        return false;
+    }
+
+    if (!in.empty()) {
+        return false;
+    }
+
+    out.session_id = std::move(session_id);
+    out.nonce = nonce;
+    out.expires_unix_ms = expires_unix_ms;
+    out.token = std::move(token);
+    return true;
+}
+
+std::uint16_t GatewayApp::apply_udp_bind_request(const ParsedUdpBindRequest& req,
+                                                 const boost::asio::ip::udp::endpoint& endpoint,
+                                                 UdpBindTicket& applied_ticket,
+                                                 std::string& message) {
+    using server::core::protocol::errc::FORBIDDEN;
+    using server::core::protocol::errc::INVALID_PAYLOAD;
+    using server::core::protocol::errc::UNAUTHORIZED;
+
+    if (req.session_id.empty() || req.token.empty()) {
+        message = "invalid bind payload";
+        return INVALID_PAYLOAD;
+    }
+
+    if (req.expires_unix_ms < unix_time_ms()) {
+        message = "ticket expired";
+        return UNAUTHORIZED;
+    }
+
+    std::lock_guard<std::mutex> lock(session_mutex_);
+    auto it = sessions_.find(req.session_id);
+    if (it == sessions_.end()) {
+        message = "unknown session";
+        return UNAUTHORIZED;
+    }
+
+    auto& state = it->second;
+    if (state.udp_expires_unix_ms == 0 || state.udp_nonce == 0 || state.udp_token.empty()) {
+        message = "bind ticket not issued";
+        return UNAUTHORIZED;
+    }
+
+    if (state.udp_expires_unix_ms < unix_time_ms()) {
+        message = "ticket expired";
+        return UNAUTHORIZED;
+    }
+
+    if (req.expires_unix_ms != state.udp_expires_unix_ms || req.nonce != state.udp_nonce) {
+        message = "ticket mismatch";
+        return UNAUTHORIZED;
+    }
+
+    const std::string expected = make_udp_bind_token(req.session_id, req.nonce, req.expires_unix_ms);
+    if (!secure_equals(req.token, state.udp_token) || !secure_equals(req.token, expected)) {
+        message = "invalid token";
+        return UNAUTHORIZED;
+    }
+
+    if (state.udp_bound && state.udp_endpoint != endpoint) {
+        message = "session already bound";
+        return FORBIDDEN;
+    }
+
+    state.udp_bound = true;
+    state.udp_endpoint = endpoint;
+
+    applied_ticket.session_id = req.session_id;
+    applied_ticket.nonce = req.nonce;
+    applied_ticket.expires_unix_ms = req.expires_unix_ms;
+    applied_ticket.token = req.token;
+
+    message = "bound";
+    return 0;
+}
+
+void GatewayApp::send_udp_datagram(std::vector<std::uint8_t> frame,
+                                   const boost::asio::ip::udp::endpoint& endpoint) {
+    if (!udp_socket_) {
+        return;
+    }
+
+    udp_socket_->async_send_to(
+        boost::asio::buffer(frame),
+        endpoint,
+        [frame = std::move(frame)](const boost::system::error_code&, std::size_t) mutable {
+            frame.clear();
+        });
 }
 
 std::optional<GatewayApp::SelectedBackend> GatewayApp::select_best_server(const std::string& client_id) {
@@ -741,6 +1094,24 @@ void GatewayApp::configure_gateway() {
         "GatewayApp invalid GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES; using default"
     );
 
+    if (const char* udp_listen_env = std::getenv(kEnvGatewayUdpListen); udp_listen_env && *udp_listen_env) {
+        const auto [udp_host, udp_port] = parse_listen(std::string_view(udp_listen_env), 0);
+        udp_listen_host_ = udp_host;
+        udp_listen_port_ = udp_port;
+    }
+
+    if (const char* udp_secret_env = std::getenv(kEnvGatewayUdpBindSecret); udp_secret_env && *udp_secret_env) {
+        udp_bind_secret_ = udp_secret_env;
+    }
+
+    udp_bind_ttl_ms_ = parse_env_u32_bounded(
+        kEnvGatewayUdpBindTtlMs,
+        kDefaultUdpBindTtlMs,
+        1000,
+        120000,
+        "GatewayApp invalid GATEWAY_UDP_BIND_TTL_MS; using default"
+    );
+
     allow_anonymous_ = true;
     if (const char* anonymous_env = std::getenv(kEnvAllowAnonymous); anonymous_env && *anonymous_env) {
         allow_anonymous_ = (std::string_view(anonymous_env) != "0");
@@ -748,6 +1119,9 @@ void GatewayApp::configure_gateway() {
 
     server::core::log::info("GatewayApp configured: gateway_id=" + gateway_id_
         + " listen=" + listen_host_ + ":" + std::to_string(listen_port_)
+        + " udp_listen="
+        + (udp_listen_port_ == 0 ? std::string("disabled") : (udp_listen_host_ + ":" + std::to_string(udp_listen_port_)))
+        + " udp_bind_ttl_ms=" + std::to_string(udp_bind_ttl_ms_)
         + " backend_connect_timeout_ms=" + std::to_string(backend_connect_timeout_ms_)
         + " backend_send_queue_max_bytes=" + std::to_string(backend_send_queue_max_bytes_)
         + " allow_anonymous=" + std::string(allow_anonymous_ ? "1" : "0"));
@@ -830,6 +1204,255 @@ void GatewayApp::start_listener() {
     listener_->start();
     auto bound = listener_->local_endpoint();
     server::core::log::info("GatewayApp listening on " + bound.address().to_string() + ":" + std::to_string(bound.port()));
+}
+
+void GatewayApp::start_udp_listener() {
+    if (udp_listen_port_ == 0) {
+        udp_enabled_.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    if (udp_bind_secret_.empty()) {
+        server::core::log::warn("GatewayApp UDP bind secret is empty; UDP disabled");
+        udp_enabled_.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    boost::system::error_code ec;
+    auto address = boost::asio::ip::make_address(udp_listen_host_.empty() ? "0.0.0.0" : udp_listen_host_, ec);
+    if (ec) {
+        server::core::log::warn("GatewayApp failed to parse UDP listen address; UDP disabled");
+        udp_enabled_.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    auto socket = std::make_unique<boost::asio::ip::udp::socket>(io_);
+    socket->open(boost::asio::ip::udp::v4(), ec);
+    if (ec) {
+        server::core::log::warn("GatewayApp failed to open UDP socket; UDP disabled");
+        udp_enabled_.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    socket->set_option(boost::asio::socket_base::reuse_address(true), ec);
+    if (ec) {
+        server::core::log::warn("GatewayApp failed to set UDP reuse_address; UDP disabled");
+        udp_enabled_.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    socket->bind(boost::asio::ip::udp::endpoint{address, udp_listen_port_}, ec);
+    if (ec) {
+        server::core::log::warn("GatewayApp failed to bind UDP socket; UDP disabled");
+        udp_enabled_.store(false, std::memory_order_relaxed);
+        return;
+    }
+
+    udp_socket_ = std::move(socket);
+    udp_enabled_.store(true, std::memory_order_relaxed);
+    do_udp_receive();
+    server::core::log::info("GatewayApp UDP listening on " + address.to_string() + ":" + std::to_string(udp_listen_port_));
+}
+
+void GatewayApp::stop_udp_listener() {
+    udp_enabled_.store(false, std::memory_order_relaxed);
+    if (!udp_socket_) {
+        return;
+    }
+
+    boost::system::error_code ec;
+    udp_socket_->cancel(ec);
+    udp_socket_->close(ec);
+    udp_socket_.reset();
+}
+
+void GatewayApp::do_udp_receive() {
+    if (!udp_socket_) {
+        return;
+    }
+
+    udp_socket_->async_receive_from(
+        boost::asio::buffer(udp_read_buffer_),
+        udp_remote_endpoint_,
+        [this](const boost::system::error_code& ec, std::size_t bytes) {
+            if (ec) {
+                if (ec != boost::asio::error::operation_aborted) {
+                    (void)udp_receive_error_total_.fetch_add(1, std::memory_order_relaxed);
+                    do_udp_receive();
+                }
+                return;
+            }
+
+            if (bytes > 0) {
+                (void)udp_packets_total_.fetch_add(1, std::memory_order_relaxed);
+            }
+
+            namespace proto = server::core::protocol;
+            if (bytes < proto::k_header_bytes) {
+                (void)udp_receive_error_total_.fetch_add(1, std::memory_order_relaxed);
+                do_udp_receive();
+                return;
+            }
+
+            proto::PacketHeader header{};
+            proto::decode_header(udp_read_buffer_.data(), header);
+            const auto body_len = static_cast<std::size_t>(header.length);
+            if (body_len != (bytes - proto::k_header_bytes)) {
+                (void)udp_receive_error_total_.fetch_add(1, std::memory_order_relaxed);
+                do_udp_receive();
+                return;
+            }
+
+            const auto payload = std::span<const std::uint8_t>(
+                udp_read_buffer_.data() + proto::k_header_bytes,
+                body_len
+            );
+
+            if (header.msg_id == server::protocol::MSG_UDP_BIND_REQ) {
+                ParsedUdpBindRequest req{};
+                if (!parse_udp_bind_req(payload, req)) {
+                    (void)udp_bind_reject_total_.fetch_add(1, std::memory_order_relaxed);
+                    auto frame = make_udp_bind_res_frame(
+                        server::core::protocol::errc::INVALID_PAYLOAD,
+                        std::string_view{},
+                        0,
+                        0,
+                        std::string_view{},
+                        "invalid bind payload",
+                        header.seq
+                    );
+                    send_udp_datagram(std::move(frame), udp_remote_endpoint_);
+                    do_udp_receive();
+                    return;
+                }
+
+                UdpBindTicket ticket{};
+                std::string message;
+                const auto code = apply_udp_bind_request(req, udp_remote_endpoint_, ticket, message);
+                if (code == 0) {
+                    (void)udp_bind_success_total_.fetch_add(1, std::memory_order_relaxed);
+                } else {
+                    (void)udp_bind_reject_total_.fetch_add(1, std::memory_order_relaxed);
+                }
+
+                auto frame = (code == 0)
+                    ? make_udp_bind_res_frame(code, ticket, message, header.seq)
+                    : make_udp_bind_res_frame(code,
+                                              req.session_id,
+                                              req.nonce,
+                                              req.expires_unix_ms,
+                                              req.token,
+                                              message,
+                                              header.seq);
+                send_udp_datagram(std::move(frame), udp_remote_endpoint_);
+                do_udp_receive();
+                return;
+            }
+
+            GatewayApp::BackendConnectionPtr bound_session;
+            std::string bound_session_id;
+            {
+                std::lock_guard<std::mutex> lock(session_mutex_);
+                for (auto& [sid, state] : sessions_) {
+                    if (state.udp_bound && state.udp_endpoint == udp_remote_endpoint_) {
+                        bound_session = state.session;
+                        bound_session_id = sid;
+                        break;
+                    }
+                }
+            }
+
+            if (!bound_session) {
+                (void)udp_bind_reject_total_.fetch_add(1, std::memory_order_relaxed);
+                auto frame = make_udp_bind_res_frame(
+                    server::core::protocol::errc::UNAUTHORIZED,
+                    std::string_view{},
+                    0,
+                    0,
+                    std::string_view{},
+                    "udp session not bound",
+                    header.seq
+                );
+                send_udp_datagram(std::move(frame), udp_remote_endpoint_);
+                do_udp_receive();
+                return;
+            }
+
+            const bool is_game_opcode = !server::protocol::opcode_name(header.msg_id).empty();
+            const bool is_core_opcode = !server::core::protocol::opcode_name(header.msg_id).empty();
+            if (!is_game_opcode && !is_core_opcode) {
+                (void)udp_bind_reject_total_.fetch_add(1, std::memory_order_relaxed);
+                auto frame = make_udp_bind_res_frame(
+                    server::core::protocol::errc::UNKNOWN_MSG_ID,
+                    std::string_view{},
+                    0,
+                    0,
+                    std::string_view{},
+                    "unknown udp msg_id",
+                    header.seq
+                );
+                send_udp_datagram(std::move(frame), udp_remote_endpoint_);
+                do_udp_receive();
+                return;
+            }
+
+            const auto policy = is_game_opcode
+                ? server::protocol::opcode_policy(header.msg_id)
+                : server::core::protocol::opcode_policy(header.msg_id);
+            if (!server::core::protocol::transport_allows(policy.transport, server::core::protocol::TransportKind::kUdp)) {
+                (void)udp_bind_reject_total_.fetch_add(1, std::memory_order_relaxed);
+                auto frame = make_udp_bind_res_frame(
+                    server::core::protocol::errc::FORBIDDEN,
+                    std::string_view{},
+                    0,
+                    0,
+                    std::string_view{},
+                    "opcode not allowed on udp",
+                    header.seq
+                );
+                send_udp_datagram(std::move(frame), udp_remote_endpoint_);
+                do_udp_receive();
+                return;
+            }
+
+            if (policy.delivery == server::core::protocol::DeliveryClass::kUnreliableSequenced) {
+                bool accepted = false;
+                {
+                    std::lock_guard<std::mutex> lock(session_mutex_);
+                    auto it = sessions_.find(bound_session_id);
+                    if (it != sessions_.end()
+                        && it->second.udp_bound
+                        && it->second.udp_endpoint == udp_remote_endpoint_) {
+                        if (!it->second.udp_last_seq_initialized || header.seq > it->second.udp_last_seq) {
+                            it->second.udp_last_seq = header.seq;
+                            it->second.udp_last_seq_initialized = true;
+                            accepted = true;
+                        }
+                    }
+                }
+
+                if (!accepted) {
+                    (void)udp_replay_drop_total_.fetch_add(1, std::memory_order_relaxed);
+                    (void)udp_bind_reject_total_.fetch_add(1, std::memory_order_relaxed);
+                    auto frame = make_udp_bind_res_frame(
+                        server::core::protocol::errc::FORBIDDEN,
+                        std::string_view{},
+                        0,
+                        0,
+                        std::string_view{},
+                        "stale sequenced udp packet",
+                        header.seq
+                    );
+                    send_udp_datagram(std::move(frame), udp_remote_endpoint_);
+                    do_udp_receive();
+                    return;
+                }
+            }
+
+            bound_session->send(udp_read_buffer_.data(), bytes);
+            (void)udp_forward_total_.fetch_add(1, std::memory_order_relaxed);
+            do_udp_receive();
+        });
 }
 
 } // namespace gateway

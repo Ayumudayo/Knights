@@ -46,10 +46,25 @@ void Dispatcher::register_handler(std::uint16_t msg_id, handler_t handler, polic
 }
 
 bool Dispatcher::dispatch(std::uint16_t msg_id, Session& s, std::span<const std::uint8_t> payload) const {
+    return dispatch(msg_id, s, payload, server::core::protocol::TransportKind::kTcp);
+}
+
+bool Dispatcher::dispatch(std::uint16_t msg_id,
+                          Session& s,
+                          std::span<const std::uint8_t> payload,
+                          server::core::protocol::TransportKind transport) const {
     auto it = table_.find(msg_id);
     if (it == table_.end()) return false; // 등록되지 않은 메시지는 처리하지 않습니다.
 
     const auto& entry = it->second;
+    if (!server::core::protocol::transport_allows(entry.policy.transport, transport)) {
+        try {
+            s.send_error(server::core::protocol::errc::FORBIDDEN, "forbidden");
+        } catch (...) {
+        }
+        return true;
+    }
+
     if (!satisfies_required_state(entry.policy.required_state, s.session_status())) {
         try {
             s.send_error(server::core::protocol::errc::FORBIDDEN, "forbidden");

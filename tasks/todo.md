@@ -96,6 +96,13 @@
 
 ## 4) Phase 3 - UDP ingress 도입 (제한 롤아웃)
 
+진행 메모 (2026-02-21):
+
+- [x] gateway UDP listener 스켈레톤(`GATEWAY_UDP_LISTEN`) 추가 및 수신 카운터/에러 카운터 메트릭 노출
+- [x] dispatcher transport-aware 진입점 추가(`TransportKind`) 및 policy.transport 게이트(TCP/UDP) 적용
+- [x] `MSG_UDP_BIND_REQ/RES` + HMAC ticket 기반 TCP-auth 세션 <-> UDP endpoint 바인딩 구현
+- [x] 바인딩된 UDP payload를 정책 검증 후 backend 경로로 전달하고, `UnreliableSequenced` 최소 replay/순서 가드 적용
+
 ## 4.1 전송 추상화
 
 - [ ] 코어 전송 인터페이스(`ITransportSession` 성격) 도입
@@ -104,14 +111,14 @@
 
 ## 4.2 Gateway 연동
 
-- [ ] `gateway/src/gateway_app.cpp`에 UDP listener 경로 추가
-- [ ] TCP 인증 세션과 UDP 세션 바인딩 절차 구현
-- [ ] 바인딩 실패/만료/재시도 정책 구현
+- [x] `gateway/src/gateway_app.cpp`에 UDP listener 경로 추가
+- [x] TCP 인증 세션과 UDP 세션 바인딩 절차 구현
+- [ ] 바인딩 실패/만료/재시도 정책 구현(실패/만료 처리 완료, 재시도 정책 정교화 필요)
 
 ## 4.3 정책 기반 전송 분기
 
-- [ ] `TransportMask` + `DeliveryClass` 기반 송수신 분기 구현
-- [ ] `UnreliableSequenced`용 seq window/replay guard 구현
+- [x] `TransportMask` + `DeliveryClass` 기반 송수신 분기 구현(UDP ingress -> policy 검사 -> backend 전달)
+- [x] `UnreliableSequenced`용 seq window/replay guard 구현(최소 단조 증가 가드)
 - [ ] 초기 대상 opcode를 최소 세트로 제한
 
 ## 4.4 검증

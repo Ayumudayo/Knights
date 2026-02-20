@@ -32,6 +32,8 @@ login/auth
 |---:|------|:---:|:-----:|:-----:|:---------:|:--------:|-------:|------|
 | 0x0010 | `MSG_LOGIN_REQ` | `c2s` | `any` | `inline` | `tcp` | `reliable_ordered` | 0 | 로그인 요청 |
 | 0x0011 | `MSG_LOGIN_RES` | `s2c` | `any` | `inline` | `tcp` | `reliable_ordered` | 0 | 로그인 응답 |
+| 0x0012 | `MSG_UDP_BIND_REQ` | `c2s` | `any` | `inline` | `udp` | `reliable` | 0 | UDP 바인딩 요청 |
+| 0x0013 | `MSG_UDP_BIND_RES` | `s2c` | `any` | `inline` | `both` | `reliable` | 0 | UDP 바인딩 응답/티켓 |
 
 ### chat (0x0100..0x01FF)
 

@@ -3,7 +3,6 @@
 #include <cstdint>
 #include <functional>
 #include <unordered_map>
-#include <vector>
 #include <span>
 
 #include "server/core/protocol/opcode_policy.hpp"
@@ -41,6 +40,19 @@ public:
      * @return 핸들러를 찾아 실행했으면 true, 등록되지 않았으면 false
      */
     bool dispatch(std::uint16_t msg_id, Session& s, std::span<const std::uint8_t> payload) const;
+
+    /**
+     * @brief msg_id에 맞는 핸들러를 transport 문맥과 함께 실행합니다.
+     * @param msg_id 프로토콜 메시지 ID
+     * @param s 현재 세션
+     * @param payload 메시지 본문 payload
+     * @param transport 실제 수신 전송 계층(TCP/UDP)
+     * @return 핸들러를 찾아 실행했으면 true, 등록되지 않았으면 false
+     */
+    bool dispatch(std::uint16_t msg_id,
+                  Session& s,
+                  std::span<const std::uint8_t> payload,
+                  server::core::protocol::TransportKind transport) const;
 
 private:
     struct Entry {

@@ -46,6 +46,30 @@
             "channel": 0
         },
         {
+            "group": "auth",
+            "dir": "c2s",
+            "name": "MSG_UDP_BIND_REQ",
+            "id": "0x0012",
+            "desc": "UDP 바인딩 요청",
+            "required_state": "any",
+            "processing_place": "inline",
+            "transport": "udp",
+            "delivery": "reliable",
+            "channel": 0
+        },
+        {
+            "group": "auth",
+            "dir": "s2c",
+            "name": "MSG_UDP_BIND_RES",
+            "id": "0x0013",
+            "desc": "UDP 바인딩 응답/티켓",
+            "required_state": "any",
+            "processing_place": "inline",
+            "transport": "both",
+            "delivery": "reliable",
+            "channel": 0
+        },
+        {
             "group": "chat",
             "dir": "c2s",
             "name": "MSG_CHAT_SEND",

@@ -30,6 +30,11 @@ enum class DeliveryClass : std::uint8_t {
     kUnreliableSequenced,
 };
 
+enum class TransportKind : std::uint8_t {
+    kTcp = 0,
+    kUdp,
+};
+
 struct OpcodePolicy {
     SessionStatus   required_state  = SessionStatus::kAny;
     ProcessingPlace processing_place = ProcessingPlace::kInline;
@@ -40,6 +45,19 @@ struct OpcodePolicy {
 
 inline constexpr OpcodePolicy default_opcode_policy() noexcept {
     return OpcodePolicy{};
+}
+
+inline constexpr bool transport_allows(TransportMask mask, TransportKind transport) noexcept {
+    if (mask == TransportMask::kBoth) {
+        return true;
+    }
+    if (mask == TransportMask::kNone) {
+        return false;
+    }
+    if (transport == TransportKind::kTcp) {
+        return mask == TransportMask::kTcp;
+    }
+    return mask == TransportMask::kUdp;
 }
 
 } // namespace server::core::protocol
