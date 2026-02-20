@@ -17,7 +17,7 @@ Chat logic node. Owns room/user state, storage access, and Redis instance regist
 
 ## Flow
 - Bootstrap: `server::app::run_server()` loads `ServerConfig`, installs crash handler, and wires DI via `ServiceRegistry`.
-- Core runtime: `asio::io_context`, `JobQueue`, `ThreadManager`, `BufferManager`, `Dispatcher`, `SessionOptions`, `SharedState`.
+- Core runtime: `asio::io_context`, `JobQueue`, `ThreadManager`, `BufferManager`, `Dispatcher`, `SessionOptions`, `ConnectionRuntimeState`.
 - Storage:
   - Postgres pool: `server::storage::postgres::make_connection_pool()` + periodic health checks.
   - Redis client: `server::storage::redis::make_redis_client()` + periodic health checks.

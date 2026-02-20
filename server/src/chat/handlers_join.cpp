@@ -9,7 +9,6 @@
 #include "server/storage/redis/client.hpp"
 // 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
-#include "server/core/storage/repositories.hpp"
 
 using namespace server::core;
 namespace proto = server::core::protocol;

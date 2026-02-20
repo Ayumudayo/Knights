@@ -9,13 +9,16 @@
 
 | Module | Stability | Primary Headers | Purpose |
 |---|---|---|---|
-| Runtime Host | `[Stable]` | `server/core/app/app_host.hpp` | Process lifecycle, readiness/health, admin HTTP integration. |
-| Networking | `[Stable]+[Transitional]` | `server/core/net/hive.hpp`, `server/core/net/dispatcher.hpp`, `server/core/net/listener.hpp`, `server/core/net/connection.hpp`, `server/core/net/acceptor.hpp`, `server/core/net/session.hpp` | Event loop lifecycle + transport/session routing primitives. |
-| Concurrency | `[Stable]+[Transitional]+[Internal]` | `server/core/concurrent/task_scheduler.hpp`, `server/core/concurrent/job_queue.hpp`, `server/core/concurrent/thread_manager.hpp` | Scheduler and worker queue primitives. |
-| Storage SPI | `[Transitional]` | `server/core/storage/connection_pool.hpp`, `server/core/storage/unit_of_work.hpp`, `server/core/storage/repositories.hpp`, `server/core/storage/db_worker_pool.hpp` | Repository and unit-of-work contracts for DB access. |
-| Metrics/Lifecycle | `[Stable]+[Transitional]` | `server/core/metrics/http_server.hpp`, `server/core/metrics/build_info.hpp`, `server/core/runtime_metrics.hpp` | Operational metrics and lifecycle visibility. |
+| Runtime Host | `[Stable]` | `server/core/app/app_host.hpp`, `server/core/app/termination_signals.hpp` | Process lifecycle, readiness/health, and process-level termination signaling. |
+| Networking | `[Stable]+[Internal]` | `server/core/net/hive.hpp`, `server/core/net/dispatcher.hpp`, `server/core/net/listener.hpp`, `server/core/net/connection.hpp` | Event loop lifecycle + transport routing primitives. |
+| Concurrency | `[Stable]+[Internal]` | `server/core/concurrent/task_scheduler.hpp`, `server/core/concurrent/job_queue.hpp`, `server/core/concurrent/thread_manager.hpp` | Scheduler and worker queue primitives. |
+| Compression | `[Stable]` | `server/core/compression/compressor.hpp` | LZ4-based byte payload compression/decompression contract. |
+| Memory | `[Stable]` | `server/core/memory/memory_pool.hpp` | Fixed-size memory pool and RAII buffer manager contract. |
+| Storage SPI | `[Internal]` | (No Stable public headers) | Server-specific repository/UoW and async DB worker primitives. |
+| Metrics/Lifecycle | `[Stable]` | `server/core/metrics/metrics.hpp`, `server/core/metrics/http_server.hpp`, `server/core/metrics/build_info.hpp`, `server/core/runtime_metrics.hpp` | Operational metrics and lifecycle visibility. |
 | Protocol | `[Stable]` | `server/core/protocol/packet.hpp`, `server/core/protocol/protocol_flags.hpp`, `server/core/protocol/protocol_errors.hpp`, `server/core/protocol/system_opcodes.hpp` | Wire header, flags, errors, and opcode constants. |
-| Utilities | `[Stable]+[Transitional]+[Internal]` | `server/core/util/log.hpp`, `server/core/util/paths.hpp`, `server/core/util/service_registry.hpp` | Cross-binary helpers and process utilities. |
+| Security | `[Stable]` | `server/core/security/cipher.hpp` | AES-256-GCM encryption/decryption contract with authenticated payload semantics. |
+| Utilities | `[Stable]+[Internal]` | `server/core/util/log.hpp`, `server/core/util/paths.hpp`, `server/core/util/service_registry.hpp` | Cross-binary helpers and process utilities. |
 
 ## Canonical Include Contract
 - Use only headers classified as `[Stable]` for public consumers.

@@ -1,7 +1,6 @@
 #pragma once
 
 #include <initializer_list>
-#include <memory>
 #include <string>
 #include <utility>
 
@@ -48,6 +47,10 @@ public:
  * @brief 이름으로 카운터를 조회합니다.
  * @param name 메트릭 이름
  * @return 구현체가 없으면 no-op 카운터를 반환
+ *
+ * 계약:
+ * - 동일 name 요청은 동일 객체 레퍼런스를 반환합니다.
+ * - 백엔드 미연결 상태에서도 호출은 예외 없이 동작합니다.
  */
 Counter& get_counter(const std::string& name);
 
@@ -55,6 +58,10 @@ Counter& get_counter(const std::string& name);
  * @brief 이름으로 게이지를 조회합니다.
  * @param name 메트릭 이름
  * @return 구현체가 없으면 no-op 게이지를 반환
+ *
+ * 계약:
+ * - 동일 name 요청은 동일 객체 레퍼런스를 반환합니다.
+ * - 백엔드 미연결 상태에서도 호출은 예외 없이 동작합니다.
  */
 Gauge& get_gauge(const std::string& name);
 
@@ -62,6 +69,10 @@ Gauge& get_gauge(const std::string& name);
  * @brief 이름으로 히스토그램을 조회합니다.
  * @param name 메트릭 이름
  * @return 구현체가 없으면 no-op 히스토그램을 반환
+ *
+ * 계약:
+ * - 동일 name 요청은 동일 객체 레퍼런스를 반환합니다.
+ * - 백엔드 미연결 상태에서도 호출은 예외 없이 동작합니다.
  */
 Histogram& get_histogram(const std::string& name);
 

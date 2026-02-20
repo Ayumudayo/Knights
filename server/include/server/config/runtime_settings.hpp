@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <string_view>
 
-namespace server::core::config {
+namespace server::config {
 
 enum class RuntimeSettingKey {
     kPresenceTtlSec,
@@ -34,4 +34,4 @@ inline constexpr const RuntimeSettingRule* find_runtime_setting_rule(std::string
     return nullptr;
 }
 
-} // namespace server::core::config
+} // namespace server::config

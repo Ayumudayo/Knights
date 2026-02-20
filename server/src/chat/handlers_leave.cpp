@@ -9,8 +9,6 @@
 #include "server/storage/redis/client.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/storage/connection_pool.hpp"
-#include "server/core/storage/unit_of_work.hpp"
-#include "server/core/storage/repositories.hpp"
 
 using namespace server::core;
 namespace proto = server::core::protocol;

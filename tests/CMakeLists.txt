@@ -108,6 +108,30 @@ target_link_libraries(core_public_api_headers_compile PRIVATE
 )
 add_test(NAME CorePublicApiHeadersCompile COMMAND core_public_api_headers_compile)
 
+add_executable(core_public_api_stable_header_scenarios
+    core/public_api_stable_header_scenarios.cpp
+)
+target_include_directories(core_public_api_stable_header_scenarios PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+)
+target_link_libraries(core_public_api_stable_header_scenarios PRIVATE
+    server_core
+)
+add_test(NAME CorePublicApiStableHeaderScenarios COMMAND core_public_api_stable_header_scenarios)
+
+if (Python3_Interpreter_FOUND)
+  add_test(
+    NAME CoreApiBoundaryFixtures
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_core_api_contracts.py" --check-boundary-fixtures
+  )
+  add_test(
+    NAME CoreApiStableGovernanceFixtures
+    COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_core_api_contracts.py" --check-stable-governance-fixtures
+  )
+else()
+  message(WARNING "Python3 not found: CoreApiBoundaryFixtures test disabled")
+endif()
+
 add_executable(server_general_tests
     server/test_server_chat.cpp
     ${CMAKE_SOURCE_DIR}/server/src/chat/chat_service_core.cpp

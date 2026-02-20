@@ -16,10 +16,10 @@
 #include "server/core/concurrent/task_scheduler.hpp"
 #include "server/core/concurrent/thread_manager.hpp"
 #include "server/core/config/options.hpp"
-#include "server/core/metrics/build_info.hpp"
-#include "server/core/metrics/metrics.hpp"
-#include "server/core/metrics/http_server.hpp"
 #include "server/core/memory/memory_pool.hpp"
+#include "server/core/metrics/build_info.hpp"
+#include "server/core/metrics/http_server.hpp"
+#include "server/core/metrics/metrics.hpp"
 #include "server/core/net/connection.hpp"
 #include "server/core/net/dispatcher.hpp"
 #include "server/core/net/hive.hpp"
@@ -34,18 +34,26 @@
 #include "server/core/util/paths.hpp"
 #include "server/core/util/service_registry.hpp"
 
-int main() {
+namespace {
+
+void scenario_api_and_app() {
     (void)server::core::api::version_string();
 
-    boost::asio::io_context io;
-    server::core::net::Hive hive(io);
-    auto hive_ptr = std::make_shared<server::core::net::Hive>(io);
-
-    server::core::app::AppHost host{"core_public_api_smoke"};
-    host.declare_dependency("sample");
-    host.set_dependency_ok("sample", true);
+    server::core::app::AppHost host{"stable_header_scenarios"};
+    host.declare_dependency("dep");
+    host.set_dependency_ok("dep", true);
     host.set_ready(true);
     host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kRunning);
+
+    server::core::app::install_termination_signal_handlers();
+    (void)server::core::app::termination_signal_received();
+    (void)host.lifecycle_metrics_text();
+    (void)host.dependency_metrics_text();
+}
+
+void scenario_concurrency_and_config() {
+    server::core::SessionOptions options{};
+    options.read_timeout_ms = 250;
 
     server::core::concurrent::TaskScheduler scheduler;
     scheduler.post([] {});
@@ -56,63 +64,75 @@ int main() {
     workers.Start(1);
     (void)queue.TryPush([] {});
     workers.Stop();
+}
 
-    server::core::app::install_termination_signal_handlers();
-    (void)server::core::app::termination_signal_received();
-
-    server::core::SessionOptions options{};
-    options.read_timeout_ms = 1000;
-
+void scenario_metrics_and_runtime() {
     server::core::metrics::MetricsHttpServer metrics_server(0, [] { return std::string{}; });
 
-    server::core::metrics::Counter& counter = server::core::metrics::get_counter("public_api_smoke_counter");
+    server::core::metrics::Counter& counter = server::core::metrics::get_counter("stable_header_counter");
     counter.inc();
 
-    server::core::BufferManager buffers(256, 2);
-    auto pooled = buffers.Acquire();
-    (void)pooled;
+    server::core::metrics::Gauge& gauge = server::core::metrics::get_gauge("stable_header_gauge");
+    gauge.set(1.0);
 
-    server::core::Dispatcher dispatcher;
-    dispatcher.register_handler(server::core::protocol::MSG_PING,
-                                [](server::core::Session&, std::span<const std::uint8_t>) {});
+    std::ostringstream metrics;
+    server::core::metrics::append_build_info(metrics);
+    (void)server::core::runtime_metrics::snapshot();
+}
 
+void scenario_protocol_and_security() {
     server::core::protocol::PacketHeader header{};
     std::array<std::uint8_t, server::core::protocol::k_header_bytes> encoded{};
     server::core::protocol::encode_header(header, encoded.data());
     server::core::protocol::decode_header(encoded.data(), header);
 
+    (void)server::core::protocol::MSG_PING;
     (void)server::core::protocol::FLAG_COMPRESSED;
     (void)server::core::protocol::CAP_COMPRESS_SUPP;
     (void)server::core::protocol::errc::UNKNOWN_MSG_ID;
-    (void)server::core::build_info::git_hash();
-    (void)server::core::runtime_metrics::snapshot();
-    (void)server::core::compression::Compressor::get_max_compressed_size(32);
+
+    (void)server::core::compression::Compressor::get_max_compressed_size(64);
     (void)server::core::security::Cipher::KEY_SIZE;
+    (void)server::core::build_info::git_hash();
+}
 
-    server::core::log::set_level(server::core::log::level::info);
-    (void)server::core::util::paths::executable_dir();
+void scenario_net_and_utils() {
+    boost::asio::io_context io;
+    auto hive = std::make_shared<server::core::net::Hive>(io);
+    auto connection = std::make_shared<server::core::net::Connection>(hive);
 
-    struct PublicSmokeService {
-        int value{7};
-    };
-    auto service = std::make_shared<PublicSmokeService>();
-    server::core::util::services::set(service);
-    auto service_read = server::core::util::services::get<PublicSmokeService>();
-    (void)service_read;
-    server::core::util::services::clear();
+    server::core::Dispatcher dispatcher;
+    dispatcher.register_handler(server::core::protocol::MSG_PING,
+                                [](server::core::Session&, std::span<const std::uint8_t>) {});
 
-    std::ostringstream metrics;
-    server::core::metrics::append_build_info(metrics);
-
-    auto connection = std::make_shared<server::core::net::Connection>(hive_ptr);
     server::core::net::Listener listener(
-        hive_ptr,
+        hive,
         {boost::asio::ip::address_v4::loopback(), 0},
         [connection](std::shared_ptr<server::core::net::Hive>) { return connection; });
     (void)listener.local_endpoint();
 
-    (void)host.dependency_metrics_text();
-    (void)host.lifecycle_metrics_text();
+    server::core::BufferManager buffers(128, 2);
+    (void)buffers.Acquire();
 
+    server::core::log::set_level(server::core::log::level::info);
+    (void)server::core::util::paths::executable_dir();
+
+    struct StableScenarioService {
+        int value{42};
+    };
+    auto service = std::make_shared<StableScenarioService>();
+    server::core::util::services::set(service);
+    (void)server::core::util::services::get<StableScenarioService>();
+    server::core::util::services::clear();
+}
+
+}  // namespace
+
+int main() {
+    scenario_api_and_app();
+    scenario_concurrency_and_config();
+    scenario_metrics_and_runtime();
+    scenario_protocol_and_security();
+    scenario_net_and_utils();
     return 0;
 }

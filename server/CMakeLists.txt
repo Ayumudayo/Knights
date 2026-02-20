@@ -2,6 +2,7 @@ add_executable(server_app
     src/main.cpp
     src/app/bootstrap.cpp
     src/app/config.cpp
+    src/app/core_internal_adapter.cpp
     src/app/metrics_server.cpp
     src/app/router.cpp
     src/chat/chat_service_core.cpp

@@ -1,8 +1,8 @@
 #include "server/core/net/session.hpp"
+#include "server/core/net/connection_runtime_state.hpp"
 #include "server/core/net/dispatcher.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/config/options.hpp"
-#include "server/core/state/shared_state.hpp"
 #include "server/core/protocol/protocol_flags.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/memory/memory_pool.hpp"
@@ -28,7 +28,7 @@ Session::Session(asio::ip::tcp::socket socket,
                  Dispatcher& dispatcher,
                  BufferManager& buffer_manager,
                  std::shared_ptr<const SessionOptions> options,
-                 std::shared_ptr<SharedState> state)
+                 std::shared_ptr<net::ConnectionRuntimeState> state)
     : socket_(std::move(socket))
     , strand_(socket_.get_executor())
     , dispatcher_(dispatcher)

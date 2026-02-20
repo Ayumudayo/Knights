@@ -6,15 +6,15 @@
 |---|---|
 | `server/core/net/hive.hpp` | `[Stable]` |
 | `server/core/net/dispatcher.hpp` | `[Stable]` |
-| `server/core/net/listener.hpp` | `[Transitional]` |
-| `server/core/net/connection.hpp` | `[Transitional]` |
-| `server/core/net/acceptor.hpp` | `[Transitional]` |
-| `server/core/net/session.hpp` | `[Transitional]` |
+| `server/core/net/listener.hpp` | `[Stable]` |
+| `server/core/net/connection.hpp` | `[Stable]` |
 
 ## Core Contracts
 - `Hive` owns run/stop lifecycle for shared `io_context` usage.
 - `Dispatcher` maps `msg_id` to handlers and does not own business logic.
-- `Listener/Connection/Acceptor/Session` are transport/session primitives; treat them as transitional contracts until promoted.
+- `Listener` owns the accept loop lifecycle and injects transport creation through `connection_factory`.
+- `Connection` owns async read/write loops with FIFO write ordering and bounded send-queue backpressure.
+- Server-specific packet session implementation (`acceptor`/`session`) is internal and excluded from public API usage.
 
 ## Ownership and Lifetime Rules
 - Use `std::shared_ptr` ownership for async transport objects.

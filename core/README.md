@@ -32,9 +32,8 @@ core/
 │  ├─ config/      # options
 │  ├─ memory/      # BufferManager, MemoryPool
 │  ├─ metrics/     # Runtime metrics (Counter/Gauge)
-│  ├─ net/         # Hive, SessionListener/TransportListener, Session/TransportConnection, Dispatcher
+│  ├─ net/         # Hive, SessionListener/TransportListener, Session/TransportConnection, Dispatcher, ConnectionRuntimeState
 │  ├─ protocol/    # Packet definition, codec
-│  ├─ state/       # SharedState (global server state)
 │  ├─ storage/     # DB/Redis interfaces
 │  └─ util/        # Log, CrashHandler, ServiceRegistry
 └─ src/            # 구현체 (.cpp)
@@ -65,25 +64,23 @@ cmake --build --preset windows-debug --target server_core
 서버를 구동하는 기본적인 흐름은 다음과 같습니다. (의사 코드)
 
 ```cpp
-#include "server/core/net/acceptor.hpp"
-#include "server/core/net/dispatcher.hpp"
+#include "server/core/net/connection.hpp"
+#include "server/core/net/hive.hpp"
+#include "server/core/net/listener.hpp"
 
 int main() {
-    // 1. 설정 및 의존성 초기화
-    auto options = std::make_shared<SessionOptions>();
-    auto shared_state = std::make_shared<SharedState>();
-    BufferManager buffer_manager;
-    Dispatcher dispatcher;
-
     boost::asio::io_context io;
-    boost::asio::ip::tcp::endpoint ep(boost::asio::ip::tcp::v4(), 6000);
+    auto hive = std::make_shared<server::core::net::Hive>(io);
+    auto endpoint = boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 6000);
 
-    // 2. server_app 경로: SessionListener가 Session을 생성해 Dispatcher로 연결
-    auto acceptor = std::make_shared<server::core::net::SessionListener>(
-        io, ep, dispatcher, buffer_manager, options, shared_state);
-    acceptor->start();
+    auto listener = std::make_shared<server::core::net::Listener>(
+        hive,
+        endpoint,
+        [](std::shared_ptr<server::core::net::Hive> h) {
+            return std::make_shared<server::core::net::Connection>(std::move(h));
+        });
+    listener->start();
 
-    // 3. 이벤트 루프 실행
     io.run();
 }
 ```

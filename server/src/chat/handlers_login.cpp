@@ -6,7 +6,6 @@
 #include "wire.pb.h"
 // 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
-#include "server/core/storage/repositories.hpp"
 #include <algorithm>
 #include <cstdlib>
 #include <optional>

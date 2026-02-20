@@ -21,17 +21,14 @@
 #include "server/app/bootstrap.hpp"
 #include "server/app/router.hpp"
 #include "server/app/config.hpp"
+#include "server/app/core_internal_adapter.hpp"
 #include "server/app/metrics_server.hpp"
 
-#include "server/core/net/acceptor.hpp"
 #include "server/core/net/dispatcher.hpp"
-#include "server/core/net/session.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/service_registry.hpp"
-#include "server/core/util/crash_handler.hpp"
 #include "server/core/app/app_host.hpp"
 #include "server/core/config/options.hpp"
-#include "server/core/state/shared_state.hpp"
 #include "server/core/concurrent/job_queue.hpp"
 #include "server/core/concurrent/thread_manager.hpp"
 #include "server/core/concurrent/task_scheduler.hpp"
@@ -40,20 +37,14 @@
 #include "server/chat/chat_service.hpp"
 // Protobuf (수신 payload ts_ms 파싱용)
 #include "wire.pb.h"
-// 저장소 DI: Postgres 커넥션 풀 팩토리
-#include "server/storage/postgres/connection_pool.hpp"
-#include "server/core/storage/connection_pool.hpp"
-#include "server/core/storage/db_worker_pool.hpp"
 // 캐시/팬아웃: Redis 클라이언트(스켈레톤)
 #include "server/storage/redis/client.hpp"
 #include "server/state/instance_registry.hpp"
 
 namespace asio = boost::asio;
-using tcp = asio::ip::tcp;
 namespace core = server::core;
 namespace corelog = server::core::log;
 namespace services = server::core::util::services;
-namespace crash = server::core::util::crash;
 
 namespace server::app {
 
@@ -165,7 +156,7 @@ int run_server(int argc, char** argv) {
         std::setlocale(LC_ALL, ".UTF-8");
 #endif
         // 크래시 핸들러 설치
-        crash::install();
+        core_internal::install_crash_handler();
 
         // 2. 설정 로드
         ServerConfig config;
@@ -200,7 +191,7 @@ int run_server(int argc, char** argv) {
         auto options = std::make_shared<core::SessionOptions>();
         options->read_timeout_ms = 60'000;
         options->heartbeat_interval_ms = 10'000;
-        auto state = std::make_shared<core::SharedState>();
+        auto state = core_internal::make_connection_runtime_state();
 
         // ServiceRegistry 등록
         const auto make_ref = [](auto& instance) {
@@ -213,7 +204,7 @@ int run_server(int argc, char** argv) {
         services::set(make_ref(buffer_manager));
         services::set(make_ref(dispatcher));
         services::set(options);
-        services::set(state);
+        core_internal::register_connection_runtime_state_service(state);
         services::set(make_ref(scheduler));
         services::set(make_ref(app_host));
 
@@ -240,15 +231,14 @@ int run_server(int argc, char** argv) {
         std::shared_ptr<core::storage::IConnectionPool> db_pool;
         if (!config.db_uri.empty()) {
             corelog::info("Detected DB_URI (redacted)");
-            core::storage::PoolOptions popts{};
-            popts.min_size = config.db_pool_min;
-            popts.max_size = config.db_pool_max;
-            popts.connect_timeout_ms = config.db_conn_timeout_ms;
-            popts.query_timeout_ms = config.db_query_timeout_ms;
-            popts.prepare_statements = config.db_prepare_statements;
-
-            db_pool = server::storage::postgres::make_connection_pool(config.db_uri.c_str(), popts);
-            if (!db_pool || !db_pool->health_check()) {
+            db_pool = core_internal::make_postgres_connection_pool(
+                config.db_uri,
+                config.db_pool_min,
+                config.db_pool_max,
+                config.db_conn_timeout_ms,
+                config.db_query_timeout_ms,
+                config.db_prepare_statements);
+            if (!core_internal::connection_pool_health_check(db_pool)) {
                 corelog::error("DB health check failed; please verify DB_URI.");
                 app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
                 return 2;
@@ -261,31 +251,25 @@ int run_server(int argc, char** argv) {
         }
 
         if (db_pool) {
-            services::set(db_pool);
+            core_internal::register_connection_pool_service(db_pool);
             std::size_t log_workers = config.db_worker_threads;
             if (log_workers == 0) {
                 log_workers = std::thread::hardware_concurrency();
                 if (log_workers == 0) log_workers = 1;
             }
-            db_workers = std::make_shared<core::storage::DbWorkerPool>(db_pool, config.db_job_queue_max);
-            db_workers->start(config.db_worker_threads);
-            services::set(db_workers);
+            db_workers = core_internal::make_db_worker_pool(db_pool, config.db_job_queue_max);
+            core_internal::start_db_worker_pool(db_workers, config.db_worker_threads);
+            core_internal::register_db_worker_pool_service(db_workers);
             corelog::info(std::string("DB worker pool started: ") + std::to_string(log_workers) + " threads.");
 
             // 주기적인 DB 헬스 체크
             scheduler.schedule_every([job_queue_ptr, db_pool, &app_host]() {
                 job_queue_ptr->Push([db_pool, &app_host]() {
-                    try {
-                        const bool ok = db_pool->health_check();
-                        if (!ok) {
-                            corelog::warn("Periodic DB health check failed");
-                        }
-                        app_host.set_dependency_ok("db", ok);
-                    } catch (const std::exception& ex) {
-                        corelog::error(std::string("Periodic DB health check exception: ") + ex.what());
-                    } catch (...) {
-                        corelog::error("Periodic DB health check unknown exception");
+                    const bool ok = core_internal::connection_pool_health_check(db_pool);
+                    if (!ok) {
+                        corelog::warn("Periodic DB health check failed");
                     }
+                    app_host.set_dependency_ok("db", ok);
                 });
             }, std::chrono::seconds(60));
         }
@@ -370,7 +354,7 @@ int run_server(int argc, char** argv) {
                 scheduler.schedule_every([registry_backend, registry_record, state, &app_host]() mutable {
                     registry_record.last_heartbeat_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::steady_clock::now().time_since_epoch()).count());
-                    registry_record.active_sessions = state->connection_count.load(std::memory_order_relaxed);
+                    registry_record.active_sessions = core_internal::connection_count(state);
                     registry_record.ready = app_host.ready();
                     if (!registry_backend->upsert(registry_record)) {
                         corelog::warn("Server registry heartbeat upsert failed");
@@ -385,10 +369,15 @@ int run_server(int argc, char** argv) {
         register_routes(dispatcher, chat);
 
         // 7. TCP 리스너 시작
-        tcp::endpoint ep(tcp::v4(), config.port);
-        auto acceptor = std::make_shared<core::net::SessionListener>(io, ep, dispatcher, buffer_manager, options, state,
-            [&chat](std::shared_ptr<core::net::Session> sess){
-                sess->set_on_close([&chat](std::shared_ptr<core::net::Session> s){ chat.on_session_close(s); });
+        auto acceptor = core_internal::make_session_listener_handle(
+            io,
+            config.port,
+            dispatcher,
+            buffer_manager,
+            options,
+            state,
+            [&chat](std::shared_ptr<server::core::Session> session) {
+                chat.on_session_close(session);
             });
         services::set(acceptor);
         acceptor->start();
@@ -420,7 +409,7 @@ int run_server(int argc, char** argv) {
             registry_record.last_heartbeat_ms = static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::milliseconds>(
                     std::chrono::steady_clock::now().time_since_epoch()).count());
-            registry_record.active_sessions = state->connection_count.load(std::memory_order_relaxed);
+            registry_record.active_sessions = core_internal::connection_count(state);
             registry_record.ready = app_host.ready();
             if (!registry_backend->upsert(registry_record)) {
                 corelog::warn("Server registry ready-state upsert failed");
@@ -586,9 +575,7 @@ int run_server(int argc, char** argv) {
         app_host.add_shutdown_step("stop io_context", [&]() { io.stop(); });
         app_host.add_shutdown_step("stop acceptor", [&]() { acceptor->stop(); });
         app_host.add_shutdown_step("stop db worker pool", [&]() {
-            if (db_workers) {
-                try { db_workers->stop(); } catch (...) {}
-            }
+            core_internal::stop_db_worker_pool(db_workers);
         });
         app_host.add_shutdown_step("cancel scheduler timer", [&]() {
             try {
@@ -626,7 +613,7 @@ int run_server(int argc, char** argv) {
         if (metrics_server) metrics_server->stop();
         try { scheduler_timer->cancel(); } catch (...) {}
         scheduler.shutdown();
-        if (db_workers) db_workers->stop();
+        core_internal::stop_db_worker_pool(db_workers);
         services::clear();
 
         return 0;

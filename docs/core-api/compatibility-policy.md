@@ -31,3 +31,12 @@
 - Pass API smoke consumer build and CI checks.
 - Update `core/include/server/core/api/version.hpp`.
 - Update `docs/core-api/compatibility-matrix.json`.
+
+## Package Version Coupling
+- Package version source of truth is `core/include/server/core/api/version.hpp` (`version_string()`).
+- `core/CMakeLists.txt` derives `SERVER_CORE_PACKAGE_VERSION` from that header and emits `server_coreConfigVersion.cmake`.
+- `server_coreConfigVersion.cmake` uses `SameMajorVersion`; major mismatch is rejected at `find_package(server_core CONFIG)` time.
+- Version bump guidance:
+  - Breaking `Stable` API change: bump major.
+  - Backward-compatible `Stable` API addition: bump minor.
+  - Docs-only or internal-only change: bump patch only when shipping package update is required.

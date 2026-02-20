@@ -20,7 +20,9 @@ namespace asio = boost::asio;
 class Dispatcher;
 class BufferManager;
 struct SessionOptions;
-struct SharedState;
+namespace net {
+struct ConnectionRuntimeState;
+}
 
 using PacketHeader = server::core::protocol::PacketHeader;
 
@@ -39,13 +41,13 @@ public:
      * @param dispatcher opcode 라우팅 디스패처
      * @param buffer_manager 송수신 버퍼 풀 관리자
      * @param options 세션 제어 옵션
-     * @param state 서버 전역 공유 상태
+     * @param state 연결 수/세션 ID를 추적하는 런타임 상태
      */
     Session(asio::ip::tcp::socket socket,
             Dispatcher& dispatcher,
             BufferManager& buffer_manager,
             std::shared_ptr<const SessionOptions> options,
-            std::shared_ptr<SharedState> state);
+            std::shared_ptr<net::ConnectionRuntimeState> state);
 
     /** @brief 세션 읽기/타이머 루프를 시작합니다. */
     void start();
@@ -118,7 +120,7 @@ private:
     std::queue<std::pair<BufferManager::PooledBuffer, size_t>> send_queue_;
     std::size_t queued_bytes_{0};
     std::shared_ptr<const SessionOptions> options_;
-    std::shared_ptr<SharedState> state_;
+    std::shared_ptr<net::ConnectionRuntimeState> state_;
     std::atomic<bool> stopped_{false};
     boost::asio::steady_timer read_timer_{socket_.get_executor()};
     boost::asio::steady_timer write_timer_{socket_.get_executor()};

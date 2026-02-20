@@ -4,8 +4,8 @@
 #include <server/core/memory/memory_pool.hpp>
 #include <server/core/net/dispatcher.hpp>
 #include <server/core/net/hive.hpp>
+#include <server/core/net/connection_runtime_state.hpp>
 #include <server/core/net/session.hpp>
-#include <server/core/state/shared_state.hpp>
 
 #include <memory>
 #include <vector>
@@ -21,7 +21,7 @@ TEST(DispatcherTest, RegisterAndDispatch) {
     Dispatcher dispatcher;
     BufferManager buffer_manager(2048, 8);
     auto options = std::make_shared<SessionOptions>();
-    auto state = std::make_shared<SharedState>();
+    auto state = std::make_shared<server::core::net::ConnectionRuntimeState>();
 
     Session session(
         boost::asio::ip::tcp::socket(io),

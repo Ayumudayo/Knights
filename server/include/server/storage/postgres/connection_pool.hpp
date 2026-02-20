@@ -2,7 +2,11 @@
 
 #include <memory>
 #include <string>
-#include "server/core/storage/connection_pool.hpp"
+
+namespace server::core::storage {
+struct PoolOptions;
+class IConnectionPool;
+}
 
 namespace server::storage::postgres {
 

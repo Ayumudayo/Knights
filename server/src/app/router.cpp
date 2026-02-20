@@ -1,7 +1,6 @@
 #include "server/app/router.hpp"
 
 #include "server/core/net/dispatcher.hpp"
-#include "server/core/net/session.hpp"
 #include "server/core/protocol/system_opcodes.hpp"
 #include "server/protocol/game_opcodes.hpp"
 #include "server/chat/chat_service.hpp"
@@ -19,7 +18,7 @@ namespace server::app {
 // ChatService가 대부분의 메시지를 처리하므로 dispatcher는 단순한 라우팅 테이블 역할을 한다.
 // 각 메시지 ID(opcode)에 대해 어떤 함수가 호출되어야 하는지 정의합니다.
 void register_routes(server::core::Dispatcher& dispatcher, server::app::chat::ChatService& chat) {
-    using NetSession = server::core::net::Session;
+    using NetSession = server::app::chat::ChatService::NetSession;
     using server::core::protocol::MSG_PING;
     using server::core::protocol::MSG_PONG;
     using server::protocol::MSG_LOGIN_REQ;

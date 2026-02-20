@@ -12,7 +12,9 @@ class Session;
 class Dispatcher;
 class BufferManager;
 struct SessionOptions;
-struct SharedState;
+namespace net {
+struct ConnectionRuntimeState;
+}
 
 /**
  * @brief 신규 TCP 연결을 수락해 `Session` 객체로 넘기는 수락기입니다.
@@ -32,7 +34,7 @@ public:
      * @param dispatcher 패킷 디스패처
      * @param buffer_manager 버퍼 풀 관리자
      * @param options 세션 옵션
-     * @param state 전역 공유 상태
+     * @param state 연결 수/세션 ID를 추적하는 런타임 상태
      * @param on_new_session 신규 세션 콜백
      */
     Acceptor(asio::io_context& io,
@@ -40,7 +42,7 @@ public:
              Dispatcher& dispatcher,
              BufferManager& buffer_manager,
              std::shared_ptr<const SessionOptions> options,
-             std::shared_ptr<SharedState> state,
+             std::shared_ptr<net::ConnectionRuntimeState> state,
              new_session_cb_t on_new_session = {});
 
     /** @brief accept 루프를 시작합니다. */
@@ -59,7 +61,7 @@ private:
     Dispatcher& dispatcher_;
     BufferManager& buffer_manager_;
     std::shared_ptr<const SessionOptions> options_;
-    std::shared_ptr<SharedState> state_;
+    std::shared_ptr<net::ConnectionRuntimeState> state_;
     new_session_cb_t on_new_session_{};
 };
 

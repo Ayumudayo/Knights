@@ -1,9 +1,9 @@
 #include "server/core/net/acceptor.hpp"
 #include "server/core/net/session.hpp"
+#include "server/core/net/connection_runtime_state.hpp"
 #include "server/core/net/dispatcher.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/config/options.hpp"
-#include "server/core/state/shared_state.hpp"
 #include "server/core/memory/memory_pool.hpp"
 #include "server/core/runtime_metrics.hpp"
 
@@ -24,7 +24,7 @@ Acceptor::Acceptor(asio::io_context& io,
                    Dispatcher& dispatcher,
                    BufferManager& buffer_manager,
                    std::shared_ptr<const SessionOptions> options,
-                   std::shared_ptr<SharedState> state,
+                   std::shared_ptr<net::ConnectionRuntimeState> state,
                    new_session_cb_t on_new_session)
     : io_(io), 
       acceptor_(io), 

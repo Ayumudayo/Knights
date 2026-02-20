@@ -68,6 +68,20 @@
       "description": "Windows configuration using Visual Studio 2022"
     },
     {
+      "name": "windows-core-engine",
+      "inherits": "windows-base",
+      "displayName": "Windows Core Engine (VS2022)",
+      "description": "Standalone server_core-only profile (no server/gateway/tools/tests)",
+      "binaryDir": "${sourceDir}/build-windows-core-engine",
+      "cacheVariables": {
+        "BUILD_SERVER_STACK": "OFF",
+        "BUILD_GATEWAY_APP": "OFF",
+        "BUILD_SERVER_TESTS": "OFF",
+        "BUILD_WRITE_BEHIND_TOOLS": "OFF",
+        "BUILD_ADMIN_APP": "OFF"
+      }
+    },
+    {
       "name": "windows-ninja",
       "inherits": "windows-ninja-base",
       "displayName": "Windows (Ninja)",
@@ -125,6 +139,12 @@
       "configurePreset": "windows",
       "configuration": "RelWithDebInfo",
       "displayName": "Windows Release"
+    },
+    {
+      "name": "windows-core-engine-debug",
+      "configurePreset": "windows-core-engine",
+      "configuration": "Debug",
+      "displayName": "Windows Core Engine Debug"
     },
     {
       "name": "windows-ninja-debug",

@@ -1,6 +1,6 @@
 #include "server/chat/chat_service.hpp"
 #include "server/protocol/game_opcodes.hpp"
-#include "server/core/config/runtime_settings.hpp"
+#include "server/config/runtime_settings.hpp"
 #include "server/core/protocol/packet.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/util/log.hpp"
@@ -11,7 +11,6 @@
 #include "wire.pb.h"
 // 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
-#include "server/core/storage/repositories.hpp"
 #include "server/storage/redis/client.hpp"
 
 #include <algorithm>
@@ -1172,14 +1171,14 @@ void ChatService::admin_apply_runtime_setting(const std::string& key, const std:
             return;
         }
 
-        const auto* setting_rule = server::core::config::find_runtime_setting_rule(normalized_key);
+        const auto* setting_rule = server::config::find_runtime_setting_rule(normalized_key);
         if (setting_rule == nullptr) {
             corelog::warn("admin setting rejected: key=" + normalized_key + " reason=unsupported_key");
             return;
         }
 
         std::uint32_t min_allowed = setting_rule->min_value;
-        if (setting_rule->key_id == server::core::config::RuntimeSettingKey::kRoomRecentMaxlen) {
+        if (setting_rule->key_id == server::config::RuntimeSettingKey::kRoomRecentMaxlen) {
             min_allowed = std::max(min_allowed, static_cast<std::uint32_t>(history_.recent_limit));
         }
 
@@ -1189,16 +1188,16 @@ void ChatService::admin_apply_runtime_setting(const std::string& key, const std:
         }
 
         switch (setting_rule->key_id) {
-        case server::core::config::RuntimeSettingKey::kPresenceTtlSec:
+        case server::config::RuntimeSettingKey::kPresenceTtlSec:
             presence_.ttl = *parsed;
             break;
-        case server::core::config::RuntimeSettingKey::kRecentHistoryLimit:
+        case server::config::RuntimeSettingKey::kRecentHistoryLimit:
             history_.recent_limit = static_cast<std::size_t>(*parsed);
             if (history_.max_list_len < history_.recent_limit) {
                 history_.max_list_len = history_.recent_limit;
             }
             break;
-        case server::core::config::RuntimeSettingKey::kRoomRecentMaxlen:
+        case server::config::RuntimeSettingKey::kRoomRecentMaxlen:
             history_.max_list_len = static_cast<std::size_t>(*parsed);
             break;
         }

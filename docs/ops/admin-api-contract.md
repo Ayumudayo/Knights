@@ -313,7 +313,7 @@ Phase 2 구현 스펙(현재):
 
 구현 메모:
 
-- key/range 규칙은 `core/include/server/core/config/runtime_settings.hpp`를 single-source로 사용한다.
+- key/range 규칙은 `server/include/server/config/runtime_settings.hpp`를 single-source로 사용한다.
 - `admin_app` 입력 검증과 `server_app` 적용 검증이 동일 규칙을 공유한다.
 
 동작:

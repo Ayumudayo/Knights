@@ -21,6 +21,10 @@ JobQueue::JobQueue(std::size_t max_size)
 }
 
 void JobQueue::Push(Job job) {
+    if (!job) {
+        return;
+    }
+
     {
         std::unique_lock<std::mutex> lock(mutex_);
         if (stopping_) {
@@ -46,6 +50,10 @@ void JobQueue::Push(Job job) {
 }
 
 bool JobQueue::TryPush(Job job) {
+    if (!job) {
+        return false;
+    }
+
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (stopping_) {

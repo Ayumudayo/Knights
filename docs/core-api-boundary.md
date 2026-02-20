@@ -22,40 +22,39 @@
 |---|---|---|
 | `server/core/api/version.hpp` | Stable | Public API version signal; stable-header changes require this version to be updated. |
 | `server/core/app/app_host.hpp` | Stable | Runtime host contract used across server/gateway/tools. |
-| `server/core/app/termination_signals.hpp` | Transitional | Process-global signal flag API; may move behind `AppHost` only. |
+| `server/core/app/termination_signals.hpp` | Stable | Process-global termination polling contract for non-Asio loops and shared shutdown signaling. |
 | `server/core/build_info.hpp` | Stable | Build metadata contract used by all binaries. |
-| `server/core/compression/compressor.hpp` | Transitional | Algorithm and error contract may evolve. |
-| `server/core/concurrent/job_queue.hpp` | Transitional | Legacy naming/namespace style; queue semantics need formal contract text. |
+| `server/core/compression/compressor.hpp` | Stable | LZ4 compress/decompress contract with explicit error signaling on malformed or invalid input. |
+| `server/core/concurrent/job_queue.hpp` | Stable | Bounded/unbounded FIFO queue contract with explicit stop and backpressure behavior. |
 | `server/core/concurrent/locked_queue.hpp` | Internal | Low-level queue primitive intended for internal worker plumbing. |
 | `server/core/concurrent/task_scheduler.hpp` | Stable | Clear scheduling contract and cross-module usage. |
-| `server/core/concurrent/thread_manager.hpp` | Transitional | Basic worker wrapper; lifecycle API may be consolidated later. |
+| `server/core/concurrent/thread_manager.hpp` | Stable | Fixed worker-pool consumer for `JobQueue` with idempotent stop and guarded start semantics. |
 | `server/core/config/options.hpp` | Stable | Session runtime options consumed by networking path. |
-| `server/core/config/runtime_settings.hpp` | Internal | Chat-domain setting key registry, not general core contract. |
-| `server/core/memory/memory_pool.hpp` | Transitional | Raw-pointer/legacy method style; API cleanup pending. |
+| `server/core/memory/memory_pool.hpp` | Stable | Fixed-block allocator + RAII buffer contract with bounded failure (`Acquire()==nullptr`) semantics. |
 | `server/core/metrics/build_info.hpp` | Stable | Shared Prometheus build-info helper. |
 | `server/core/metrics/http_server.hpp` | Stable | Shared admin/metrics HTTP surface. |
-| `server/core/metrics/metrics.hpp` | Transitional | Generic metrics abstraction exists but backend contract is minimal. |
-| `server/core/net/acceptor.hpp` | Transitional | Tightly coupled to `Session`; naming alignment still in progress. |
-| `server/core/net/connection.hpp` | Transitional | Extensible transport base, but callback contract needs hardening. |
+| `server/core/metrics/metrics.hpp` | Stable | Named metric accessor contract with no-op fallback for backend-optional operation. |
+| `server/core/net/acceptor.hpp` | Internal | Server-specific accept loop coupled to `SessionOptions`/`ConnectionRuntimeState`; not part of stable transport contract. |
+| `server/core/net/connection.hpp` | Stable | Extensible transport base with FIFO send-queue ordering, bounded queue backpressure, and idempotent stop lifecycle. |
 | `server/core/net/dispatcher.hpp` | Stable | Core msg_id routing contract. |
 | `server/core/net/hive.hpp` | Stable | `io_context` lifecycle wrapper shared by transport modules. |
-| `server/core/net/listener.hpp` | Transitional | Generic listener API still evolving with connection abstractions. |
-| `server/core/net/session.hpp` | Transitional | Exposes mutable members; boundary tightening required. |
+| `server/core/net/listener.hpp` | Stable | Generic accept loop contract with injected connection factory and idempotent stop semantics. |
+| `server/core/net/connection_runtime_state.hpp` | Internal | Internal session-runtime state contract for connection-count guardrail and randomized session-id seed. |
+| `server/core/net/session.hpp` | Internal | Server packet/session implementation tied to dispatcher/options/shared runtime state. |
 | `server/core/protocol/packet.hpp` | Stable | Wire header encode/decode contract. |
 | `server/core/protocol/protocol_errors.hpp` | Stable | Shared error code constants for protocol responses. |
 | `server/core/protocol/protocol_flags.hpp` | Stable | Shared protocol flags/capability constants. |
 | `server/core/protocol/system_opcodes.hpp` | Stable | Generated opcode contract consumed by server/client paths. |
-| `server/core/runtime_metrics.hpp` | Transitional | Process-global counters; naming/ownership policy still being finalized. |
-| `server/core/security/cipher.hpp` | Transitional | Crypto API is usable but still implementation-shaped. |
-| `server/core/state/shared_state.hpp` | Internal | Session runtime state holder for server internals. |
-| `server/core/storage/connection_pool.hpp` | Transitional | Storage SPI is useful but repository contract set is still stabilizing. |
-| `server/core/storage/db_worker_pool.hpp` | Transitional | Internal async DB execution helper exposed today for reuse. |
-| `server/core/storage/repositories.hpp` | Transitional | DTO/repository interfaces are chat-domain coupled today. |
-| `server/core/storage/unit_of_work.hpp` | Transitional | Depends on repository set that is still being normalized. |
+| `server/core/runtime_metrics.hpp` | Stable | Process-wide runtime counters/snapshot contract used by server/gateway/tools observability paths. |
+| `server/core/security/cipher.hpp` | Stable | AES-256-GCM encrypt/decrypt contract with key/IV size validation and authentication failure signaling. |
+| `server/core/storage/connection_pool.hpp` | Internal | Server storage adapter contract (`IConnectionPool`) remains domain-coupled through chat repositories/UoW. |
+| `server/core/storage/db_worker_pool.hpp` | Internal | Async DB execution helper is server-internal plumbing over internal storage contracts. |
+| `server/core/storage/repositories.hpp` | Internal | Repository DTO/interfaces are chat-domain specific and excluded from stable engine API. |
+| `server/core/storage/unit_of_work.hpp` | Internal | Transaction boundary depends on internal, chat-coupled repository interfaces. |
 | `server/core/util/crash_handler.hpp` | Internal | Process-level crash hook intended for app entrypoints. |
 | `server/core/util/log.hpp` | Stable | Common logging contract used by all binaries. |
 | `server/core/util/paths.hpp` | Stable | Executable path helper used by tools and services. |
-| `server/core/util/service_registry.hpp` | Transitional | Service locator contract exists but intended for constrained internal use. |
+| `server/core/util/service_registry.hpp` | Stable | Typed service registration/lookup contract used by multi-binary runtime composition. |
 
 ## Public API Naming Rules (Phase 1)
 - Public symbols should live under `server::core::<module>` and avoid global aliases.
@@ -64,6 +63,6 @@
 - Public docs/examples must not include `Internal` headers.
 
 ## Immediate Follow-up
-- Convert Transitional headers to either `Stable` (after contract hardening) or `Internal` (if app-internal).
+- Keep `Transitional` header count at zero; new exposed headers must be classified directly as `Stable` or `Internal`.
 - Add CI guard so public examples compile with `Stable` headers only.
 - Keep `docs/core-api/compatibility-matrix.json` synchronized with `Stable` header inventory and API version.

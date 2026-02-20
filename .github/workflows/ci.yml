@@ -10,7 +10,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  core-api-consumer:
+  core-api-consumer-windows:
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -27,6 +27,16 @@ jobs:
         shell: pwsh
         run: |
           python tools/check_core_api_contracts.py --check-boundary
+
+      - name: Check Core API Boundary Fixtures
+        shell: pwsh
+        run: |
+          python tools/check_core_api_contracts.py --check-boundary-fixtures
+
+      - name: Check Core Stable Governance Fixtures
+        shell: pwsh
+        run: |
+          python tools/check_core_api_contracts.py --check-stable-governance-fixtures
 
       - name: Check Core API Docs Freshness (PR)
         if: github.event_name == 'pull_request'
@@ -56,10 +66,48 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug -Target core_public_api_headers_compile
 
+      - name: Build Core Public API Stable Header Scenarios Target (Debug)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug -Target core_public_api_stable_header_scenarios
+
       - name: Run Core Public API Consumer Tests
         shell: pwsh
         run: |
-          ctest --preset windows-test -R CorePublicApi --output-on-failure
+          ctest --preset windows-test -R "CorePublicApi|CoreApiBoundaryFixtures|CoreApiStableGovernanceFixtures" --output-on-failure
+
+  core-api-consumer-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Docker Info
+        run: |
+          docker version
+          docker compose version
+
+      - name: Build Base Image (knights-base)
+        run: |
+          docker build -f Dockerfile.base -t knights-base:latest .
+
+      - name: Run Core API Contract Checks and Linux Consumer Tests
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/app" \
+            -w /app \
+            knights-base:latest \
+            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; \
+            python3 tools/check_core_api_contracts.py --check-boundary; \
+            python3 tools/check_core_api_contracts.py --check-boundary-fixtures; \
+            python3 tools/check_core_api_contracts.py --check-stable-governance-fixtures; \
+            cmake --preset linux; \
+            cmake --build --preset linux-debug --target core_public_api_smoke core_public_api_headers_compile core_public_api_stable_header_scenarios --parallel; \
+            ctest --preset linux-test -R 'CorePublicApi|CoreApiBoundaryFixtures|CoreApiStableGovernanceFixtures' --output-on-failure"
 
   windows-build-test:
     runs-on: windows-latest

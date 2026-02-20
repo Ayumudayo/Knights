@@ -36,6 +36,41 @@ int main() {
 pwsh scripts/build.ps1 -Config Debug -Target core_public_api_smoke
 ```
 
+Standalone engine profile (core-only graph):
+
+```powershell
+cmake --preset windows-core-engine
+cmake --build --preset windows-core-engine-debug --target server_core
+```
+
+## External CMake Consumer (`find_package`)
+
+`server_core` installs CMake package files and exported targets.
+
+```cmake
+find_package(server_core CONFIG REQUIRED)
+
+add_executable(app main.cpp)
+target_link_libraries(app PRIVATE server_core::server_core)
+```
+
+### Local Windows Smoke (repo context)
+
+```powershell
+pwsh scripts/build.ps1 -Config Debug -Target server_core
+cmake --install build-windows --config Debug --prefix build-windows/install-smoke
+```
+
+Consumer configure/build (dependency prefixes included):
+
+```powershell
+cmake -S build-windows/package-smoke -B build-windows/package-smoke/build --fresh `
+  -DCMAKE_PREFIX_PATH="${PWD}/build-windows/install-smoke;${PWD}/build-windows/vcpkg_installed/x64-windows"
+cmake --build build-windows/package-smoke/build --config Debug
+```
+
+If dependency discovery fails, ensure `Boost`, `OpenSSL`, and `lz4` package roots are on `CMAKE_PREFIX_PATH`.
+
 ## Notes
 - This quickstart intentionally avoids `Transitional` and `Internal` headers.
 - Public API boundary is defined in `docs/core-api-boundary.md`.
