@@ -67,10 +67,14 @@ void ChatService::on_leave(ChatService::NetSession& s, std::span<const std::uint
             // 방에서 세션 제거
             auto itroom = state_.rooms.find(room_to_leave);
             if (itroom != state_.rooms.end()) {
-                itroom->second.erase(session_sp);
                 auto it2 = state_.user.find(session_sp.get());
                 sender_name = (it2 != state_.user.end()) ? it2->second : std::string("guest");
                 if (auto it_uuid = state_.user_uuid.find(session_sp.get()); it_uuid != state_.user_uuid.end()) { user_uuid = it_uuid->second; }
+                const bool was_owner =
+                    (room_to_leave != "lobby") &&
+                    (state_.room_owners.find(room_to_leave) != state_.room_owners.end()) &&
+                    (state_.room_owners[room_to_leave] == sender_name);
+                itroom->second.erase(session_sp);
                 
                 // 퇴장 알림을 보낼 대상(방에 남은 사람들) 수집
                 auto itb = state_.rooms.find(room_to_leave);
@@ -81,8 +85,42 @@ void ChatService::on_leave(ChatService::NetSession& s, std::span<const std::uint
                     if (set.empty() && room_to_leave != std::string("lobby")) { 
                         state_.rooms.erase(itb); 
                         state_.room_passwords.erase(room_to_leave);
+                        state_.room_owners.erase(room_to_leave);
+                        state_.room_invites.erase(room_to_leave);
+                    } else if (was_owner && room_to_leave != std::string("lobby")) {
+                        std::string new_owner;
+                        for (const auto& weak : set) {
+                            if (auto candidate = weak.lock()) {
+                                auto user_it = state_.user.find(candidate.get());
+                                if (user_it != state_.user.end()) {
+                                    new_owner = user_it->second;
+                                    if (new_owner != "guest") {
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if (!new_owner.empty()) {
+                            state_.room_owners[room_to_leave] = new_owner;
+                        }
                     }
                 }
+
+                std::vector<std::shared_ptr<Session>> filtered_targets;
+                filtered_targets.reserve(targets.size());
+                for (auto& target : targets) {
+                    auto receiver_it = state_.user.find(target.get());
+                    if (receiver_it == state_.user.end()) {
+                        continue;
+                    }
+                    const std::string& receiver = receiver_it->second;
+                    if (auto blk_it = state_.user_blacklists.find(receiver);
+                        blk_it != state_.user_blacklists.end() && blk_it->second.count(sender_name) > 0) {
+                        continue;
+                    }
+                    filtered_targets.push_back(target);
+                }
+                targets = std::move(filtered_targets);
             }
             // 사용자를 로비로 이동시킴
             state_.cur_room[session_sp.get()] = std::string("lobby");
@@ -155,6 +193,8 @@ void ChatService::on_leave(ChatService::NetSession& s, std::span<const std::uint
                                 {
                                     std::lock_guard<std::mutex> lk(state_.mu);
                                     state_.room_ids.erase(room_to_leave);
+                                    state_.room_owners.erase(room_to_leave);
+                                    state_.room_invites.erase(room_to_leave);
                                 }
                             } catch (const std::exception& e) {
                                 corelog::error("failed to close room: " + std::string(e.what()));
@@ -179,6 +219,22 @@ void ChatService::on_leave(ChatService::NetSession& s, std::span<const std::uint
                 auto& set = itb->second;
                 collect_room_sessions(set, t2);
             }
+
+            std::vector<std::shared_ptr<Session>> filtered_lobby_targets;
+            filtered_lobby_targets.reserve(t2.size());
+            for (auto& target : t2) {
+                auto receiver_it = state_.user.find(target.get());
+                if (receiver_it == state_.user.end()) {
+                    continue;
+                }
+                const std::string& receiver = receiver_it->second;
+                if (auto blk_it = state_.user_blacklists.find(receiver);
+                    blk_it != state_.user_blacklists.end() && blk_it->second.count(sender_name) > 0) {
+                    continue;
+                }
+                filtered_lobby_targets.push_back(target);
+            }
+            t2 = std::move(filtered_lobby_targets);
         }
         
         server::wire::v1::ChatBroadcast pb2;

@@ -716,6 +716,20 @@
               <input id="setting-value" class="input" type="number" min="5" max="5000" step="1" value="30" />
               <button id="setting-apply" type="button" class="action">Apply Runtime Setting</button>
             </section>
+
+            <section class="action-card">
+              <h3 style="margin:0;font-size:13px;">Global Moderation (Admin)</h3>
+              <input id="mod-targets" class="input" type="text" placeholder="client_id or comma-separated client_ids" />
+              <input id="mod-duration" class="input" type="number" min="0" step="1" value="0" />
+              <input id="mod-reason" class="input" type="text" placeholder="Reason (optional)" autocomplete="off" />
+              <div class="row-left" style="gap:6px;flex-wrap:wrap;">
+                <button id="mod-mute" type="button" class="action">Mute</button>
+                <button id="mod-unmute" type="button" class="action">Unmute</button>
+                <button id="mod-ban" type="button" class="action danger">Ban</button>
+                <button id="mod-unban" type="button" class="action">Unban</button>
+                <button id="mod-kick" type="button" class="action danger">Kick</button>
+              </div>
+            </section>
           </div>
           <div id="actions-error" style="margin-top:8px;"></div>
         </div>
@@ -789,6 +803,14 @@
       settingKey: document.getElementById('setting-key'),
       settingValue: document.getElementById('setting-value'),
       settingApply: document.getElementById('setting-apply'),
+      modTargets: document.getElementById('mod-targets'),
+      modDuration: document.getElementById('mod-duration'),
+      modReason: document.getElementById('mod-reason'),
+      modMute: document.getElementById('mod-mute'),
+      modUnmute: document.getElementById('mod-unmute'),
+      modBan: document.getElementById('mod-ban'),
+      modUnban: document.getElementById('mod-unban'),
+      modKick: document.getElementById('mod-kick'),
       metricsLinks: document.getElementById('metrics-links'),
       linksError: document.getElementById('links-error'),
       footerMeta: document.getElementById('footer-meta')
@@ -1024,14 +1046,22 @@
       }
 
       dom.announceSend.disabled = !canWrite;
-      dom.disconnectSelected.disabled = !canWrite || state.selectedUsers.size === 0;
+      dom.disconnectSelected.disabled = !canSettings || state.selectedUsers.size === 0;
       dom.settingApply.disabled = !canSettings;
       dom.settingKey.disabled = !canSettings;
       dom.settingValue.disabled = !canSettings;
+      dom.modTargets.disabled = !canSettings;
+      dom.modDuration.disabled = !canSettings;
+      dom.modReason.disabled = !canSettings;
+      dom.modMute.disabled = !canSettings;
+      dom.modUnmute.disabled = !canSettings;
+      dom.modBan.disabled = !canSettings;
+      dom.modUnban.disabled = !canSettings;
+      dom.modKick.disabled = !canSettings;
     }
 
     function updateDisconnectButtonState() {
-      dom.disconnectSelected.disabled = !isOperatorRole() || state.selectedUsers.size === 0;
+      dom.disconnectSelected.disabled = !isAdminRole() || state.selectedUsers.size === 0;
     }
 
     async function apiRequest(method, path) {
@@ -1456,7 +1486,7 @@
     }
 
     async function disconnectSelectedUsers() {
-      if (!isOperatorRole()) {
+      if (!isAdminRole()) {
         setActionsMessage('Current role cannot disconnect users.', true);
         return;
       }
@@ -1546,6 +1576,47 @@
       }
 
       setActionsMessage('Runtime setting command submitted: ' + key + '=' + value, false);
+    }
+
+    async function applyModeration(op) {
+      if (!isAdminRole()) {
+        setActionsMessage('Only admin role can perform moderation.', true);
+        return;
+      }
+
+      const targetsRaw = (dom.modTargets.value || '').trim();
+      if (!targetsRaw) {
+        setActionsMessage('Moderation target is required.', true);
+        return;
+      }
+
+      const params = new URLSearchParams();
+      if (targetsRaw.includes(',')) {
+        params.set('client_ids', targetsRaw);
+      } else {
+        params.set('client_id', targetsRaw);
+      }
+
+      const durationRaw = (dom.modDuration.value || '').trim();
+      if (durationRaw) {
+        params.set('duration_sec', durationRaw);
+      }
+
+      const reason = (dom.modReason.value || '').trim();
+      if (reason) {
+        params.set('reason', reason);
+      }
+
+      const endpoint = '/api/v1/users/' + encodeURIComponent(op);
+      const res = await apiRequest('POST', endpoint + '?' + params.toString());
+      if (!res.ok) {
+        applyAuthError('Moderation', res);
+        setActionsMessage('Moderation failed: ' + res.code + ' - ' + res.message, true);
+        return;
+      }
+
+      setActionsMessage('Moderation command submitted: ' + op, false);
+      await refreshUsers();
     }
 
     function renderWorker(data) {
@@ -1881,6 +1952,22 @@
 
     dom.settingApply.addEventListener('click', () => {
       applyRuntimeSetting();
+    });
+
+    dom.modMute.addEventListener('click', () => {
+      applyModeration('mute');
+    });
+    dom.modUnmute.addEventListener('click', () => {
+      applyModeration('unmute');
+    });
+    dom.modBan.addEventListener('click', () => {
+      applyModeration('ban');
+    });
+    dom.modUnban.addEventListener('click', () => {
+      applyModeration('unban');
+    });
+    dom.modKick.addEventListener('click', () => {
+      applyModeration('kick');
     });
 
     updateAccessUi();

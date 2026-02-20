@@ -355,6 +355,12 @@ void GuiManager::render_users_panel() {
     const auto& data = app_.get_data();
 
     if (data.is_connected) {
+        const auto issue_command = [this, &data](const std::string& cmd) {
+            if (data.is_logged_in) {
+                app_.process_command(cmd);
+            }
+        };
+
         ImGui::Text("Online Users (%d)", (int)data.user_list.size());
         ImGui::Separator();
         for (const auto& u : data.user_list) {
@@ -364,6 +370,37 @@ void GuiManager::render_users_panel() {
                     // 채팅창에 귓속말 명령어 자동 완성
                     snprintf(state_.chat_input, sizeof(state_.chat_input), "/w %s ", u.c_str());
                     state_.focus_chat_input = true;
+                }
+                const bool room_action_enabled = (data.current_room != "lobby");
+                if (ImGui::MenuItem("Invite To Current Room", nullptr, false, room_action_enabled)) {
+                    issue_command("/invite " + u + " " + data.current_room);
+                }
+                if (ImGui::MenuItem("Kick From Current Room", nullptr, false, room_action_enabled)) {
+                    issue_command("/kick " + u + " " + data.current_room);
+                }
+                if (data.is_admin && ImGui::BeginMenu("Admin Mute")) {
+                    if (ImGui::MenuItem("30s")) {
+                        issue_command("/mute " + u + " 30");
+                    }
+                    if (ImGui::MenuItem("5m")) {
+                        issue_command("/mute " + u + " 300");
+                    }
+                    if (ImGui::MenuItem("30m")) {
+                        issue_command("/mute " + u + " 1800");
+                    }
+                    ImGui::EndMenu();
+                }
+                if (data.is_admin && ImGui::BeginMenu("Admin Ban")) {
+                    if (ImGui::MenuItem("10m")) {
+                        issue_command("/ban " + u + " 600");
+                    }
+                    if (ImGui::MenuItem("1h")) {
+                        issue_command("/ban " + u + " 3600");
+                    }
+                    if (ImGui::MenuItem("24h")) {
+                        issue_command("/ban " + u + " 86400");
+                    }
+                    ImGui::EndMenu();
                 }
                 if (ImGui::MenuItem("Block")) {
                     // 차단 기능 (예시)
@@ -406,6 +443,11 @@ void GuiManager::render_chat_panel() {
         }
     }
     ImGui::PopItemWidth();
+    if (data.is_admin) {
+        ImGui::TextDisabled("/invite /kick /mute /ban /unmute /unban /gkick");
+    } else {
+        ImGui::TextDisabled("/invite /kick /block /unblock /blacklist");
+    }
     
     ImGui::End();
 }

@@ -10,8 +10,12 @@
 #include "server/core/storage/connection_pool.hpp"
 #include "server/storage/redis/client.hpp"
 #include <vector>
+#include <algorithm>
+#include <cctype>
 #include <cstdlib>
 #include <atomic>
+#include <chrono>
+#include <sstream>
 
 using namespace server::core;
 namespace proto = server::core::protocol;
@@ -106,6 +110,24 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
             current_room = authoritative_room;
         }
 
+        const auto parse_duration_sec = [](const std::string& raw,
+                                           std::uint32_t fallback,
+                                           std::uint32_t min_value,
+                                           std::uint32_t max_value) {
+            if (raw.empty()) {
+                return fallback;
+            }
+            try {
+                const auto parsed = std::stoul(raw);
+                if (parsed < min_value || parsed > max_value) {
+                    return fallback;
+                }
+                return static_cast<std::uint32_t>(parsed);
+            } catch (...) {
+                return fallback;
+            }
+        };
+
         // 슬래시 명령 분기를 처리한다.
         // 채팅 메시지가 '/'로 시작하면 명령어로 간주합니다.
         if (!text.empty() && text[0] == '/') {
@@ -147,16 +169,633 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
                 dispatch_whisper(session_sp, target_user, wtext);
                 return;
             }
+
+            if (text.rfind("/invite ", 0) == 0) {
+                std::istringstream iss(text.substr(8));
+                std::string target_user;
+                std::string target_room;
+                iss >> target_user;
+                iss >> target_room;
+                if (target_room.empty()) {
+                    target_room = current_room;
+                }
+                if (target_user.empty() || target_room.empty() || target_room == "lobby") {
+                    send_system_notice(*session_sp, "usage: /invite <user> [room]");
+                    return;
+                }
+
+                bool allowed = false;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    if (actor != "guest") {
+                        allowed = admin_users_.count(actor) > 0;
+                        if (!allowed) {
+                            auto owner_it = state_.room_owners.find(target_room);
+                            if (owner_it != state_.room_owners.end()) {
+                                allowed = (owner_it->second == actor);
+                            }
+                        }
+                        if (allowed) {
+                            state_.room_invites[target_room].insert(target_user);
+                        }
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "invite denied: owner/admin only");
+                    return;
+                }
+                send_system_notice(*session_sp, "invited user: " + target_user + " room=" + target_room);
+                return;
+            }
+
+            if (text.rfind("/kick ", 0) == 0) {
+                std::istringstream iss(text.substr(6));
+                std::string target_user;
+                std::string target_room;
+                iss >> target_user;
+                iss >> target_room;
+                if (target_room.empty()) {
+                    target_room = current_room;
+                }
+                if (target_user.empty() || target_room.empty() || target_room == "lobby") {
+                    send_system_notice(*session_sp, "usage: /kick <user> [room]");
+                    return;
+                }
+
+                bool allowed = false;
+                std::vector<std::shared_ptr<Session>> kicked_sessions;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    if (actor != "guest") {
+                        allowed = admin_users_.count(actor) > 0;
+                        if (!allowed) {
+                            auto owner_it = state_.room_owners.find(target_room);
+                            if (owner_it != state_.room_owners.end()) {
+                                allowed = (owner_it->second == actor);
+                            }
+                        }
+
+                        if (allowed) {
+                            auto users_it = state_.by_user.find(target_user);
+                            if (users_it != state_.by_user.end()) {
+                                auto room_it = state_.rooms.find(target_room);
+                                for (auto wit = users_it->second.begin(); wit != users_it->second.end();) {
+                                    if (auto candidate = wit->lock()) {
+                                        auto cur_room_it = state_.cur_room.find(candidate.get());
+                                        if (cur_room_it != state_.cur_room.end() && cur_room_it->second == target_room) {
+                                            if (room_it != state_.rooms.end()) {
+                                                room_it->second.erase(candidate);
+                                            }
+                                            state_.cur_room[candidate.get()] = "lobby";
+                                            state_.rooms["lobby"].insert(candidate);
+                                            kicked_sessions.push_back(std::move(candidate));
+                                        }
+                                        ++wit;
+                                    } else {
+                                        wit = users_it->second.erase(wit);
+                                    }
+                                }
+
+                                if (room_it != state_.rooms.end()) {
+                                    if (room_it->second.empty()) {
+                                        state_.rooms.erase(room_it);
+                                        state_.room_passwords.erase(target_room);
+                                        state_.room_owners.erase(target_room);
+                                        state_.room_invites.erase(target_room);
+                                    } else {
+                                        auto owner_it = state_.room_owners.find(target_room);
+                                        if (owner_it != state_.room_owners.end() && owner_it->second == target_user) {
+                                            std::string new_owner;
+                                            for (const auto& weak : room_it->second) {
+                                                if (auto p = weak.lock()) {
+                                                    auto user_it = state_.user.find(p.get());
+                                                    if (user_it != state_.user.end()) {
+                                                        new_owner = user_it->second;
+                                                        if (new_owner != "guest") {
+                                                            break;
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if (!new_owner.empty()) {
+                                                owner_it->second = new_owner;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "kick denied: owner/admin only");
+                    return;
+                }
+                for (auto& kicked : kicked_sessions) {
+                    send_system_notice(*kicked, "kicked from room: " + target_room);
+                    send_snapshot(*kicked, "lobby");
+                }
+                if (!kicked_sessions.empty()) {
+                    broadcast_refresh(target_room);
+                    broadcast_refresh("lobby");
+                }
+                send_system_notice(*session_sp,
+                                   kicked_sessions.empty() ? "kick target not found in room" : "kick applied");
+                return;
+            }
+
+            if (text.rfind("/room remove", 0) == 0) {
+                std::istringstream iss(text.substr(12));
+                std::string target_room;
+                iss >> target_room;
+                if (target_room.empty()) {
+                    target_room = current_room;
+                }
+                if (target_room.empty() || target_room == "lobby") {
+                    send_system_notice(*session_sp, "usage: /room remove [room]");
+                    return;
+                }
+
+                bool allowed = false;
+                std::vector<std::shared_ptr<Session>> moved_sessions;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    if (actor != "guest") {
+                        allowed = admin_users_.count(actor) > 0;
+                        if (!allowed) {
+                            auto owner_it = state_.room_owners.find(target_room);
+                            if (owner_it != state_.room_owners.end()) {
+                                allowed = (owner_it->second == actor);
+                            }
+                        }
+
+                        if (allowed) {
+                            auto room_it = state_.rooms.find(target_room);
+                            if (room_it != state_.rooms.end()) {
+                                for (auto wit = room_it->second.begin(); wit != room_it->second.end();) {
+                                    if (auto candidate = wit->lock()) {
+                                        state_.cur_room[candidate.get()] = "lobby";
+                                        state_.rooms["lobby"].insert(candidate);
+                                        moved_sessions.push_back(std::move(candidate));
+                                        ++wit;
+                                    } else {
+                                        wit = room_it->second.erase(wit);
+                                    }
+                                }
+                                state_.rooms.erase(room_it);
+                            }
+                            state_.room_passwords.erase(target_room);
+                            state_.room_owners.erase(target_room);
+                            state_.room_invites.erase(target_room);
+                        }
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "room remove denied: owner/admin only");
+                    return;
+                }
+
+                for (auto& moved : moved_sessions) {
+                    send_system_notice(*moved, "room removed: " + target_room);
+                    send_snapshot(*moved, "lobby");
+                }
+                if (redis_) {
+                    try {
+                        redis_->srem("rooms:active", target_room);
+                        redis_->del("room:password:" + target_room);
+                        redis_->del("room:users:" + target_room);
+                    } catch (...) {
+                    }
+                }
+                broadcast_refresh(target_room);
+                broadcast_refresh("lobby");
+                send_system_notice(*session_sp, "room removed: " + target_room);
+                return;
+            }
+
+            if (text.rfind("/mute ", 0) == 0) {
+                std::istringstream iss(text.substr(6));
+                std::string target_user;
+                std::string duration_raw;
+                iss >> target_user;
+                iss >> duration_raw;
+                if (target_user.empty()) {
+                    send_system_notice(*session_sp, "usage: /mute <user> [seconds]");
+                    return;
+                }
+                const auto duration_sec = parse_duration_sec(duration_raw, spam_mute_sec_, 5, 86400);
+
+                bool allowed = false;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    allowed = admin_users_.count(actor) > 0;
+                    if (allowed) {
+                        state_.muted_users[target_user] = {
+                            std::chrono::steady_clock::now() + std::chrono::seconds(duration_sec),
+                            "muted by admin"
+                        };
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "mute denied: admin only");
+                    return;
+                }
+                send_system_notice(*session_sp, "mute applied: user=" + target_user + " duration=" + std::to_string(duration_sec) + "s");
+                return;
+            }
+
+            if (text.rfind("/unmute ", 0) == 0) {
+                std::istringstream iss(text.substr(8));
+                std::string target_user;
+                iss >> target_user;
+                if (target_user.empty()) {
+                    send_system_notice(*session_sp, "usage: /unmute <user>");
+                    return;
+                }
+
+                bool allowed = false;
+                bool changed = false;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    allowed = admin_users_.count(actor) > 0;
+                    if (allowed) {
+                        changed = state_.muted_users.erase(target_user) > 0;
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "unmute denied: admin only");
+                    return;
+                }
+                send_system_notice(*session_sp, changed ? "unmute applied: user=" + target_user : "unmute no-op: user not muted");
+                return;
+            }
+
+            if (text.rfind("/ban ", 0) == 0) {
+                std::istringstream iss(text.substr(5));
+                std::string target_user;
+                std::string duration_raw;
+                iss >> target_user;
+                iss >> duration_raw;
+                if (target_user.empty()) {
+                    send_system_notice(*session_sp, "usage: /ban <user> [seconds]");
+                    return;
+                }
+                const auto duration_sec = parse_duration_sec(duration_raw, spam_ban_sec_, 10, 604800);
+
+                bool allowed = false;
+                std::vector<std::shared_ptr<Session>> banned_sessions;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    allowed = admin_users_.count(actor) > 0;
+                    if (allowed) {
+                        const auto expires_at = std::chrono::steady_clock::now() + std::chrono::seconds(duration_sec);
+                        state_.banned_users[target_user] = {expires_at, "banned by admin"};
+
+                        if (auto ip_it = state_.user_last_ip.find(target_user); ip_it != state_.user_last_ip.end() && !ip_it->second.empty()) {
+                            state_.banned_ips[ip_it->second] = expires_at;
+                        }
+                        if (auto hwid_it = state_.user_last_hwid_hash.find(target_user); hwid_it != state_.user_last_hwid_hash.end() && !hwid_it->second.empty()) {
+                            state_.banned_hwid_hashes[hwid_it->second] = expires_at;
+                        }
+
+                        auto users_it = state_.by_user.find(target_user);
+                        if (users_it != state_.by_user.end()) {
+                            for (auto wit = users_it->second.begin(); wit != users_it->second.end();) {
+                                if (auto candidate = wit->lock()) {
+                                    banned_sessions.push_back(std::move(candidate));
+                                    ++wit;
+                                } else {
+                                    wit = users_it->second.erase(wit);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "ban denied: admin only");
+                    return;
+                }
+                for (auto& banned : banned_sessions) {
+                    send_system_notice(*banned, "temporarily banned");
+                    banned->stop();
+                }
+                send_system_notice(*session_sp, "ban applied: user=" + target_user + " duration=" + std::to_string(duration_sec) + "s");
+                return;
+            }
+
+            if (text.rfind("/unban ", 0) == 0) {
+                std::istringstream iss(text.substr(7));
+                std::string target_user;
+                iss >> target_user;
+                if (target_user.empty()) {
+                    send_system_notice(*session_sp, "usage: /unban <user>");
+                    return;
+                }
+
+                bool allowed = false;
+                bool changed = false;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    allowed = admin_users_.count(actor) > 0;
+                    if (allowed) {
+                        changed = state_.banned_users.erase(target_user) > 0;
+                        if (auto ip_it = state_.user_last_ip.find(target_user); ip_it != state_.user_last_ip.end() && !ip_it->second.empty()) {
+                            changed = state_.banned_ips.erase(ip_it->second) > 0 || changed;
+                        }
+                        if (auto hwid_it = state_.user_last_hwid_hash.find(target_user); hwid_it != state_.user_last_hwid_hash.end() && !hwid_it->second.empty()) {
+                            changed = state_.banned_hwid_hashes.erase(hwid_it->second) > 0 || changed;
+                        }
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "unban denied: admin only");
+                    return;
+                }
+                send_system_notice(*session_sp, changed ? "unban applied: user=" + target_user : "unban no-op: user not banned");
+                return;
+            }
+
+            if (text.rfind("/gkick ", 0) == 0) {
+                std::istringstream iss(text.substr(7));
+                std::string target_user;
+                iss >> target_user;
+                if (target_user.empty()) {
+                    send_system_notice(*session_sp, "usage: /gkick <user>");
+                    return;
+                }
+
+                bool allowed = false;
+                std::vector<std::shared_ptr<Session>> kicked_sessions;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    const std::string actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                    allowed = admin_users_.count(actor) > 0;
+                    if (allowed) {
+                        auto users_it = state_.by_user.find(target_user);
+                        if (users_it != state_.by_user.end()) {
+                            for (auto wit = users_it->second.begin(); wit != users_it->second.end();) {
+                                if (auto candidate = wit->lock()) {
+                                    kicked_sessions.push_back(std::move(candidate));
+                                    ++wit;
+                                } else {
+                                    wit = users_it->second.erase(wit);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (!allowed) {
+                    send_system_notice(*session_sp, "global kick denied: admin only");
+                    return;
+                }
+                for (auto& kicked : kicked_sessions) {
+                    send_system_notice(*kicked, "disconnected by administrator");
+                    kicked->stop();
+                }
+                send_system_notice(*session_sp,
+                                   kicked_sessions.empty() ? "global kick target not found" : "global kick applied");
+                return;
+            }
+
+            if (text.rfind("/block ", 0) == 0 || text.rfind("/unblock ", 0) == 0 || text.rfind("/blacklist", 0) == 0) {
+                std::string actor;
+                {
+                    std::lock_guard<std::mutex> lk(state_.mu);
+                    auto actor_it = state_.user.find(session_sp.get());
+                    actor = (actor_it != state_.user.end()) ? actor_it->second : std::string("guest");
+                }
+                if (actor.empty() || actor == "guest") {
+                    send_system_notice(*session_sp, "blacklist denied: login required");
+                    return;
+                }
+
+                const auto trim_copy = [](std::string value) {
+                    const auto begin = value.find_first_not_of(' ');
+                    if (begin == std::string::npos) {
+                        return std::string();
+                    }
+                    const auto end = value.find_last_not_of(' ');
+                    return value.substr(begin, end - begin + 1);
+                };
+
+                std::string op;
+                std::string target_user;
+                if (text.rfind("/block ", 0) == 0) {
+                    op = "add";
+                    target_user = trim_copy(text.substr(7));
+                } else if (text.rfind("/unblock ", 0) == 0) {
+                    op = "remove";
+                    target_user = trim_copy(text.substr(9));
+                } else {
+                    std::string args = trim_copy(text.substr(10));
+                    if (args.empty() || args == "list") {
+                        op = "list";
+                    } else {
+                        std::istringstream iss(args);
+                        iss >> op;
+                        std::getline(iss, target_user);
+                        target_user = trim_copy(target_user);
+                        std::transform(op.begin(), op.end(), op.begin(), [](unsigned char c) {
+                            return static_cast<char>(std::tolower(c));
+                        });
+                    }
+                }
+
+                if (op == "list") {
+                    std::vector<std::string> blocked_users;
+                    {
+                        std::lock_guard<std::mutex> lk(state_.mu);
+                        if (auto it = state_.user_blacklists.find(actor); it != state_.user_blacklists.end()) {
+                            blocked_users.assign(it->second.begin(), it->second.end());
+                        }
+                    }
+                    std::sort(blocked_users.begin(), blocked_users.end());
+                    if (blocked_users.empty()) {
+                        send_system_notice(*session_sp, "blacklist: (empty)");
+                    } else {
+                        std::string joined;
+                        for (std::size_t i = 0; i < blocked_users.size(); ++i) {
+                            if (i != 0) {
+                                joined += ", ";
+                            }
+                            joined += blocked_users[i];
+                        }
+                        send_system_notice(*session_sp, "blacklist: " + joined);
+                    }
+                    return;
+                }
+
+                if (target_user.empty()) {
+                    send_system_notice(*session_sp, "usage: /blacklist <add|remove|list> [user]");
+                    return;
+                }
+                if (target_user == actor) {
+                    send_system_notice(*session_sp, "blacklist denied: cannot target yourself");
+                    return;
+                }
+
+                if (op == "add") {
+                    bool changed = false;
+                    {
+                        std::lock_guard<std::mutex> lk(state_.mu);
+                        changed = state_.user_blacklists[actor].insert(target_user).second;
+                    }
+                    send_system_notice(*session_sp, changed ? "blacklist add: " + target_user : "blacklist add no-op");
+                    return;
+                }
+                if (op == "remove") {
+                    bool changed = false;
+                    {
+                        std::lock_guard<std::mutex> lk(state_.mu);
+                        auto it = state_.user_blacklists.find(actor);
+                        if (it != state_.user_blacklists.end()) {
+                            changed = it->second.erase(target_user) > 0;
+                            if (it->second.empty()) {
+                                state_.user_blacklists.erase(it);
+                            }
+                        }
+                    }
+                    send_system_notice(*session_sp, changed ? "blacklist remove: " + target_user : "blacklist remove no-op");
+                    return;
+                }
+
+                send_system_notice(*session_sp, "usage: /blacklist <add|remove|list> [user]");
+                return;
+            }
         }
 
-        // Chat hook plugins (optional): custom commands / moderation / transforms.
-        // Runs after built-in slash commands, right before broadcasting.
         std::string sender;
+        bool sender_is_muted = false;
+        bool sender_is_banned = false;
+        bool spam_escalated = false;
+        bool spam_escalated_to_ban = false;
+        std::string moderation_reason;
+        std::vector<std::shared_ptr<Session>> penalized_sessions;
         {
             std::lock_guard<std::mutex> lk(state_.mu);
             auto it2 = state_.user.find(session_sp.get());
             sender = (it2 != state_.user.end()) ? it2->second : std::string("guest");
+            if (sender == "guest") {
+                session_sp->send_error(proto::errc::UNAUTHORIZED, "guest cannot chat");
+                return;
+            }
+
+            const auto now = std::chrono::steady_clock::now();
+
+            if (auto muted_it = state_.muted_users.find(sender); muted_it != state_.muted_users.end()) {
+                if (muted_it->second.expires_at <= now) {
+                    state_.muted_users.erase(muted_it);
+                } else {
+                    sender_is_muted = true;
+                    moderation_reason = muted_it->second.reason.empty() ? "temporarily muted" : muted_it->second.reason;
+                }
+            }
+
+            if (auto banned_it = state_.banned_users.find(sender); banned_it != state_.banned_users.end()) {
+                if (banned_it->second.expires_at <= now) {
+                    state_.banned_users.erase(banned_it);
+                } else {
+                    sender_is_banned = true;
+                    moderation_reason = banned_it->second.reason.empty() ? "temporarily banned" : banned_it->second.reason;
+                }
+            }
+
+            if (!sender_is_muted && !sender_is_banned) {
+                auto& events = state_.spam_events[sender];
+                const auto cutoff = now - std::chrono::seconds(spam_window_sec_);
+                while (!events.empty() && events.front() < cutoff) {
+                    events.pop_front();
+                }
+                events.push_back(now);
+
+                if (events.size() > spam_message_threshold_) {
+                    events.clear();
+                    const auto violations = ++state_.spam_violations[sender];
+                    if (violations >= spam_ban_violation_threshold_) {
+                        spam_escalated = true;
+                        spam_escalated_to_ban = true;
+                        moderation_reason = "temporarily banned for repeated spam";
+                        const auto expires_at = now + std::chrono::seconds(spam_ban_sec_);
+                        state_.banned_users[sender] = {expires_at, moderation_reason};
+
+                        if (auto ip_it = state_.user_last_ip.find(sender); ip_it != state_.user_last_ip.end() && !ip_it->second.empty()) {
+                            state_.banned_ips[ip_it->second] = expires_at;
+                        }
+                        if (auto hwid_it = state_.user_last_hwid_hash.find(sender); hwid_it != state_.user_last_hwid_hash.end() && !hwid_it->second.empty()) {
+                            state_.banned_hwid_hashes[hwid_it->second] = expires_at;
+                        }
+
+                        auto users_it = state_.by_user.find(sender);
+                        if (users_it != state_.by_user.end()) {
+                            for (auto wit = users_it->second.begin(); wit != users_it->second.end();) {
+                                if (auto candidate = wit->lock()) {
+                                    penalized_sessions.push_back(std::move(candidate));
+                                    ++wit;
+                                } else {
+                                    wit = users_it->second.erase(wit);
+                                }
+                            }
+                        }
+                    } else {
+                        spam_escalated = true;
+                        moderation_reason = "temporarily muted for spam";
+                        state_.muted_users[sender] = {
+                            now + std::chrono::seconds(spam_mute_sec_),
+                            moderation_reason
+                        };
+                    }
+                }
+            }
         }
+
+        if (sender_is_banned) {
+            send_system_notice(*session_sp, moderation_reason);
+            session_sp->send_error(proto::errc::FORBIDDEN, moderation_reason);
+            session_sp->stop();
+            return;
+        }
+        if (sender_is_muted) {
+            send_system_notice(*session_sp, moderation_reason);
+            session_sp->send_error(proto::errc::FORBIDDEN, moderation_reason);
+            return;
+        }
+        if (spam_escalated) {
+            send_system_notice(*session_sp, moderation_reason);
+            session_sp->send_error(proto::errc::FORBIDDEN, moderation_reason);
+            if (spam_escalated_to_ban) {
+                for (auto& penalized : penalized_sessions) {
+                    send_system_notice(*penalized, moderation_reason);
+                    penalized->stop();
+                }
+            }
+            return;
+        }
+
+        // Chat hook plugins (optional): custom commands / moderation / transforms.
+        // Runs after built-in slash commands, right before broadcasting.
         if (maybe_handle_chat_hook_plugin(*session_sp, current_room, sender, text)) {
             return;
         }
@@ -165,17 +804,26 @@ void ChatService::on_chat_send(Session& s, std::span<const std::uint8_t> payload
         std::vector<std::shared_ptr<Session>> targets;
         {
             std::lock_guard<std::mutex> lk(state_.mu);
-            auto it2 = state_.user.find(session_sp.get()); 
-            sender = (it2 != state_.user.end()) ? it2->second : std::string("guest");
-            // 게스트는 채팅 권한이 없습니다.
-            if (sender == "guest") { 
-                session_sp->send_error(proto::errc::UNAUTHORIZED, "guest cannot chat"); 
-                return; 
-            }
-            auto it = state_.rooms.find(current_room); 
-            if (it != state_.rooms.end()) { 
+            auto it = state_.rooms.find(current_room);
+            if (it != state_.rooms.end()) {
                 collect_room_sessions(it->second, targets);
             }
+
+            std::vector<std::shared_ptr<Session>> filtered_targets;
+            filtered_targets.reserve(targets.size());
+            for (auto& target : targets) {
+                auto receiver_it = state_.user.find(target.get());
+                if (receiver_it == state_.user.end()) {
+                    continue;
+                }
+                const std::string& receiver = receiver_it->second;
+                if (auto blk_it = state_.user_blacklists.find(receiver);
+                    blk_it != state_.user_blacklists.end() && blk_it->second.count(sender) > 0) {
+                    continue;
+                }
+                filtered_targets.push_back(target);
+            }
+            targets = std::move(filtered_targets);
         }
 
         // Protobuf 메시지 생성

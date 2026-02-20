@@ -275,7 +275,7 @@ void NetClient::handle_packet(const proto::PacketHeader& hh, std::span<const std
     if (hh.msg_id == game_proto::MSG_LOGIN_RES) {
         server::wire::v1::LoginRes pb;
         if (server::wire::codec::Decode(in.data(), in.size(), pb)) {
-            if (on_login_) on_login_(pb.effective_user(), pb.session_id());
+            if (on_login_) on_login_(pb.effective_user(), pb.session_id(), pb.is_admin());
         } else {
             // Protobuf 디코딩 실패 시 레거시 포맷 파싱 시도 (하위 호환성)
             auto cur = in;
@@ -293,7 +293,7 @@ void NetClient::handle_packet(const proto::PacketHeader& hh, std::span<const std
             }
             std::uint32_t sid = 0;
             if (cur.size() >= 4) sid = proto::read_be32(cur.data());
-            if (on_login_) on_login_(effective, sid);
+            if (on_login_) on_login_(effective, sid, false);
         }
         return;
     }

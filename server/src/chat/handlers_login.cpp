@@ -7,6 +7,7 @@
 // 저장소 연동 헤더
 #include "server/core/storage/connection_pool.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdlib>
 #include <optional>
 #include "server/storage/redis/client.hpp"
@@ -59,6 +60,46 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         bool guest_mode = (user.empty() || user == "guest");
         std::string new_user = ensure_unique_or_error(*session_sp, user);
         if (new_user.empty()) return; // 중복 등으로 실패 시 종료
+        const std::string hwid_hash = hash_hwid_token(token);
+
+        const auto now = std::chrono::steady_clock::now();
+        std::string deny_reason;
+        {
+            std::lock_guard<std::mutex> lk(state_.mu);
+
+            if (auto it = state_.banned_users.find(new_user); it != state_.banned_users.end()) {
+                if (it->second.expires_at <= now) {
+                    state_.banned_users.erase(it);
+                } else {
+                    deny_reason = it->second.reason.empty() ? "temporarily banned" : it->second.reason;
+                }
+            }
+
+            if (deny_reason.empty() && !login_ip.empty()) {
+                if (auto it = state_.banned_ips.find(login_ip); it != state_.banned_ips.end()) {
+                    if (it->second <= now) {
+                        state_.banned_ips.erase(it);
+                    } else {
+                        deny_reason = "temporarily banned (ip)";
+                    }
+                }
+            }
+
+            if (deny_reason.empty() && !hwid_hash.empty()) {
+                if (auto it = state_.banned_hwid_hashes.find(hwid_hash); it != state_.banned_hwid_hashes.end()) {
+                    if (it->second <= now) {
+                        state_.banned_hwid_hashes.erase(it);
+                    } else {
+                        deny_reason = "temporarily banned (device)";
+                    }
+                }
+            }
+        }
+
+        if (!deny_reason.empty()) {
+            session_sp->send_error(proto::errc::FORBIDDEN, deny_reason);
+            return;
+        }
 
         {
             std::lock_guard<std::mutex> lk(state_.mu);
@@ -77,6 +118,14 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
                 state_.guest.insert(session_sp.get());
             } else {
                 state_.guest.erase(session_sp.get());
+            }
+            state_.session_ip[session_sp.get()] = login_ip;
+            state_.session_hwid_hash[session_sp.get()] = hwid_hash;
+            if (!login_ip.empty()) {
+                state_.user_last_ip[new_user] = login_ip;
+            }
+            if (!hwid_hash.empty()) {
+                state_.user_last_hwid_hash[new_user] = hwid_hash;
             }
             // 기본적으로 로비에 입장시킵니다.
             std::string room = "lobby";
@@ -169,6 +218,7 @@ void ChatService::on_login(Session& s, std::span<const std::uint8_t> payload) {
         pb.set_effective_user(new_user);
         pb.set_session_id(session_sp->session_id());
         pb.set_message("ok");
+        pb.set_is_admin(admin_users_.count(new_user) > 0);
         std::string bytes; pb.SerializeToString(&bytes);
         std::vector<std::uint8_t> res(bytes.begin(), bytes.end());
         session_sp->async_send(game_proto::MSG_LOGIN_RES, res, 0);

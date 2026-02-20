@@ -46,11 +46,17 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
             state_.user.erase(s.get());
             // 세션 UUID 캐시도 더 이상 필요 없으므로 제거한다.
             state_.session_uuid.erase(s.get());
+            state_.session_ip.erase(s.get());
+            state_.session_hwid_hash.erase(s.get());
             auto itcr = state_.cur_room.find(s.get());
             if (itcr != state_.cur_room.end()) {
                 room_left = itcr->second;
                 auto itroom = state_.rooms.find(room_left);
                 if (itroom != state_.rooms.end()) {
+                    const bool was_owner =
+                        (room_left != "lobby") &&
+                        (state_.room_owners.find(room_left) != state_.room_owners.end()) &&
+                        (state_.room_owners[room_left] == name);
                     itroom->second.erase(s);
                     server::wire::v1::ChatBroadcast pb;
                     pb.set_room(room_left);
@@ -66,8 +72,45 @@ void ChatService::on_session_close(std::shared_ptr<Session> s) {
                     if (itb != state_.rooms.end()) {
                         auto& set = itb->second;
                         collect_room_sessions(set, targets);
-                        if (set.empty() && room_left != std::string("lobby")) state_.rooms.erase(itb);
+                        if (set.empty() && room_left != std::string("lobby")) {
+                            state_.rooms.erase(itb);
+                            state_.room_passwords.erase(room_left);
+                            state_.room_owners.erase(room_left);
+                            state_.room_invites.erase(room_left);
+                        } else if (was_owner && room_left != std::string("lobby")) {
+                            std::string new_owner;
+                            for (const auto& weak : set) {
+                                if (auto candidate = weak.lock()) {
+                                    auto user_it = state_.user.find(candidate.get());
+                                    if (user_it != state_.user.end()) {
+                                        new_owner = user_it->second;
+                                        if (new_owner != "guest") {
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                            if (!new_owner.empty()) {
+                                state_.room_owners[room_left] = new_owner;
+                            }
+                        }
                     }
+
+                    std::vector<std::shared_ptr<Session>> filtered_targets;
+                    filtered_targets.reserve(targets.size());
+                    for (auto& target : targets) {
+                        auto receiver_it = state_.user.find(target.get());
+                        if (receiver_it == state_.user.end()) {
+                            continue;
+                        }
+                        const std::string& receiver = receiver_it->second;
+                        if (auto blk_it = state_.user_blacklists.find(receiver);
+                            blk_it != state_.user_blacklists.end() && blk_it->second.count(name) > 0) {
+                            continue;
+                        }
+                        filtered_targets.push_back(target);
+                    }
+                    targets = std::move(filtered_targets);
                 }
                 state_.cur_room.erase(itcr);
             }

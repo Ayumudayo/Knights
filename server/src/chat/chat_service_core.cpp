@@ -7,6 +7,7 @@
 #include "server/core/util/service_registry.hpp"
 #include "server/core/concurrent/task_scheduler.hpp"
 #include "server/core/concurrent/job_queue.hpp"
+#include "server/wire/codec.hpp"
 #include "chat_hook_plugin_chain.hpp"
 #include "wire.pb.h"
 // 저장소 연동 헤더
@@ -150,6 +151,61 @@ ChatService::ChatService(boost::asio::io_context& io,
         }
         return nullptr;
     };
+
+    const auto split_csv = [](std::string_view raw) {
+        std::vector<std::string> out;
+        std::string current;
+        auto flush = [&]() {
+            std::size_t begin = 0;
+            while (begin < current.size() && std::isspace(static_cast<unsigned char>(current[begin])) != 0) {
+                ++begin;
+            }
+            std::size_t end = current.size();
+            while (end > begin && std::isspace(static_cast<unsigned char>(current[end - 1])) != 0) {
+                --end;
+            }
+            if (end > begin) {
+                out.emplace_back(current.substr(begin, end - begin));
+            }
+            current.clear();
+        };
+        for (char c : raw) {
+            if (c == ',' || c == ';') {
+                flush();
+                continue;
+            }
+            current.push_back(c);
+        }
+        flush();
+        return out;
+    };
+
+    if (const char* admins_env = read_env("CHAT_ADMIN_USERS", "ADMIN_USERS"); admins_env && *admins_env) {
+        for (const auto& user : split_csv(admins_env)) {
+            admin_users_.insert(user);
+        }
+    }
+
+    const auto parse_u32_bounded = [](const char* raw,
+                                      std::uint32_t fallback,
+                                      std::uint32_t min_value,
+                                      std::uint32_t max_value) {
+        if (!raw || !*raw) {
+            return fallback;
+        }
+        char* end = nullptr;
+        const unsigned long parsed = std::strtoul(raw, &end, 10);
+        if (end == raw || parsed < min_value || parsed > max_value) {
+            return fallback;
+        }
+        return static_cast<std::uint32_t>(parsed);
+    };
+
+    spam_message_threshold_ = parse_u32_bounded(std::getenv("CHAT_SPAM_THRESHOLD"), 6, 3, 100);
+    spam_window_sec_ = parse_u32_bounded(std::getenv("CHAT_SPAM_WINDOW_SEC"), 5, 1, 120);
+    spam_mute_sec_ = parse_u32_bounded(std::getenv("CHAT_SPAM_MUTE_SEC"), 30, 5, 86400);
+    spam_ban_sec_ = parse_u32_bounded(std::getenv("CHAT_SPAM_BAN_SEC"), 600, 10, 604800);
+    spam_ban_violation_threshold_ = parse_u32_bounded(std::getenv("CHAT_SPAM_BAN_VIOLATIONS"), 3, 1, 20);
 
     // 최근 대화 내역(History) 관련 설정
     if (const char* limit_env = read_env("RECENT_HISTORY_LIMIT", "SNAPSHOT_RECENT_LIMIT")) {
@@ -648,6 +704,7 @@ void ChatService::broadcast_refresh(const std::string& room) {
 void ChatService::send_room_users(Session& s, const std::string& target) {
     std::vector<std::string> names;
     bool allow = true;
+    std::string viewer;
 
     {
         std::lock_guard<std::mutex> lk(state_.mu);
@@ -672,6 +729,10 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
 
         if (is_locked && !is_member) {
             allow = false;
+        }
+
+        if (auto viewer_it = state_.user.find(&s); viewer_it != state_.user.end()) {
+            viewer = viewer_it->second;
         }
     }
 
@@ -708,7 +769,17 @@ void ChatService::send_room_users(Session& s, const std::string& target) {
 
     server::wire::v1::RoomUsers pb;
     pb.set_room(target);
+    std::unordered_set<std::string> blocked;
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        if (auto it = state_.user_blacklists.find(viewer); it != state_.user_blacklists.end()) {
+            blocked = it->second;
+        }
+    }
     for (const auto& name : names) {
+        if (blocked.count(name) > 0) {
+            continue;
+        }
         pb.add_users(name);
     }
     std::string bytes;
@@ -833,6 +904,18 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         }
     }
 
+    std::string viewer_name;
+    std::unordered_set<std::string> viewer_blocked;
+    {
+        std::lock_guard<std::mutex> lk(state_.mu);
+        if (auto it = state_.user.find(&s); it != state_.user.end()) {
+            viewer_name = it->second;
+            if (auto blk_it = state_.user_blacklists.find(viewer_name); blk_it != state_.user_blacklists.end()) {
+                viewer_blocked = blk_it->second;
+            }
+        }
+    }
+
     // 3. 현재 방 유저 목록 조회 (Redis 우선, Fallback 로컬)
     {
         std::vector<std::string> user_list;
@@ -846,6 +929,9 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
         
         if (loaded_from_redis) {
             for (const auto& name : user_list) {
+                if (viewer_blocked.count(name) > 0) {
+                    continue;
+                }
                 pb.add_users(name);
             }
         } else {
@@ -857,6 +943,10 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
                     if (auto p = wit->lock()) {
                         auto itu = state_.user.find(p.get());
                         std::string name = (itu != state_.user.end()) ? itu->second : std::string("guest");
+                        if (viewer_blocked.count(name) > 0) {
+                            ++wit;
+                            continue;
+                        }
                         pb.add_users(name); ++wit;
                     } else { wit = itroom->second.erase(wit); }
                 }
@@ -1010,12 +1100,39 @@ void ChatService::send_snapshot(Session& s, const std::string& current) {
 
 // 외부에서 수신한 브로드캐스트(예: Redis Pub/Sub)를 해당 방의 로컬 세션들에게 전달합니다.
 void ChatService::broadcast_room(const std::string& room, const std::vector<std::uint8_t>& body, Session* self) {
+    (void)self;
+    std::string sender;
+    {
+        server::wire::v1::ChatBroadcast pb;
+        if (server::wire::codec::Decode(body.data(), body.size(), pb)) {
+            sender = pb.sender();
+        }
+    }
+
     std::vector<std::shared_ptr<Session>> targets;
     {
         std::lock_guard<std::mutex> lk(state_.mu);
         auto it = state_.rooms.find(room);
         if (it != state_.rooms.end()) {
             collect_room_sessions(it->second, targets);
+        }
+
+        if (!sender.empty()) {
+            std::vector<std::shared_ptr<Session>> filtered_targets;
+            filtered_targets.reserve(targets.size());
+            for (auto& target : targets) {
+                auto receiver_it = state_.user.find(target.get());
+                if (receiver_it == state_.user.end()) {
+                    continue;
+                }
+                const std::string& receiver = receiver_it->second;
+                if (auto blk_it = state_.user_blacklists.find(receiver);
+                    blk_it != state_.user_blacklists.end() && blk_it->second.count(sender) > 0) {
+                    continue;
+                }
+                filtered_targets.push_back(target);
+            }
+            targets = std::move(filtered_targets);
         }
     }
     for (auto& t : targets) {
@@ -1245,6 +1362,129 @@ void ChatService::admin_apply_runtime_setting(const std::string& key, const std:
     }
 }
 
+void ChatService::admin_apply_user_moderation(const std::string& op,
+                                              const std::vector<std::string>& users,
+                                              std::uint32_t duration_sec,
+                                              const std::string& reason) {
+    if (op.empty() || users.empty()) {
+        return;
+    }
+
+    const auto trim_ascii_local = [](std::string_view input) {
+        std::size_t begin = 0;
+        while (begin < input.size() && std::isspace(static_cast<unsigned char>(input[begin])) != 0) {
+            ++begin;
+        }
+        std::size_t end = input.size();
+        while (end > begin && std::isspace(static_cast<unsigned char>(input[end - 1])) != 0) {
+            --end;
+        }
+        return std::string(input.substr(begin, end - begin));
+    };
+
+    const auto to_lower_ascii_local = [](std::string_view input) {
+        std::string out(input);
+        std::transform(out.begin(), out.end(), out.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        return out;
+    };
+
+    std::vector<std::string> targets;
+    targets.reserve(users.size());
+    for (const auto& user : users) {
+        const std::string trimmed = trim_ascii_local(user);
+        if (!trimmed.empty()) {
+            targets.push_back(trimmed);
+        }
+    }
+    if (targets.empty()) {
+        return;
+    }
+
+    std::string normalized_op = to_lower_ascii_local(trim_ascii_local(op));
+    std::string normalized_reason = trim_ascii_local(reason);
+
+    if (!job_queue_.TryPush([this,
+                             normalized_op = std::move(normalized_op),
+                             targets = std::move(targets),
+                             duration_sec,
+                             normalized_reason = std::move(normalized_reason)]() {
+        const auto now = std::chrono::steady_clock::now();
+        std::vector<std::shared_ptr<Session>> affected_sessions;
+        std::unordered_set<Session*> seen;
+
+        auto add_user_sessions = [&](const std::string& user) {
+            auto itset = state_.by_user.find(user);
+            if (itset == state_.by_user.end()) {
+                return;
+            }
+            for (auto wit = itset->second.begin(); wit != itset->second.end();) {
+                if (auto session = wit->lock()) {
+                    if (seen.insert(session.get()).second) {
+                        affected_sessions.push_back(std::move(session));
+                    }
+                    ++wit;
+                } else {
+                    wit = itset->second.erase(wit);
+                }
+            }
+        };
+
+        {
+            std::lock_guard<std::mutex> lk(state_.mu);
+            for (const auto& user : targets) {
+                if (normalized_op == "mute") {
+                    const std::uint32_t seconds = duration_sec > 0 ? duration_sec : spam_mute_sec_;
+                    const std::string applied_reason = normalized_reason.empty() ? "muted by administrator" : normalized_reason;
+                    state_.muted_users[user] = {now + std::chrono::seconds(seconds), applied_reason};
+                } else if (normalized_op == "unmute") {
+                    state_.muted_users.erase(user);
+                } else if (normalized_op == "ban") {
+                    const std::uint32_t seconds = duration_sec > 0 ? duration_sec : spam_ban_sec_;
+                    const auto expires_at = now + std::chrono::seconds(seconds);
+                    const std::string applied_reason = normalized_reason.empty() ? "banned by administrator" : normalized_reason;
+                    state_.banned_users[user] = {expires_at, applied_reason};
+
+                    if (auto ip_it = state_.user_last_ip.find(user); ip_it != state_.user_last_ip.end() && !ip_it->second.empty()) {
+                        state_.banned_ips[ip_it->second] = expires_at;
+                    }
+                    if (auto hwid_it = state_.user_last_hwid_hash.find(user); hwid_it != state_.user_last_hwid_hash.end() && !hwid_it->second.empty()) {
+                        state_.banned_hwid_hashes[hwid_it->second] = expires_at;
+                    }
+                    add_user_sessions(user);
+                } else if (normalized_op == "unban") {
+                    state_.banned_users.erase(user);
+                    if (auto ip_it = state_.user_last_ip.find(user); ip_it != state_.user_last_ip.end() && !ip_it->second.empty()) {
+                        state_.banned_ips.erase(ip_it->second);
+                    }
+                    if (auto hwid_it = state_.user_last_hwid_hash.find(user); hwid_it != state_.user_last_hwid_hash.end() && !hwid_it->second.empty()) {
+                        state_.banned_hwid_hashes.erase(hwid_it->second);
+                    }
+                } else if (normalized_op == "kick") {
+                    add_user_sessions(user);
+                }
+            }
+        }
+
+        if (normalized_op == "ban" || normalized_op == "kick") {
+            const std::string notice = normalized_reason.empty()
+                ? (normalized_op == "ban" ? "temporarily banned" : "disconnected by administrator")
+                : normalized_reason;
+            for (auto& session : affected_sessions) {
+                send_system_notice(*session, notice);
+                session->stop();
+            }
+        }
+
+        corelog::info("admin moderation applied: op=" + normalized_op +
+                      " requested=" + std::to_string(targets.size()) +
+                      " sessions=" + std::to_string(affected_sessions.size()));
+    })) {
+        corelog::warn("admin moderation dropped: job queue full");
+    }
+}
+
 // 귓속말 전송 결과를 클라이언트에게 알립니다.
 void ChatService::send_whisper_result(Session& s, bool ok, const std::string& reason) {
     server::wire::v1::WhisperResult pb;
@@ -1277,6 +1517,10 @@ void ChatService::deliver_remote_whisper(const std::vector<std::uint8_t>& body) 
     std::vector<std::shared_ptr<Session>> targets;
     {
         std::lock_guard<std::mutex> lk(state_.mu);
+        if (auto blk_it = state_.user_blacklists.find(notice.recipient());
+            blk_it != state_.user_blacklists.end() && blk_it->second.count(notice.sender()) > 0) {
+            return;
+        }
         auto itset = state_.by_user.find(notice.recipient());
         if (itset != state_.by_user.end()) {
             for (auto wit = itset->second.begin(); wit != itset->second.end(); ) {
@@ -1355,8 +1599,24 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
 
     std::vector<std::shared_ptr<Session>> targets;
     bool ineligible_found = false;
+    bool blocked_by_sender = false;
+    bool blocked_by_target = false;
     {
         std::lock_guard<std::mutex> lk(state_.mu);
+        if (auto sender_blk_it = state_.user_blacklists.find(sender);
+            sender_blk_it != state_.user_blacklists.end() && sender_blk_it->second.count(target_user) > 0) {
+            blocked_by_sender = true;
+        }
+        if (auto target_blk_it = state_.user_blacklists.find(target_user);
+            target_blk_it != state_.user_blacklists.end() && target_blk_it->second.count(sender) > 0) {
+            blocked_by_target = true;
+        }
+
+        if (blocked_by_sender || blocked_by_target) {
+            // behave similar to offline/hidden target for privacy
+            ineligible_found = true;
+        }
+
         auto itset = state_.by_user.find(target_user);
         if (itset != state_.by_user.end()) {
             for (auto wit = itset->second.begin(); wit != itset->second.end(); ) {
@@ -1366,6 +1626,11 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
                         continue;
                     }
                     if (!state_.authed.count(p.get()) || state_.guest.count(p.get())) {
+                        ineligible_found = true;
+                        ++wit;
+                        continue;
+                    }
+                    if (blocked_by_sender || blocked_by_target) {
                         ineligible_found = true;
                         ++wit;
                         continue;
@@ -1382,9 +1647,15 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
     }
 
     if (targets.empty() && ineligible_found) {
+        if (blocked_by_sender) {
+            send_system_notice(*session_sp, "whisper denied: unblock target first");
+            send_whisper_result(*session_sp, false, "recipient blocked by sender");
+            corelog::debug("[whisper] sender=" + sender + " target=" + target_user + " status=blocked_by_sender");
+            return;
+        }
         send_system_notice(*session_sp, "user cannot receive whispers (login required): " + target_user);
         send_whisper_result(*session_sp, false, "recipient not eligible");
-        corelog::debug("[whisper] sender=" + sender + " target=" + target_user + " status=recipient_guest");
+        corelog::debug("[whisper] sender=" + sender + " target=" + target_user + " status=recipient_guest_or_blocked");
         return;
     }
 
@@ -1456,6 +1727,17 @@ std::string ChatService::hash_room_password(const std::string& password) {
         return {};
     }
     return std::string(kRoomPasswordHashPrefix) + digest;
+}
+
+std::string ChatService::hash_hwid_token(std::string_view token) const {
+    if (token.empty()) {
+        return {};
+    }
+    std::string digest = sha256_hex(token);
+    if (digest.empty()) {
+        return {};
+    }
+    return std::string("hwid:") + digest;
 }
 
 bool ChatService::verify_room_password(const std::string& password, const std::string& stored_hash) {

@@ -554,12 +554,17 @@ std::string resource_from_path(std::string_view path) {
         std::string_view resource;
     };
 
-    static constexpr std::array<ExactRoute, 10> kExactRoutes{{
+static constexpr std::array<ExactRoute, 15> kExactRoutes{{
         {"/api/v1/auth/context", "auth_context"},
         {"/api/v1/overview", "overview"},
         {"/api/v1/instances", "instances"},
         {"/api/v1/users", "users"},
         {"/api/v1/users/disconnect", "users_disconnect"},
+        {"/api/v1/users/mute", "users_mute"},
+        {"/api/v1/users/unmute", "users_unmute"},
+        {"/api/v1/users/ban", "users_ban"},
+        {"/api/v1/users/unban", "users_unban"},
+        {"/api/v1/users/kick", "users_kick"},
         {"/api/v1/announcements", "announcements"},
         {"/api/v1/settings", "runtime_settings"},
         {"/api/v1/worker/write-behind", "worker_write_behind"},
@@ -1256,6 +1261,10 @@ private:
         stream << "admin_settings_requests_total " << settings_requests_total_.load(std::memory_order_relaxed)
                << "\n";
 
+        stream << "# TYPE admin_moderation_requests_total counter\n";
+        stream << "admin_moderation_requests_total " << moderation_requests_total_.load(std::memory_order_relaxed)
+               << "\n";
+
         stream << "# TYPE admin_worker_requests_total counter\n";
         stream << "admin_worker_requests_total " << worker_requests_total_.load(std::memory_order_relaxed) << "\n";
 
@@ -1361,7 +1370,13 @@ private:
         const bool is_disconnect = (path == "/api/v1/users/disconnect");
         const bool is_announce = (path == "/api/v1/announcements");
         const bool is_settings = (path == "/api/v1/settings");
-        const bool is_write_endpoint = is_disconnect || is_announce || is_settings;
+        const bool is_mute = (path == "/api/v1/users/mute");
+        const bool is_unmute = (path == "/api/v1/users/unmute");
+        const bool is_ban = (path == "/api/v1/users/ban");
+        const bool is_unban = (path == "/api/v1/users/unban");
+        const bool is_kick = (path == "/api/v1/users/kick");
+        const bool is_user_moderation = is_mute || is_unmute || is_ban || is_unban || is_kick;
+        const bool is_write_endpoint = is_disconnect || is_announce || is_settings || is_user_moderation;
 
         if (!is_write_endpoint && method != "GET") {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
@@ -1397,6 +1412,15 @@ private:
                 "405 Method Not Allowed",
                 "METHOD_NOT_ALLOWED",
                 "settings endpoint requires PATCH"));
+        }
+
+        if (is_user_moderation && method != "POST") {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return finalize(json_error(
+                request_id,
+                "405 Method Not Allowed",
+                "METHOD_NOT_ALLOWED",
+                "moderation endpoints require POST"));
         }
 
         QueryOptions query_options;
@@ -1466,7 +1490,7 @@ private:
         }
 
         if (is_disconnect) {
-            if (auto forbidden = require_role("operator")) {
+            if (auto forbidden = require_role("admin")) {
                 return finalize(std::move(*forbidden));
             }
             disconnect_requests_total_.fetch_add(1, std::memory_order_relaxed);
@@ -1487,6 +1511,26 @@ private:
             }
             settings_requests_total_.fetch_add(1, std::memory_order_relaxed);
             return finalize(handle_runtime_setting(request_id, auth, split.query));
+        }
+
+        if (is_user_moderation) {
+            if (auto forbidden = require_role("admin")) {
+                return finalize(std::move(*forbidden));
+            }
+            moderation_requests_total_.fetch_add(1, std::memory_order_relaxed);
+            std::string op;
+            if (is_mute) {
+                op = "mute";
+            } else if (is_unmute) {
+                op = "unmute";
+            } else if (is_ban) {
+                op = "ban";
+            } else if (is_unban) {
+                op = "unban";
+            } else {
+                op = "kick";
+            }
+            return finalize(handle_user_moderation(request_id, auth, op, split.query));
         }
 
         if (path == "/api/v1/worker/write-behind") {
@@ -1515,9 +1559,10 @@ private:
         data << "\"role\":\"" << json_escape(auth_role_header_name_) << "\"";
         data << "},";
         data << "\"capabilities\":{";
-        data << "\"disconnect\":" << bool_json(has_min_role(auth.role, "operator")) << ",";
+        data << "\"disconnect\":" << bool_json(has_min_role(auth.role, "admin")) << ",";
         data << "\"announce\":" << bool_json(has_min_role(auth.role, "operator")) << ",";
-        data << "\"settings\":" << bool_json(has_min_role(auth.role, "admin"));
+        data << "\"settings\":" << bool_json(has_min_role(auth.role, "admin")) << ",";
+        data << "\"moderation\":" << bool_json(has_min_role(auth.role, "admin"));
         data << "}";
         data << "}";
         return json_ok(request_id, data.str());
@@ -2343,6 +2388,133 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
     }
 
     server::core::metrics::MetricsHttpServer::RouteResponse
+    handle_user_moderation(std::uint64_t request_id,
+                           const AuthContext& auth,
+                           std::string_view op,
+                           std::string_view query_string) {
+        if (!redis_ || !redis_available_.load(std::memory_order_relaxed)) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "UPSTREAM_UNAVAILABLE",
+                "redis command channel unavailable");
+        }
+
+        const auto params = parse_query_string(query_string);
+        std::vector<std::string> targets;
+        if (const auto it = params.find("client_id"); it != params.end()) {
+            const std::string one = trim_ascii(it->second);
+            if (!one.empty()) {
+                targets.push_back(one);
+            }
+        }
+        if (const auto it = params.find("client_ids"); it != params.end()) {
+            auto many = split_csv_trimmed(it->second);
+            targets.insert(targets.end(), many.begin(), many.end());
+        }
+
+        if (targets.empty()) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "400 Bad Request",
+                "BAD_REQUEST",
+                "client_id or client_ids is required");
+        }
+
+        std::vector<std::string> deduped;
+        deduped.reserve(targets.size());
+        std::unordered_set<std::string> seen;
+        for (const auto& target : targets) {
+            const std::string normalized = trim_ascii(target);
+            if (normalized.empty() || normalized.find('/') != std::string::npos || normalized.size() > 128) {
+                continue;
+            }
+            if (seen.insert(normalized).second) {
+                deduped.push_back(normalized);
+            }
+        }
+
+        if (deduped.empty()) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "400 Bad Request",
+                "BAD_REQUEST",
+                "no valid client ids provided");
+        }
+
+        if (deduped.size() > kMaxDisconnectTargets) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "400 Bad Request",
+                "BAD_REQUEST",
+                "too many client ids",
+                json_details("max", std::to_string(kMaxDisconnectTargets)));
+        }
+
+        std::uint32_t duration_sec = 0;
+        if (const auto duration_it = params.find("duration_sec"); duration_it != params.end() && !duration_it->second.empty()) {
+            if (!parse_u32_strict(trim_ascii(duration_it->second), duration_sec)) {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return json_error(
+                    request_id,
+                    "400 Bad Request",
+                    "BAD_REQUEST",
+                    "duration_sec must be an unsigned integer",
+                    json_details("value", duration_it->second));
+            }
+        }
+
+        std::string reason;
+        if (const auto reason_it = params.find("reason"); reason_it != params.end()) {
+            reason = sanitize_single_line(reason_it->second);
+            if (reason.size() > 200) {
+                reason.resize(200);
+            }
+        }
+
+        const std::string channel = redis_channel_prefix_ + "fanout:admin:moderation";
+        std::ostringstream payload;
+        payload << "op=" << sanitize_single_line(op) << "\n";
+        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
+        payload << "request_id=admin-" << request_id << "\n";
+        payload << "duration_sec=" << duration_sec << "\n";
+        payload << "reason=" << reason << "\n";
+        payload << "client_ids=" << join_csv(deduped);
+
+        const std::string message = "gw=admin_app\n" + payload.str();
+        if (!redis_->publish(channel, message)) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "UPSTREAM_UNAVAILABLE",
+                "failed to publish moderation command");
+        }
+
+        std::ostringstream data;
+        data << "{";
+        data << "\"accepted\":true,";
+        data << "\"channel\":\"" << json_escape(channel) << "\",";
+        data << "\"op\":\"" << json_escape(op) << "\",";
+        data << "\"duration_sec\":" << duration_sec << ",";
+        data << "\"submitted_count\":" << deduped.size() << ",";
+        data << "\"targets\":[";
+        for (std::size_t i = 0; i < deduped.size(); ++i) {
+            if (i != 0) {
+                data << ",";
+            }
+            data << "\"" << json_escape(deduped[i]) << "\"";
+        }
+        data << "]";
+        data << "}";
+        return json_ok(request_id, data.str());
+    }
+
+    server::core::metrics::MetricsHttpServer::RouteResponse
     handle_worker(std::uint64_t request_id, const QueryOptions& options) {
         WorkerSnapshot snapshot;
         {
@@ -2520,6 +2692,7 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
     std::atomic<std::uint64_t> disconnect_requests_total_{0};
     std::atomic<std::uint64_t> announce_requests_total_{0};
     std::atomic<std::uint64_t> settings_requests_total_{0};
+    std::atomic<std::uint64_t> moderation_requests_total_{0};
     std::atomic<std::uint64_t> worker_requests_total_{0};
     std::atomic<std::uint64_t> poll_errors_total_{0};
     std::atomic<std::uint64_t> request_seq_{0};

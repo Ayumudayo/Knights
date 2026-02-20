@@ -430,14 +430,16 @@ int run_server(int argc, char** argv) {
                 kAdminDisconnect,
                 kAdminAnnounce,
                 kAdminSettings,
+                kAdminModeration,
             };
 
             using ExactChannelEntry = std::pair<std::string, ExactFanoutChannel>;
-            const std::array<ExactChannelEntry, 4> exact_channels{{
+            const std::array<ExactChannelEntry, 5> exact_channels{{
                 {config.redis_channel_prefix + "fanout:whisper", ExactFanoutChannel::kWhisper},
                 {config.redis_channel_prefix + "fanout:admin:disconnect", ExactFanoutChannel::kAdminDisconnect},
                 {config.redis_channel_prefix + "fanout:admin:announce", ExactFanoutChannel::kAdminAnnounce},
                 {config.redis_channel_prefix + "fanout:admin:settings", ExactFanoutChannel::kAdminSettings},
+                {config.redis_channel_prefix + "fanout:admin:moderation", ExactFanoutChannel::kAdminModeration},
             }};
 
             redis->start_psubscribe(pattern_all,
@@ -551,6 +553,38 @@ int run_server(int argc, char** argv) {
                         }
 
                         chat.admin_apply_runtime_setting(key_it->second, value_it->second);
+                        g_subscribe_total++;
+                        return;
+                    }
+                    case ExactFanoutChannel::kAdminModeration: {
+                        const auto fields = parse_kv_lines(payload);
+
+                        const auto op_it = fields.find("op");
+                        const auto users_it = fields.find("client_ids");
+                        if (op_it == fields.end() || users_it == fields.end() || op_it->second.empty() || users_it->second.empty()) {
+                            return;
+                        }
+
+                        auto users = split_csv(users_it->second);
+                        if (users.empty()) {
+                            return;
+                        }
+
+                        std::uint32_t duration_sec = 0;
+                        if (const auto duration_it = fields.find("duration_sec"); duration_it != fields.end() && !duration_it->second.empty()) {
+                            try {
+                                duration_sec = static_cast<std::uint32_t>(std::stoul(duration_it->second));
+                            } catch (...) {
+                                duration_sec = 0;
+                            }
+                        }
+
+                        std::string reason;
+                        if (const auto reason_it = fields.find("reason"); reason_it != fields.end()) {
+                            reason = reason_it->second;
+                        }
+
+                        chat.admin_apply_user_moderation(op_it->second, users, duration_sec, reason);
                         g_subscribe_total++;
                         return;
                     }

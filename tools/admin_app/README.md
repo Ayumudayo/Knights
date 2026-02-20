@@ -14,6 +14,11 @@
 - `/api/v1/sessions/{client_id}` (JSON)
 - `/api/v1/users` (JSON)
 - `/api/v1/users/disconnect` (POST, query)
+- `/api/v1/users/mute` (POST, query)
+- `/api/v1/users/unmute` (POST, query)
+- `/api/v1/users/ban` (POST, query)
+- `/api/v1/users/unban` (POST, query)
+- `/api/v1/users/kick` (POST, query)
 - `/api/v1/announcements` (POST, query)
 - `/api/v1/settings` (PATCH, query)
 - `/api/v1/worker/write-behind` (JSON)
@@ -92,6 +97,14 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 - `POST /api/v1/users/disconnect`
   - `client_id` 또는 `client_ids`(comma separated)
   - `reason` (optional)
+- `POST /api/v1/users/mute`
+- `POST /api/v1/users/unmute`
+- `POST /api/v1/users/ban`
+- `POST /api/v1/users/unban`
+- `POST /api/v1/users/kick`
+  - 공통: `client_id` 또는 `client_ids`(comma separated)
+  - 공통: `reason` (optional)
+  - `mute`/`ban`은 `duration_sec` (optional)
 - `POST /api/v1/announcements`
   - `text` (required, max 512 bytes)
   - `priority` (`info|warn|critical`, optional)
@@ -106,7 +119,7 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 
 - `viewer`: read-only
 - `operator`: disconnect/announcement 가능
-- `admin`: runtime settings 포함 전체 가능
+- `admin`: runtime settings + moderation 포함 전체 가능
 
 ## 감사 로그
 

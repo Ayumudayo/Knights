@@ -11,6 +11,8 @@
 #include <unordered_set>
 #include <vector>
 #include <cstdint>
+#include <chrono>
+#include <deque>
 
 #include <boost/asio.hpp>
 
@@ -182,6 +184,19 @@ public:
      */
     void admin_apply_runtime_setting(const std::string& key, const std::string& value);
 
+    /**
+     * @brief 관리자 제재 명령(mute/unmute/ban/unban/kick)을 적용합니다.
+     *
+     * @param op 제재 연산자
+     * @param users 대상 사용자 목록
+     * @param duration_sec 기간(초, mute/ban에서만 사용)
+     * @param reason 사유(선택)
+     */
+    void admin_apply_user_moderation(const std::string& op,
+                                     const std::vector<std::string>& users,
+                                     std::uint32_t duration_sec,
+                                     const std::string& reason);
+
     struct ChatHookPluginMetric {
         std::string file;
         bool loaded{false};
@@ -228,25 +243,45 @@ private:
     // 서버의 전체 상태를 관리하는 구조체
     // 멀티스레드 환경에서 안전하게 접근하기 위해 mutex로 보호됩니다.
     struct State {
+        struct TimedPenalty {
+            std::chrono::steady_clock::time_point expires_at{};
+            std::string reason;
+        };
+
         std::mutex mu;
         
         // 방 관리
         std::unordered_map<std::string, RoomSet> rooms;          // 방 이름 -> 참여 중인 세션 목록
         std::unordered_map<std::string, std::string> room_ids;   // 방 이름 -> 방 UUID
         std::unordered_map<std::string, std::string> room_passwords; // 방 이름 -> 비밀번호 해시
+        std::unordered_map<std::string, std::string> room_owners; // 방 이름 -> 소유자 닉네임
+        std::unordered_map<std::string, std::unordered_set<std::string>> room_invites; // 방 이름 -> 초대된 닉네임
 
         // 유저/세션 관리
         std::unordered_map<Session*, std::string> user;          // 세션 -> 닉네임
         std::unordered_map<Session*, std::string> user_uuid;     // 세션 -> 유저 UUID
         std::unordered_map<Session*, std::string> session_uuid;  // 세션 -> 세션 UUID
         std::unordered_map<Session*, std::string> cur_room;      // 세션 -> 현재 참여 중인 방 이름
-        
+        std::unordered_map<Session*, std::string> session_ip;     // 세션 -> 최근 로그인 IP
+        std::unordered_map<Session*, std::string> session_hwid_hash; // 세션 -> HWID hash(로그인 토큰 기반)
+        std::unordered_map<std::string, std::string> user_last_ip; // 유저 -> 최근 로그인 IP
+        std::unordered_map<std::string, std::string> user_last_hwid_hash; // 유저 -> 최근 HWID hash
+
         // 세션 집합
         std::unordered_set<Session*> authed;                     // 로그인한 세션 목록
         std::unordered_set<Session*> guest;                      // 로그인하지 않은 게스트 세션
-        
+
         // 닉네임 역참조 (중복 로그인 방지 및 귓속말용)
         std::unordered_map<std::string, RoomSet> by_user;        // 닉네임 -> 세션 목록 (다중 접속 허용 시 여러 개일 수 있음)
+
+        // 제재/스팸 관리
+        std::unordered_map<std::string, TimedPenalty> muted_users; // 유저 -> 뮤트 만료/사유
+        std::unordered_map<std::string, TimedPenalty> banned_users; // 유저 -> 밴 만료/사유
+        std::unordered_map<std::string, std::chrono::steady_clock::time_point> banned_ips; // IP -> 밴 만료
+        std::unordered_map<std::string, std::chrono::steady_clock::time_point> banned_hwid_hashes; // HWID hash -> 밴 만료
+        std::unordered_map<std::string, std::deque<std::chrono::steady_clock::time_point>> spam_events; // 유저 -> 최근 메시지 시각
+        std::unordered_map<std::string, std::uint32_t> spam_violations; // 유저 -> 누적 위반 횟수
+        std::unordered_map<std::string, std::unordered_set<std::string>> user_blacklists; // 유저 -> 차단 대상 유저 집합
     } state_;
 
     boost::asio::io_context* io_{};
@@ -255,6 +290,12 @@ private:
     std::shared_ptr<server::storage::redis::IRedisClient> redis_{};
     std::string gateway_id_{"gw-default"};
     bool redis_pubsub_enabled_{false};
+    std::unordered_set<std::string> admin_users_{};
+    std::size_t spam_message_threshold_{6};
+    std::uint32_t spam_window_sec_{5};
+    std::uint32_t spam_mute_sec_{30};
+    std::uint32_t spam_ban_sec_{600};
+    std::uint32_t spam_ban_violation_threshold_{3};
 
     std::unique_ptr<HookPluginState> hook_plugin_{};
     
@@ -297,6 +338,7 @@ private:
     std::string hash_room_password(const std::string& password);
     bool verify_room_password(const std::string& password, const std::string& stored_hash);
     bool is_modern_room_password_hash(const std::string& stored_hash) const;
+    std::string hash_hwid_token(std::string_view token) const;
     void send_whisper_result(Session& s, bool ok, const std::string& reason);
     std::string ensure_room_id_ci(const std::string& room_name);
     
