@@ -295,6 +295,8 @@ private:
     void dispatch_whisper(std::shared_ptr<Session> sender, const std::string& target_user, const std::string& text);
     void send_system_notice(Session& s, const std::string& text);
     std::string hash_room_password(const std::string& password);
+    bool verify_room_password(const std::string& password, const std::string& stored_hash);
+    bool is_modern_room_password_hash(const std::string& stored_hash) const;
     void send_whisper_result(Session& s, bool ok, const std::string& reason);
     std::string ensure_room_id_ci(const std::string& room_name);
     

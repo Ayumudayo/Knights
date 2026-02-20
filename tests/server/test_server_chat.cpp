@@ -7,7 +7,7 @@
 #include <server/core/storage/unit_of_work.hpp>
 #include <server/storage/redis/client.hpp>
 #include <server/core/config/options.hpp>
-#include <server/core/state/shared_state.hpp>
+#include <server/core/net/connection_runtime_state.hpp>
 #include "wire.pb.h"
 #include <boost/asio.hpp>
 #include <thread>
@@ -196,7 +196,7 @@ protected:
     Dispatcher dispatcher_;
     BufferManager buffer_manager_{1024, 10};
     std::shared_ptr<SessionOptions> session_options_;
-    std::shared_ptr<SharedState> shared_state_;
+    std::shared_ptr<server::core::net::ConnectionRuntimeState> shared_state_;
     std::shared_ptr<server::core::net::Session> session_;
 
     boost::asio::ip::tcp::acceptor acceptor_;
@@ -208,7 +208,7 @@ protected:
         chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
 
         session_options_ = std::make_shared<SessionOptions>();
-        shared_state_ = std::make_shared<SharedState>();
+        shared_state_ = std::make_shared<server::core::net::ConnectionRuntimeState>();
         
         // 실제 소켓 연결 수립 (Loopback)
         boost::asio::ip::tcp::endpoint ep(boost::asio::ip::make_address("127.0.0.1"), 0);
@@ -421,6 +421,10 @@ TEST_F(ChatServiceTest, WhisperRoutesViaRedisWhenRecipientIsRemote) {
 #else
     setenv("USE_REDIS_PUBSUB", "1", 1);
 #endif
+
+    // ChatService는 생성 시점에 USE_REDIS_PUBSUB를 읽으므로,
+    // 테스트에서 env를 변경한 뒤 인스턴스를 재생성해 설정을 반영한다.
+    chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
 
     // 1. 로그인
     std::vector<uint8_t> login_payload;

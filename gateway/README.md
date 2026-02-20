@@ -56,7 +56,7 @@ class TokenAuthenticator : public gateway::auth::IAuthenticator {
 | `METRICS_PORT` | `/metrics` HTTP 포트 | `6001` |
 | `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS` | backend connect timeout(ms) | `5000` |
 | `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES` | backend 전송 대기 큐 상한 바이트 | `262144` |
-| `ALLOW_ANONYMOUS` | 익명 로그인 허용(1/0) | `1` |
+| `ALLOW_ANONYMOUS` | 익명 로그인 허용(1/0), `0`이면 토큰 없는/anonymous 로그인 거부 | `1` |
 | `AUTH_PROVIDER` / `AUTH_ENDPOINT` | 외부 인증 연동(옵션) | 빈 값 |
 
 주요 gateway 메트릭:

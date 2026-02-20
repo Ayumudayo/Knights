@@ -211,6 +211,20 @@ bool GatewayConnection::try_finish_handshake() {
     if (routing_key.empty() || routing_key == "guest") {
         routing_key = "anonymous";
     }
+
+    if (!app_.allow_anonymous()) {
+        if (request.token.empty()) {
+            server::core::log::warn("GatewayConnection anonymous login disabled: token required");
+            stop();
+            return true;
+        }
+        if (routing_key == "anonymous") {
+            server::core::log::warn("GatewayConnection anonymous login disabled");
+            stop();
+            return true;
+        }
+    }
+
     client_id_ = std::move(routing_key);
 
     open_backend_connection();

@@ -43,6 +43,7 @@ constexpr const char* kEnvServerRegistryPrefix = "SERVER_REGISTRY_PREFIX";
 constexpr const char* kEnvServerRegistryTtl = "SERVER_REGISTRY_TTL";
 constexpr const char* kEnvGatewayBackendConnectTimeoutMs = "GATEWAY_BACKEND_CONNECT_TIMEOUT_MS";
 constexpr const char* kEnvGatewayBackendSendQueueMaxBytes = "GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES";
+constexpr const char* kEnvAllowAnonymous = "ALLOW_ANONYMOUS";
 constexpr const char* kDefaultGatewayListen = "0.0.0.0:6000";
 constexpr const char* kDefaultGatewayId = "gateway-default";
 constexpr const char* kDefaultRedisUri = "tcp://127.0.0.1:6379";
@@ -740,10 +741,16 @@ void GatewayApp::configure_gateway() {
         "GatewayApp invalid GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES; using default"
     );
 
+    allow_anonymous_ = true;
+    if (const char* anonymous_env = std::getenv(kEnvAllowAnonymous); anonymous_env && *anonymous_env) {
+        allow_anonymous_ = (std::string_view(anonymous_env) != "0");
+    }
+
     server::core::log::info("GatewayApp configured: gateway_id=" + gateway_id_
         + " listen=" + listen_host_ + ":" + std::to_string(listen_port_)
         + " backend_connect_timeout_ms=" + std::to_string(backend_connect_timeout_ms_)
-        + " backend_send_queue_max_bytes=" + std::to_string(backend_send_queue_max_bytes_));
+        + " backend_send_queue_max_bytes=" + std::to_string(backend_send_queue_max_bytes_)
+        + " allow_anonymous=" + std::string(allow_anonymous_ ? "1" : "0"));
 }
 
 void GatewayApp::configure_infrastructure() {

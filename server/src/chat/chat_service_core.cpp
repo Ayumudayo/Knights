@@ -13,6 +13,8 @@
 #include "server/core/storage/connection_pool.hpp"
 #include "server/storage/redis/client.hpp"
 
+#include <openssl/sha.h>
+
 #include <algorithm>
 #include <random>
 #include <array>
@@ -42,6 +44,40 @@ struct ChatService::HookPluginState {
         : chain(std::move(cfg)) {}
     ChatHookPluginChain chain;
 };
+
+namespace {
+
+constexpr std::string_view kRoomPasswordHashPrefix = "sha256:";
+
+std::string legacy_hash_room_password(std::string_view password) {
+    std::hash<std::string> hasher;
+    const std::size_t value = hasher(std::string(password));
+    std::ostringstream oss;
+    oss << std::hex << value;
+    return oss.str();
+}
+
+std::string sha256_hex(std::string_view input) {
+    std::array<unsigned char, SHA256_DIGEST_LENGTH> digest{};
+    if (SHA256(reinterpret_cast<const unsigned char*>(input.data()), input.size(), digest.data()) == nullptr) {
+        return {};
+    }
+
+    static constexpr char kHexDigits[] = "0123456789abcdef";
+    std::string out;
+    out.reserve(digest.size() * 2);
+    for (unsigned char byte : digest) {
+        out.push_back(kHexDigits[(byte >> 4) & 0x0F]);
+        out.push_back(kHexDigits[byte & 0x0F]);
+    }
+    return out;
+}
+
+bool has_room_password_hash_prefix(std::string_view value) {
+    return value.rfind(kRoomPasswordHashPrefix, 0) == 0;
+}
+
+} // namespace
 
 // ChatService 생성자: 주요 의존성을 주입받고 환경 변수로부터 설정을 로드합니다.
 ChatService::ChatService(boost::asio::io_context& io,
@@ -1413,13 +1449,30 @@ void ChatService::dispatch_whisper(std::shared_ptr<Session> session_sp, const st
     send_whisper_result(*session_sp, true, "");
 }
 
-// 방 비밀번호 해싱 (간단한 std::hash 사용, 실제 서비스에선 더 강력한 해시 권장)
+// 방 비밀번호 해싱 (versioned format)
 std::string ChatService::hash_room_password(const std::string& password) {
-    std::hash<std::string> hasher;
-    std::size_t value = hasher(password);
-    std::ostringstream oss;
-    oss << std::hex << value;
-    return oss.str();
+    std::string digest = sha256_hex(password);
+    if (digest.empty()) {
+        return {};
+    }
+    return std::string(kRoomPasswordHashPrefix) + digest;
+}
+
+bool ChatService::verify_room_password(const std::string& password, const std::string& stored_hash) {
+    if (stored_hash.empty()) {
+        return false;
+    }
+
+    if (has_room_password_hash_prefix(stored_hash)) {
+        return hash_room_password(password) == stored_hash;
+    }
+
+    // Backward compatibility for legacy hashes.
+    return legacy_hash_room_password(password) == stored_hash;
+}
+
+bool ChatService::is_modern_room_password_hash(const std::string& stored_hash) const {
+    return has_room_password_hash_prefix(stored_hash);
 }
 
 // 방 이름으로 Room ID(UUID)를 조회하거나 생성합니다. (Case-Insensitive)

@@ -185,6 +185,9 @@ public:
     /** @brief gateway 인스턴스 ID를 반환합니다. */
     std::string gateway_id() const { return gateway_id_; }
 
+    /** @brief 익명 로그인 허용 여부를 반환합니다. */
+    bool allow_anonymous() const noexcept { return allow_anonymous_; }
+
     boost::asio::io_context io_;
     std::shared_ptr<server::core::net::Hive> hive_;
     std::shared_ptr<server::core::net::TransportListener> listener_;
@@ -193,6 +196,7 @@ public:
     std::string gateway_id_;
     std::string listen_host_;
     std::uint16_t listen_port_{6000};
+    bool allow_anonymous_{true};
 
  private:
      void on_backend_connected(const std::string& client_id,

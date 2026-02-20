@@ -96,13 +96,25 @@ void ChatService::on_join(ChatService::NetSession& s, std::span<const std::uint8
 
             if (!expected_password.empty()) {
                 // 이미 비밀번호가 설정된 방인 경우 검증
-                if (provided_password.empty() || hash_room_password(provided_password) != expected_password) {
+                if (provided_password.empty() || !verify_room_password(provided_password, expected_password)) {
                     session_sp->send_error(proto::errc::FORBIDDEN, "room locked");
                     return;
+                }
+
+                if (!is_modern_room_password_hash(expected_password)) {
+                    new_hashed_password = hash_room_password(provided_password);
+                    if (!new_hashed_password.empty()) {
+                        state_.room_passwords[room_to_join] = new_hashed_password;
+                        should_set_redis_password = true;
+                    }
                 }
             } else if (!provided_password.empty() && room_to_join != "lobby") {
                 // 새 방이거나 비밀번호가 없는 방에 비밀번호를 설정하며 입장하는 경우
                 new_hashed_password = hash_room_password(provided_password);
+                if (new_hashed_password.empty()) {
+                    session_sp->send_error(proto::errc::INTERNAL_ERROR, "password hash failed");
+                    return;
+                }
                 state_.room_passwords[room_to_join] = new_hashed_password;
                 should_set_redis_password = true;
             }
