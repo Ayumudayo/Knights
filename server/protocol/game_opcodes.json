@@ -5,19 +5,19 @@
             "name": "auth",
             "id_min": "0x0010",
             "id_max": "0x001F",
-            "desc": "login/auth"
+            "desc": "로그인/인증"
         },
         {
             "name": "chat",
             "id_min": "0x0100",
             "id_max": "0x01FF",
-            "desc": "room chat"
+            "desc": "룸 채팅"
         },
         {
             "name": "state",
             "id_min": "0x0200",
             "id_max": "0x02FF",
-            "desc": "snapshot/refresh"
+            "desc": "스냅샷/갱신"
         }
     ],
     "opcodes": [

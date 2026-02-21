@@ -8,26 +8,26 @@
 namespace gateway {
 
 /**
- * @brief Tracks repeated UDP bind failures per endpoint and applies temporary blocks.
+ * @brief endpoint별 UDP bind 반복 실패를 추적하고 임시 차단을 적용합니다.
  *
- * The guard maintains a failure window and block duration to reduce repeated
- * abuse attempts against bind ticket validation.
+ * bind ticket 검증을 노린 반복 남용 시도를 줄이기 위해
+ * 실패 윈도우와 차단 지속 시간을 함께 관리합니다.
  */
 class UdpBindAbuseGuard {
 public:
-    /** @brief Current block state for an endpoint. */
+    /** @brief endpoint의 현재 차단 상태입니다. */
     struct BlockState {
-        bool blocked{false};             ///< Whether endpoint is currently blocked.
-        std::uint64_t retry_after_ms{0}; ///< Remaining block time in milliseconds.
+        bool blocked{false};             ///< 현재 endpoint가 차단 상태인지 여부
+        std::uint64_t retry_after_ms{0}; ///< 남은 차단 시간(ms)
     };
 
     UdpBindAbuseGuard() = default;
 
     /**
-     * @brief Configures failure window and block thresholds.
-     * @param fail_window_ms Rolling window length in milliseconds.
-     * @param fail_limit Failures required to trigger a block.
-     * @param block_ms Block duration in milliseconds.
+     * @brief 실패 윈도우와 차단 임계값을 설정합니다.
+     * @param fail_window_ms 롤링 실패 윈도우 길이(ms)
+     * @param fail_limit 차단 발동에 필요한 실패 횟수
+     * @param block_ms 차단 지속 시간(ms)
      */
     void configure(std::uint32_t fail_window_ms,
                    std::uint32_t fail_limit,
@@ -38,10 +38,10 @@ public:
     }
 
     /**
-     * @brief Returns current block state for an endpoint.
-     * @param endpoint_key Endpoint identity key (`ip:port`).
-     * @param now_ms Current unix timestamp in milliseconds.
-     * @return Block state with remaining retry delay when blocked.
+     * @brief endpoint의 현재 차단 상태를 반환합니다.
+     * @param endpoint_key endpoint 식별 키(`ip:port`)
+     * @param now_ms 현재 유닉스 시각(ms)
+     * @return 차단 중이면 남은 재시도 대기 시간을 포함한 상태
      */
     BlockState block_state(std::string_view endpoint_key, std::uint64_t now_ms) {
         auto it = entries_.find(std::string(endpoint_key));
@@ -59,10 +59,10 @@ public:
     }
 
     /**
-     * @brief Records a bind failure and updates block status.
-     * @param endpoint_key Endpoint identity key (`ip:port`).
-     * @param now_ms Current unix timestamp in milliseconds.
-     * @return `true` when this failure triggered a new block.
+     * @brief bind 실패를 기록하고 차단 상태를 갱신합니다.
+     * @param endpoint_key endpoint 식별 키(`ip:port`)
+     * @param now_ms 현재 유닉스 시각(ms)
+     * @return 이번 실패로 새 차단이 발동되면 `true`
      */
     bool record_failure(std::string_view endpoint_key, std::uint64_t now_ms) {
         auto& entry = entries_[std::string(endpoint_key)];
@@ -88,8 +88,8 @@ public:
     }
 
     /**
-     * @brief Resets failure counters after a successful bind.
-     * @param endpoint_key Endpoint identity key (`ip:port`).
+     * @brief bind 성공 후 실패 카운터를 초기화합니다.
+     * @param endpoint_key endpoint 식별 키(`ip:port`)
      */
     void record_success(std::string_view endpoint_key) {
         auto it = entries_.find(std::string(endpoint_key));

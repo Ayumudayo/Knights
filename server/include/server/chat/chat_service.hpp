@@ -49,8 +49,8 @@ public:
     using NetSession = server::core::net::Session;
 
     /**
-     * @brief ChatService 생성자
-     * @param io Boost.Asio IO Context (비동기 작업용)
+     * @brief 채팅 서비스 생성자
+     * @param io Boost.Asio IO 컨텍스트(비동기 작업용)
      * @param job_queue 작업 큐 (순차적 로직 처리용)
      * @param db_pool DB 연결 풀 (영구 저장소)
      * @param redis Redis 클라이언트 (캐시 및 Pub/Sub)
@@ -64,8 +64,8 @@ public:
     ~ChatService();
 
     // ======================================================================
-    // 패킷 핸들러 (Packet Handlers)
-    // Dispatcher에 의해 호출되며, 각 Opcode에 대응하는 로직을 수행합니다.
+    // 패킷 핸들러
+    // 디스패처가 호출하며, 각 opcode에 대응하는 로직을 수행합니다.
     // ======================================================================
 
     /**
@@ -74,7 +74,7 @@ public:
      * - 중복 접속 처리 (기존 세션 끊기)
      * - 유저 상태 등록
      * @param s 요청을 보낸 세션
-     * @param payload 로그인 요청 payload
+     * @param payload 로그인 요청 본문 바이트
      */
     void on_login(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -84,14 +84,14 @@ public:
      * - 비밀번호 검사 (비공개 방)
      * - 방 멤버십 등록 및 브로드캐스팅
      * @param s 요청을 보낸 세션
-     * @param payload 방 입장 요청 payload
+     * @param payload 방 입장 요청 본문 바이트
      */
     void on_join(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 방 퇴장 요청 (MSG_LEAVE_ROOM) 처리
      * @param s 요청을 보낸 세션
-     * @param payload 방 퇴장 요청 payload
+     * @param payload 방 퇴장 요청 본문 바이트
      */
     void on_leave(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -100,7 +100,7 @@ public:
      * - 메시지 DB 저장 (비동기/Write-behind)
      * - 같은 방의 모든 유저에게 브로드캐스팅
      * @param s 요청을 보낸 세션
-     * @param payload 채팅 전송 요청 payload
+     * @param payload 채팅 전송 요청 본문 바이트
      */
     void on_chat_send(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -109,16 +109,16 @@ public:
      * - 대상 유저 찾기 (로컬 또는 Redis를 통해 다른 서버 검색)
      * - 메시지 전송
      * @param s 요청을 보낸 세션
-     * @param payload 귓속말 요청 payload
+     * @param payload 귓속말 요청 본문 바이트
      */
     void on_whisper(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 핑(Ping) 요청 (MSG_PING) 처리
-     * - 연결이 살아있는지 확인하는 Heartbeat
+     * - 연결 생존 여부를 확인하는 하트비트
      * - PONG 응답 전송
      * @param s 요청을 보낸 세션
-     * @param payload 핑 요청 payload
+     * @param payload 핑 요청 본문 바이트
      */
     void on_ping(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -126,14 +126,14 @@ public:
      * @brief 방 목록 요청 (MSG_ROOMS_REQ) 처리
      * - 현재 활성화된 방 목록 반환
      * @param s 요청을 보낸 세션
-     * @param payload 방 목록 요청 payload
+     * @param payload 방 목록 요청 본문 바이트
      */
     void on_rooms_request(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 방 참여자 목록 요청 (MSG_ROOM_USERS_REQ) 처리
      * @param s 요청을 보낸 세션
-     * @param payload 방 사용자 목록 요청 payload
+     * @param payload 방 사용자 목록 요청 본문 바이트
      */
     void on_room_users_request(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -141,7 +141,7 @@ public:
      * @brief 상태 갱신 요청 (MSG_REFRESH_REQ) 처리
      * - 클라이언트가 재접속 후 놓친 메시지 등을 요청할 때 사용
      * @param s 요청을 보낸 세션
-     * @param payload 상태 갱신 요청 payload
+     * @param payload 상태 갱신 요청 본문 바이트
      */
     void on_refresh_request(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -179,8 +179,8 @@ public:
     void broadcast_refresh_local(const std::string& room);
 
     /**
-     * @brief Redis Pub/Sub로 수신한 원격 귓속말 payload를 로컬 대상 세션에 전달합니다.
-     * @param body 직렬화된 귓속말 이벤트 payload
+     * @brief Redis Pub/Sub로 수신한 원격 귓속말 본문을 로컬 대상 세션에 전달합니다.
+     * @param body 직렬화된 귓속말 이벤트 본문 바이트
      */
     void deliver_remote_whisper(const std::vector<std::uint8_t>& body);
 
@@ -188,7 +188,7 @@ public:
      * @brief 관리자 제어면에서 지정한 사용자 세션들을 강제 종료합니다.
      *
      * @param users 종료 대상 사용자 식별자 목록
-     * @param reason 종료 사유(클라이언트 공지용, optional)
+     * @param reason 종료 사유(클라이언트 공지용, 선택)
      */
     void admin_disconnect_users(const std::vector<std::string>& users, const std::string& reason);
 
@@ -203,9 +203,9 @@ public:
      * @brief 런타임 변경 가능한 채팅 설정을 적용합니다.
      *
      * 지원 키:
-     * - presence_ttl_sec
-     * - recent_history_limit
-     * - room_recent_maxlen
+     * - `presence_ttl_sec`
+     * - `recent_history_limit`
+     * - `room_recent_maxlen`
      * @param key 설정 키
      * @param value 설정 값(문자열)
      */
@@ -255,11 +255,11 @@ private:
     using RoomSet = std::set<WeakSession, WeakLess>; // 세션들의 집합 (약한 참조로 저장하여 순환 참조 방지)
 
     using Exec = boost::asio::io_context::executor_type;
-    using Strand = boost::asio::strand<Exec>; // 핸들러 동기화를 위한 Strand
+    using Strand = boost::asio::strand<Exec>; // 핸들러 동기화를 위한 스트랜드
 
     struct HookPluginState;
 
-    // Write-behind (지연 쓰기) 설정
+    // Write-behind(지연 쓰기) 설정
     /** @brief write-behind 동작 파라미터 집합입니다. */
     struct WriteBehindConfig {
         bool enabled{false};
@@ -268,7 +268,7 @@ private:
         bool approximate{true};
     };
 
-    // Presence (접속 현황) 설정
+    // Presence(접속 현황) 설정
     /** @brief presence 키 TTL/prefix 설정입니다. */
     struct PresenceConfig {
         unsigned int ttl{30}; // 초 단위
@@ -300,9 +300,9 @@ private:
         std::unordered_map<Session*, std::string> session_uuid;  // 세션 -> 세션 UUID
         std::unordered_map<Session*, std::string> cur_room;      // 세션 -> 현재 참여 중인 방 이름
         std::unordered_map<Session*, std::string> session_ip;     // 세션 -> 최근 로그인 IP
-        std::unordered_map<Session*, std::string> session_hwid_hash; // 세션 -> HWID hash(로그인 토큰 기반)
+        std::unordered_map<Session*, std::string> session_hwid_hash; // 세션 -> HWID 해시(로그인 토큰 기반)
         std::unordered_map<std::string, std::string> user_last_ip; // 유저 -> 최근 로그인 IP
-        std::unordered_map<std::string, std::string> user_last_hwid_hash; // 유저 -> 최근 HWID hash
+        std::unordered_map<std::string, std::string> user_last_hwid_hash; // 유저 -> 최근 HWID 해시
 
         // 세션 집합
         std::unordered_set<Session*> authed;                     // 로그인한 세션 목록
@@ -315,7 +315,7 @@ private:
         std::unordered_map<std::string, TimedPenalty> muted_users; // 유저 -> 뮤트 만료/사유
         std::unordered_map<std::string, TimedPenalty> banned_users; // 유저 -> 밴 만료/사유
         std::unordered_map<std::string, std::chrono::steady_clock::time_point> banned_ips; // IP -> 밴 만료
-        std::unordered_map<std::string, std::chrono::steady_clock::time_point> banned_hwid_hashes; // HWID hash -> 밴 만료
+        std::unordered_map<std::string, std::chrono::steady_clock::time_point> banned_hwid_hashes; // HWID 해시 -> 밴 만료
         std::unordered_map<std::string, std::deque<std::chrono::steady_clock::time_point>> spam_events; // 유저 -> 최근 메시지 시각
         std::unordered_map<std::string, std::uint32_t> spam_violations; // 유저 -> 누적 위반 횟수
         std::unordered_map<std::string, std::unordered_set<std::string>> user_blacklists; // 유저 -> 차단 대상 유저 집합
@@ -336,7 +336,7 @@ private:
 
     std::unique_ptr<HookPluginState> hook_plugin_{};
     
-    // 방별 Strand 관리 (방 단위로 메시지 순서를 보장하기 위함)
+    // 방별 스트랜드 관리(방 단위 메시지 순서 보장)
     std::unordered_map<std::string, std::shared_ptr<Strand>> room_strands_;
     Strand& strand_for(const std::string& room);
 
@@ -391,8 +391,8 @@ private:
                                          std::vector<server::wire::v1::StateSnapshot::SnapshotMessage>& out);
     void handle_refresh(std::shared_ptr<Session> session);
 
-    // Returns true if plugin handled/blocked the message (i.e., default logic should stop).
-    // May mutate text (replace) and/or send system notices.
+    // 플러그인이 메시지를 처리/차단했으면 true를 반환합니다(기본 로직은 중단).
+    // 필요 시 텍스트를 변경(replace)하거나 시스템 공지를 전송할 수 있습니다.
     bool maybe_handle_chat_hook_plugin(Session& s,
                                        const std::string& room,
                                        const std::string& sender,

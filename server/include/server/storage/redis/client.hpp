@@ -20,7 +20,7 @@ struct Options {
  * 
  * Redis의 다양한 명령어(String, Set, List, Pub/Sub, Streams)를 추상화하여
  * 실제 Redis 라이브러리(redis-plus-plus 등)와의 의존성을 격리합니다.
- * 이를 통해 테스트 시 Mock 객체로 대체하거나 다른 클라이언트로 교체하기 쉽습니다.
+ * 이를 통해 테스트 시 모의 객체로 대체하거나 다른 클라이언트로 교체하기 쉽습니다.
  */
 class IRedisClient {
 public:
@@ -99,7 +99,7 @@ public:
     /**
      * @brief String 다중 조회(`MGET`)를 수행합니다.
      * @param keys 조회할 키 목록
-     * @param out 키 순서와 동일한 결과 버퍼(`out.size()==keys.size()`, miss는 `std::nullopt`)
+     * @param out 키 순서와 동일한 결과 버퍼(`out.size()==keys.size()`, 누락은 `std::nullopt`)
      * @return 명령 성공 시 `true`
      */
     virtual bool mget(const std::vector<std::string>& keys,
@@ -216,7 +216,7 @@ public:
     struct StreamAutoClaimResult {
         std::string next_start_id;
         std::vector<StreamEntry> entries;
-        // Redis 7+ may return a 3rd array of deleted IDs; keep as best-effort.
+        // Redis 7+에서는 삭제된 ID의 3번째 배열이 올 수 있으므로 최선 노력으로 보존합니다.
         std::vector<std::string> deleted_ids;
     };
 
@@ -234,7 +234,7 @@ public:
     virtual bool xack(const std::string& key, const std::string& group, const std::string& id) = 0;
 
     /**
-     * @brief 컨슈머 그룹 pending 총량을 조회합니다(`XPENDING`).
+     * @brief 컨슈머 그룹 대기(pending) 총량을 조회합니다(`XPENDING`).
      * @param key 대상 스트림 키
      * @param group 소비자 그룹 이름
      * @param total pending 총량 출력 버퍼

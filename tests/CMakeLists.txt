@@ -59,7 +59,7 @@ target_link_libraries(chat_history_tests PRIVATE
     wire_proto
 )
 
-# dlopen/dlsym (Linux)
+# 리눅스 동적 로더 심볼(dlopen/dlsym)
 target_link_libraries(chat_history_tests PRIVATE ${CMAKE_DL_LIBS})
 
 include(GoogleTest)
@@ -163,6 +163,6 @@ target_link_libraries(server_general_tests PRIVATE
     wire_proto
 )
 
-# dlopen/dlsym (Linux)
+# 리눅스 동적 로더 심볼(dlopen/dlsym)
 target_link_libraries(server_general_tests PRIVATE ${CMAKE_DL_LIBS})
 gtest_discover_tests(server_general_tests)

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Checks Doxygen coverage for project headers and critical runtime sources."""
+"""프로젝트 헤더와 핵심 런타임 소스의 Doxygen 커버리지를 점검합니다."""
 
 from __future__ import annotations
 
@@ -124,7 +124,7 @@ def _collect_function_declaration(lines: list[str], start_index: int) -> tuple[s
     while index < len(lines):
         stripped = lines[index].strip()
 
-        # Multiline declaration can contain blank lines, but only after declaration starts.
+        # 멀티라인 선언은 선언 시작 이후에만 빈 줄을 허용합니다.
         if not stripped:
             if saw_open_paren:
                 index += 1
@@ -189,7 +189,7 @@ def check_header_file(path: Path, root: Path) -> list[Issue]:
             kind = m.group(1)
             stripped_decl = line.strip()
 
-            # Skip forward declarations.
+            # 전방 선언은 검사 대상에서 제외합니다.
             if not (stripped_decl.endswith(";") and "{" not in stripped_decl):
                 block = find_preceding_doxygen_block(lines, idx)
                 missing: list[str] = []
@@ -215,7 +215,7 @@ def check_header_file(path: Path, root: Path) -> list[Issue]:
         if _is_function_declaration_candidate(stripped):
             scope = class_stack[-1] if class_stack else None
 
-            # Only inspect public member declarations at direct class depth.
+            # 클래스 본문의 직접 public 멤버 선언만 검사합니다.
             if scope and scope.access == "public" and brace_depth == scope.depth:
                 declaration, end_idx = _collect_function_declaration(lines, idx)
                 if declaration is not None:
@@ -233,7 +233,7 @@ def check_header_file(path: Path, root: Path) -> list[Issue]:
                                 )
                             )
 
-                    # Consume full declaration range so multiline signatures are checked once.
+                    # 멀티라인 시그니처가 1회만 검사되도록 선언 구간 전체를 소비합니다.
                     while idx <= end_idx:
                         line_for_depth = lines[idx]
                         brace_depth += line_for_depth.count("{") - line_for_depth.count("}")
@@ -278,7 +278,7 @@ def _missing_function_tags(stripped: str, block: str, class_name: str | None) ->
     prefix = stripped.split("(", 1)[0].strip()
     params_text = stripped[stripped.find("(") + 1 : stripped.rfind(")")].strip()
 
-    # Extract function name and return token candidates.
+    # 함수 이름과 반환형 후보 토큰을 추출합니다.
     raw_tokens = prefix.replace("&", " ").replace("*", " ").split()
     tokens = [t for t in raw_tokens if t not in FUNCTION_PREFIX_QUALIFIERS]
     if not tokens:
@@ -345,8 +345,8 @@ def collect_critical_cpp_issues(root: Path) -> list[Issue]:
 
 
 def print_report(issues: list[Issue]) -> None:
-    print(f"[doxygen] FAILED: {len(issues)} issue(s)")
-    print("[doxygen] format: file:line | symbol | missing_tags")
+    print(f"[doxygen] 실패: {len(issues)}건")
+    print("[doxygen] 형식: file:line | symbol | missing_tags")
     for issue in issues:
         tags = ", ".join(issue.missing_tags)
         print(f"- {issue.file}:{issue.line} | {issue.symbol} | {tags}")
@@ -363,7 +363,7 @@ def main() -> int:
         print_report(issues)
         return 1
 
-    print("[doxygen] PASS: coverage checks succeeded")
+    print("[doxygen] 통과: 커버리지 검증 성공")
     return 0
 
 

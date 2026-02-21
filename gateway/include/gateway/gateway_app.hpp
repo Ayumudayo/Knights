@@ -50,7 +50,7 @@ public:
     /** @brief TCP 응답으로 전달되는 UDP bind ticket 정보입니다. */
     struct UdpBindTicket {
         std::string session_id;           ///< gateway 내부 세션 ID
-        std::uint64_t nonce{0};           ///< bind nonce
+        std::uint64_t nonce{0};           ///< bind 논스 값
         std::uint64_t expires_unix_ms{0}; ///< ticket 만료 시각(Epoch ms)
         std::string token;                ///< bind 검증 토큰
     };
@@ -70,9 +70,9 @@ public:
          * @param client_id 클라이언트 식별자
          * @param backend_instance_id 선택된 backend 인스턴스 ID
          * @param sticky_hit sticky 라우팅 적중 여부
-         * @param connection 클라이언트 연결 weak 포인터
+         * @param connection 클라이언트 연결 약한 포인터
          * @param send_queue_max_bytes backend 송신 큐 최대 바이트
-         * @param connect_timeout backend connect timeout
+         * @param connect_timeout backend 연결 타임아웃
          */
         BackendConnection(GatewayApp& app,
                        std::string session_id,
@@ -85,9 +85,9 @@ public:
         ~BackendConnection();
 
         /**
-         * @brief backend로 TCP connect를 시작합니다.
-         * @param host backend host
-         * @param port backend port
+         * @brief backend로 TCP 연결을 시작합니다.
+         * @param host backend 호스트
+         * @param port backend 포트
          */
         void connect(const std::string& host, std::uint16_t port);
 
@@ -109,7 +109,7 @@ public:
 
         /**
          * @brief gateway 내부 세션 ID를 반환합니다.
-         * @return backend 연결과 매핑된 session ID
+         * @return backend 연결과 매핑된 세션 ID
          */
         const std::string& session_id() const;
 
@@ -236,7 +236,7 @@ public:
      /** @brief UDP bind 요청 payload 파싱 결과입니다. */
      struct ParsedUdpBindRequest {
          std::string session_id;           ///< gateway 내부 세션 ID
-         std::uint64_t nonce{0};           ///< bind ticket nonce
+         std::uint64_t nonce{0};           ///< bind ticket 논스 값
          std::uint64_t expires_unix_ms{0}; ///< ticket 만료 시각(Epoch ms)
          std::string token;                ///< bind ticket 서명 토큰
      };
@@ -294,43 +294,43 @@ public:
     std::size_t backend_send_queue_max_bytes_{256 * 1024};
     std::string udp_listen_host_;
     std::uint16_t udp_listen_port_{0};
-     std::string udp_bind_secret_;
-     std::uint32_t udp_bind_ttl_ms_{5000};
-     std::uint32_t udp_bind_fail_window_ms_{10000};
-     std::uint32_t udp_bind_fail_limit_{5};
-     std::uint32_t udp_bind_block_ms_{60000};
-     UdpBindAbuseGuard udp_bind_abuse_guard_;
-     std::unique_ptr<boost::asio::ip::udp::socket> udp_socket_;
-     boost::asio::ip::udp::endpoint udp_remote_endpoint_;
-     std::array<std::uint8_t, 2048> udp_read_buffer_{};
+    std::string udp_bind_secret_;
+    std::uint32_t udp_bind_ttl_ms_{5000};
+    std::uint32_t udp_bind_fail_window_ms_{10000};
+    std::uint32_t udp_bind_fail_limit_{5};
+    std::uint32_t udp_bind_block_ms_{60000};
+    UdpBindAbuseGuard udp_bind_abuse_guard_;
+    std::unique_ptr<boost::asio::ip::udp::socket> udp_socket_;
+    boost::asio::ip::udp::endpoint udp_remote_endpoint_;
+    std::array<std::uint8_t, 2048> udp_read_buffer_{};
 
-     // State & Storage
-     std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
-     std::shared_ptr<server::state::IInstanceStateBackend> backend_registry_;
-     std::unique_ptr<SessionDirectory> session_directory_;
-     std::string redis_uri_;
+    // 상태 및 저장소
+    std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
+    std::shared_ptr<server::state::IInstanceStateBackend> backend_registry_;
+    std::unique_ptr<SessionDirectory> session_directory_;
+    std::string redis_uri_;
 
-     std::atomic<bool> infra_probe_stop_{false};
-     std::thread infra_probe_thread_;
-     std::atomic<std::uint64_t> udp_packets_total_{0};
-     std::atomic<std::uint64_t> udp_receive_error_total_{0};
-     std::atomic<std::uint64_t> udp_bind_ticket_issued_total_{0};
-      std::atomic<std::uint64_t> udp_bind_success_total_{0};
-      std::atomic<std::uint64_t> udp_bind_reject_total_{0};
-      std::atomic<std::uint64_t> udp_bind_block_total_{0};
-      std::atomic<std::uint64_t> udp_bind_rate_limit_reject_total_{0};
-      std::atomic<std::uint64_t> udp_forward_total_{0};
-      std::atomic<std::uint64_t> udp_forward_reliable_ordered_total_{0};
-      std::atomic<std::uint64_t> udp_forward_reliable_total_{0};
-      std::atomic<std::uint64_t> udp_forward_unreliable_sequenced_total_{0};
-      std::atomic<std::uint64_t> udp_replay_drop_total_{0};
-      std::atomic<std::uint64_t> udp_reorder_drop_total_{0};
-      std::atomic<std::uint64_t> udp_duplicate_drop_total_{0};
-      std::atomic<std::uint64_t> udp_retransmit_total_{0};
-      std::atomic<std::uint64_t> udp_loss_estimated_total_{0};
-      std::atomic<std::uint64_t> udp_jitter_ms_last_{0};
-      std::atomic<std::uint64_t> udp_rtt_ms_last_{0};
-     std::atomic<bool> udp_enabled_{false};
-  };
+    std::atomic<bool> infra_probe_stop_{false};
+    std::thread infra_probe_thread_;
+    std::atomic<std::uint64_t> udp_packets_total_{0};
+    std::atomic<std::uint64_t> udp_receive_error_total_{0};
+    std::atomic<std::uint64_t> udp_bind_ticket_issued_total_{0};
+    std::atomic<std::uint64_t> udp_bind_success_total_{0};
+    std::atomic<std::uint64_t> udp_bind_reject_total_{0};
+    std::atomic<std::uint64_t> udp_bind_block_total_{0};
+    std::atomic<std::uint64_t> udp_bind_rate_limit_reject_total_{0};
+    std::atomic<std::uint64_t> udp_forward_total_{0};
+    std::atomic<std::uint64_t> udp_forward_reliable_ordered_total_{0};
+    std::atomic<std::uint64_t> udp_forward_reliable_total_{0};
+    std::atomic<std::uint64_t> udp_forward_unreliable_sequenced_total_{0};
+    std::atomic<std::uint64_t> udp_replay_drop_total_{0};
+    std::atomic<std::uint64_t> udp_reorder_drop_total_{0};
+    std::atomic<std::uint64_t> udp_duplicate_drop_total_{0};
+    std::atomic<std::uint64_t> udp_retransmit_total_{0};
+    std::atomic<std::uint64_t> udp_loss_estimated_total_{0};
+    std::atomic<std::uint64_t> udp_jitter_ms_last_{0};
+    std::atomic<std::uint64_t> udp_rtt_ms_last_{0};
+    std::atomic<bool> udp_enabled_{false};
+};
 
- } // namespace gateway
+} // namespace gateway

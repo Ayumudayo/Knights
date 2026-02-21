@@ -5,23 +5,23 @@
 namespace gateway {
 
 /**
- * @brief Tracks sequence-based UDP quality signals for a single bound session.
+ * @brief 단일 바인딩 세션의 UDP 시퀀스 기반 품질 신호를 추적합니다.
  *
- * The tracker identifies duplicates/reorders and estimates loss and jitter
- * using packet sequence and receive-time deltas.
+ * 패킷 시퀀스와 수신 시각 차이를 이용해
+ * 중복/역순 패킷을 식별하고 손실 및 지터를 추정합니다.
  */
 class UdpSequencedMetrics {
 public:
-    /** @brief Classification and quality deltas for one packet update. */
+    /** @brief 단일 패킷 업데이트에 대한 분류 결과와 품질 변화량입니다. */
     struct UpdateResult {
-        bool accepted{false};                    ///< Packet accepted as forward progress.
-        bool duplicate{false};                   ///< Packet sequence duplicated latest accepted seq.
-        bool reordered{false};                   ///< Packet sequence older than latest accepted seq.
-        std::uint64_t estimated_lost_packets{0}; ///< Estimated missing packets before this packet.
-        std::uint64_t jitter_ms{0};              ///< Interarrival jitter delta in milliseconds.
+        bool accepted{false};                    ///< 정상 진행 패킷으로 수용됨
+        bool duplicate{false};                   ///< 마지막 수용 시퀀스와 동일한 중복 패킷
+        bool reordered{false};                   ///< 마지막 수용 시퀀스보다 오래된 역순 패킷
+        std::uint64_t estimated_lost_packets{0}; ///< 이번 패킷 이전 누락으로 추정되는 패킷 수
+        std::uint64_t jitter_ms{0};              ///< 패킷 간 도착 지터 변화량(ms)
     };
 
-    /** @brief Clears tracker state, typically on rebind. */
+    /** @brief 추적기 상태를 초기화합니다(주로 재바인딩 시). */
     void reset() {
         initialized_ = false;
         last_seq_ = 0;
@@ -30,10 +30,10 @@ public:
     }
 
     /**
-     * @brief Processes one packet sample and updates quality statistics.
-     * @param seq Packet sequence number from transport header.
-     * @param recv_unix_ms Packet receive unix timestamp in milliseconds.
-     * @return Packet classification and estimated quality deltas.
+     * @brief 단일 패킷 샘플을 처리하고 품질 통계를 갱신합니다.
+     * @param seq 전송 헤더의 패킷 시퀀스 번호
+     * @param recv_unix_ms 패킷 수신 유닉스 시각(ms)
+     * @return 패킷 분류 결과 및 추정 품질 변화량
      */
     UpdateResult on_packet(std::uint32_t seq, std::uint64_t recv_unix_ms) {
         UpdateResult result{};

@@ -63,9 +63,9 @@ public:
     virtual bool remove(const std::string& instance_id) = 0;
 
     /**
-     * @brief 생존 신호(heartbeat)를 갱신합니다.
+     * @brief 생존 신호(하트비트)를 갱신합니다.
      * @param instance_id 갱신할 인스턴스 ID
-     * @param heartbeat_ms heartbeat 시각(Epoch ms)
+     * @param heartbeat_ms 하트비트 시각(Epoch ms)
      * @return 갱신 성공 시 `true`
      */
     virtual bool touch(const std::string& instance_id, std::uint64_t heartbeat_ms) = 0;
@@ -94,11 +94,11 @@ namespace detail {
 /**
  * @brief InstanceRecord를 JSON 문자열로 직렬화합니다.
  * @param record 직렬화할 인스턴스 정보
- * @return 직렬화된 JSON payload
+ * @return 직렬화된 JSON 본문
  */
 std::string serialize_json(const InstanceRecord& record);
 /**
- * @brief JSON payload를 InstanceRecord로 역직렬화합니다.
+ * @brief JSON 본문을 InstanceRecord로 역직렬화합니다.
  * @param payload 역직렬화할 JSON 문자열
  * @return 파싱 성공 시 `InstanceRecord`, 실패 시 `std::nullopt`
  */
@@ -157,7 +157,7 @@ public:
     /**
      * @brief Redis 상태 백엔드를 생성합니다.
      * @param client Redis 접근 클라이언트
-     * @param key_prefix 인스턴스 키 prefix
+     * @param key_prefix 인스턴스 키 접두어
      * @param ttl 인스턴스 레코드 TTL
      */
     RedisInstanceStateBackend(std::shared_ptr<IRedisClient> client,
@@ -177,8 +177,8 @@ private:
     std::string key_prefix_;
     std::chrono::seconds ttl_;
 
-    // Cache refresh throttle: list_instances() may be called from hot paths (gateway accept).
-    // Avoid doing SCAN+GET on every call.
+    // 캐시 갱신 쓰로틀: list_instances()는 핫패스(gateway accept)에서 자주 호출될 수 있음.
+    // 매 호출마다 SCAN+GET을 수행하지 않도록 최소 간격을 둡니다.
     std::chrono::milliseconds reload_min_interval_{500};
     mutable std::chrono::steady_clock::time_point last_reload_attempt_{};
     mutable std::chrono::steady_clock::time_point last_reload_ok_{};
@@ -195,7 +195,7 @@ public:
 
     /**
      * @brief Consul KV 기반 인스턴스 상태 백엔드를 생성합니다.
-     * @param base_path KV base path
+     * @param base_path KV 기본 경로
      * @param put_callback PUT 요청 콜백
      * @param delete_callback DELETE 요청 콜백
      */
@@ -221,7 +221,7 @@ private:
 /**
  * @brief 서버 Redis 클라이언트를 registry 전용 인터페이스로 감쌉니다.
  * @param client 원본 Redis 클라이언트
- * @return registry 백엔드에서 사용할 adapter
+ * @return registry 백엔드에서 사용할 어댑터
  */
 std::shared_ptr<RedisInstanceStateBackend::IRedisClient>
 make_redis_state_client(std::shared_ptr<server::storage::redis::IRedisClient> client);

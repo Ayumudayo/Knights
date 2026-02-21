@@ -14,10 +14,10 @@
 #include "server/storage/postgres/connection_pool.hpp"
 
 /**
- * @brief Implements bootstrap adapters that bridge server_app to server_core internals.
+ * @brief server_app와 server_core 내부 구현을 연결하는 부트스트랩 어댑터 구현부입니다.
  *
- * This unit centralizes creation, lifecycle, and registry helper calls so
- * app bootstrap code stays isolated from concrete core implementation details.
+ * 생성/수명주기/레지스트리 헬퍼 호출을 이 단위로 집중시켜
+ * 앱 부트스트랩 코드가 구체 core 구현 상세와 직접 결합되지 않도록 유지합니다.
  */
 namespace server::app::core_internal {
 
