@@ -34,6 +34,16 @@ pwsh scripts/run_full_stack_observability.ps1
 
 포트는 `docker/stack/docker-compose.yml`의 `*_HOST_PORT` 환경 변수로 재지정할 수 있다. (`ADMIN_APP_HOST_PORT` 포함)
 
+UDP canary/rollback 리허설은 env override로 실행한다:
+
+```powershell
+pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-canary.example
+pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-rollback.example
+
+# end-to-end rehearsal (10분 기준)
+pwsh scripts/rehearse_udp_rollout_rollback.ps1
+```
+
 ## 종료
 
 ```powershell

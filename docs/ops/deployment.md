@@ -44,6 +44,16 @@ pwsh scripts/run_full_stack_observability.ps1
 
 이 프로파일은 `docker/observability/prometheus/alerts.yml`의 UDP 품질/보안 알람 룰을 함께 로드한다.
 
+UDP canary/rollback 리허설 시에는 env 파일 오버라이드로 실행한다:
+
+```powershell
+# canary (gateway-1 UDP on, gateway-2 UDP off)
+pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-canary.example
+
+# rollback (TCP-only)
+pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-rollback.example
+```
+
 ### 2.3 Dev 검증 체크리스트
 1. HAProxy 엔드포인트로 접속: `127.0.0.1:6000`
 2. server/gateway metrics 확인(옵션): `/metrics` 200 OK
@@ -90,3 +100,4 @@ helm rollback gateway <REV>
 - `docs/ops/prewarm.md` – 새 인스턴스 pre-warm
 - `docs/ops/runbook.md` – 알람 대응 순서
 - `docs/ops/fallback-and-alerts.md` – 장애 시 fallback
+- `docs/ops/udp-rollout-rollback.md` – UDP canary/rollback 실행 절차

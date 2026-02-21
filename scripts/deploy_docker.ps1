@@ -6,7 +6,8 @@ param (
     [switch]$NoCache = $false,
     [switch]$Observability = $false,
     [string]$ProjectName = "",
-    [switch]$NoBase = $false
+    [switch]$NoBase = $false,
+    [string]$EnvFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -46,10 +47,42 @@ function Resolve-ComposeTarget {
     }
 }
 
-function Maybe-PrintComposeEnvHint([string]$ComposeDir) {
-    $envPath = Join-Path $ComposeDir ".env"
-    if (-not (Test-Path $envPath)) {
-        Write-Host "No compose .env found: $envPath (using defaults)" -ForegroundColor Gray
+function Resolve-ComposeEnvFile([string]$EnvFilePath, [string]$ComposeDir, [string]$ProjectRoot) {
+    if (-not $EnvFilePath -or $EnvFilePath.Trim() -eq "") {
+        return $null
+    }
+
+    if ([System.IO.Path]::IsPathRooted($EnvFilePath)) {
+        if (-not (Test-Path $EnvFilePath)) {
+            Write-Error "Compose env file not found: $EnvFilePath"
+        }
+        return (Resolve-Path $EnvFilePath).Path
+    }
+
+    $projectCandidate = Join-Path $ProjectRoot $EnvFilePath
+    if (Test-Path $projectCandidate) {
+        return (Resolve-Path $projectCandidate).Path
+    }
+
+    $composeCandidate = Join-Path $ComposeDir $EnvFilePath
+    if (Test-Path $composeCandidate) {
+        return (Resolve-Path $composeCandidate).Path
+    }
+
+    Write-Error "Compose env file not found (checked project and compose dir): $EnvFilePath"
+}
+
+function Maybe-PrintComposeEnvHint([string]$ComposeDir, [string]$ResolvedEnvFile) {
+    if ($ResolvedEnvFile -and $ResolvedEnvFile.Trim() -ne "") {
+        Write-Host "Using compose env file: $ResolvedEnvFile" -ForegroundColor Gray
+        return
+    }
+
+    $defaultEnvPath = Join-Path $ComposeDir ".env"
+    if (Test-Path $defaultEnvPath) {
+        Write-Host "Using default compose env file: $defaultEnvPath" -ForegroundColor Gray
+    } else {
+        Write-Host "No compose .env found: $defaultEnvPath (using defaults)" -ForegroundColor Gray
     }
 }
 
@@ -76,9 +109,11 @@ $ComposePath = $target.ComposePath
 $ComposeDir = $target.ComposeDir
 $ProjectName = $target.ProjectName
 
+$ResolvedEnvFile = Resolve-ComposeEnvFile -EnvFilePath $EnvFile -ComposeDir $ComposeDir -ProjectRoot $ProjectRoot
+
 Write-Host "Compose: $ComposePath" -ForegroundColor Gray
 Write-Host "Project: $ProjectName" -ForegroundColor Gray
-Maybe-PrintComposeEnvHint $ComposeDir
+Maybe-PrintComposeEnvHint $ComposeDir $ResolvedEnvFile
 
 $ComposeBaseArgs = @(
     "compose",
@@ -86,6 +121,10 @@ $ComposeBaseArgs = @(
     "--project-directory", $ComposeDir,
     "-f", $ComposePath
 )
+
+if ($ResolvedEnvFile) {
+    $ComposeBaseArgs += @("--env-file", $ResolvedEnvFile)
+}
 
 if ($Observability) {
     $ComposeBaseArgs += @("--profile", "observability")

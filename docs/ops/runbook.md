@@ -40,6 +40,12 @@
 3. 오탐이면 `GATEWAY_UDP_BIND_FAIL_WINDOW_MS`, `GATEWAY_UDP_BIND_FAIL_LIMIT`, `GATEWAY_UDP_BIND_BLOCK_MS`를 완화
 4. 공격이면 edge(LB/WAF)에서 선차단하고, 필요 시 `GATEWAY_UDP_LISTEN` 비활성으로 TCP-only 복귀
 
+### 3.5 UDP canary/rollback 리허설
+1. canary 오픈: `pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-canary.example`
+2. `gateway_udp_enabled` 상태 확인(gateway-1=1, gateway-2=0)
+3. rollback: `pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-rollback.example`
+4. rollback 후 `gateway_udp_enabled`가 양 gateway에서 0인지 확인하고 `python tests/python/verify_pong.py`로 TCP smoke 검증
+
 ## 4. Smoke 테스트 절차
 1. devclient 실행 → `/login runbook` → `/join lobby` → `/chat runbook-check`
 2. `/refresh` 로 snapshot 정상 반환 여부 확인
@@ -61,3 +67,4 @@
 - `docs/ops/fallback-and-alerts.md`
 - `docs/ops/deployment.md`
 - `docs/ops/observability.md`
+- `docs/ops/udp-rollout-rollback.md`
