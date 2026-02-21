@@ -17,6 +17,10 @@
 | `wb_pending` | > 500 (5m) | "write-behind backlog" |
 | `sum(increase(wb_dlq_replay_dead_total[5m]))` | > 0 | "DLQ dead events" |
 | `sum(rate(chat_dispatch_exception_total[1m]))` | > 1/s | "Server dispatch exceptions" |
+| `sum(rate(gateway_udp_bind_rate_limit_reject_total[5m]))` | > 1/s (10m) | "UDP bind abuse spike" |
+| `sum(rate(gateway_udp_loss_estimated_total[5m])) / clamp_min(sum(rate(gateway_udp_forward_total[5m])), 1)` | > 0.05 (10m) | "UDP estimated loss high" |
+| `sum(rate(gateway_udp_replay_drop_total[5m]))` | > 2/s (10m) | "UDP replay/reorder drops high" |
+| `max_over_time(gateway_udp_jitter_ms_last[10m])` | > 150ms (10m) | "UDP jitter high" |
 
 AlertManager → Slack → On-call 순으로 전달하고, runbook 절차에 따라 대응한다.
 

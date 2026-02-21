@@ -42,6 +42,8 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 pwsh scripts/run_full_stack_observability.ps1
 ```
 
+이 프로파일은 `docker/observability/prometheus/alerts.yml`의 UDP 품질/보안 알람 룰을 함께 로드한다.
+
 ### 2.3 Dev 검증 체크리스트
 1. HAProxy 엔드포인트로 접속: `127.0.0.1:6000`
 2. server/gateway metrics 확인(옵션): `/metrics` 200 OK
@@ -60,6 +62,7 @@ pwsh scripts/run_full_stack_observability.ps1
 2. values에 DB/Redis Secret reference, ServiceMonitor(`/metrics`), HPA/PDB 정책을 반영한다.
 3. `helm upgrade --install ...`로 배포하고 rollout 상태를 확인한다.
 4. `gateway`에는 `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS`, `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES`를 환경별로 명시한다.
+5. UDP ingress 사용 시 `GATEWAY_UDP_BIND_TTL_MS`, `GATEWAY_UDP_BIND_FAIL_WINDOW_MS`, `GATEWAY_UDP_BIND_FAIL_LIMIT`, `GATEWAY_UDP_BIND_BLOCK_MS`를 환경별 트래픽 특성에 맞게 조정한다.
 
 Edge Load Balancer는 클러스터 외부(예: HAProxy, AWS NLB)에서 `gateway` Service로 TCP 트래픽을 분산한다.
 

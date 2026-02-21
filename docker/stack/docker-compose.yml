@@ -235,6 +235,7 @@ services:
     profiles: ["observability"]
     volumes:
       - ../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ../observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
     ports:
       - "${PROMETHEUS_HOST_PORT:-39090}:9090"
     networks:

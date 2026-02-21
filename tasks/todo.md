@@ -137,21 +137,21 @@
 
 ## 5.1 메트릭/대시보드
 
-- [ ] UDP 품질 지표 추가(RTT/loss/jitter/reorder/dup/retransmit)
-- [ ] transport/delivery 레이블 기반 대시보드 갱신
-- [ ] 임계치 기반 알람 규칙 반영
+- [x] UDP 품질 지표 추가(RTT/loss/jitter/reorder/dup/retransmit)
+- [x] transport/delivery 레이블 기반 대시보드 갱신
+- [x] 임계치 기반 알람 규칙 반영
 
 ## 5.2 보안/남용 방지
 
-- [ ] UDP 바인딩 토큰 서명/TTL 검증
-- [ ] rate limit 및 반복 실패 차단
-- [ ] replay/session hijack 방어 테스트
+- [x] UDP 바인딩 토큰 서명/TTL 검증
+- [x] rate limit 및 반복 실패 차단
+- [x] replay/session hijack 방어 테스트
 
 ## 5.3 운영 문서
 
-- [ ] `docs/ops/observability.md` 갱신
-- [ ] `docs/ops/runbook.md`에 장애 대응 절차 추가
-- [ ] 배포/롤백 체크리스트(`docs/ops/deployment.md`) 갱신
+- [x] `docs/ops/observability.md` 갱신
+- [x] `docs/ops/runbook.md`에 장애 대응 절차 추가
+- [x] 배포/롤백 체크리스트(`docs/ops/deployment.md`) 갱신
 
 완료 기준:
 

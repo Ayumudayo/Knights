@@ -13,6 +13,8 @@
 | Redis Lag | `chat_subscribe_last_lag_ms p95 > 200ms` | (1) Redis INFO latency (2) Pub/Sub 사용량 (3) 게이트웨이 로그 |
 | Write-behind backlog | `wb_pending > 500` | (1) DB 세션 확인 (2) `wb_worker` 로그 (3) DLQ 상태 |
 | Dispatch Exception | `chat_dispatch_exception_total` 급증 | (1) server_app 로그 (2) 최근 배포 롤백 |
+| UDP bind abuse | `gateway_udp_bind_rate_limit_reject_total` 증가 + `gateway_udp_bind_block_total` 증가 | (1) 공격/오탐 source IP 확인 (2) `GATEWAY_UDP_BIND_FAIL_*`/`GATEWAY_UDP_BIND_BLOCK_MS` 재검토 (3) 필요 시 임시로 UDP ingress 제한 |
+| UDP quality degradation | `GatewayUdpEstimatedLossHigh` 또는 `GatewayUdpJitterHigh` 발생 | (1) `gateway-udp-quality` 대시보드에서 loss/jitter/replay 분해 (2) 네트워크 구간 확인 (3) 필요 시 UDP 대상 opcode 축소 또는 TCP fallback |
 
 ## 3. 장애 시나리오
 ### 3.1 Redis 장애
@@ -31,6 +33,12 @@
 1. HAProxy 백엔드 상태(다운/체크 실패) 확인
 2. Gateway pod 로그 확인 (listen 실패, Redis 연결 실패 등)
 3. 필요 시 Gateway를 순차 재시작(HAProxy 백엔드에서 제외 → 재기동 → 복귀)
+
+### 3.4 UDP bind 반복 실패/차단 급증
+1. `gateway_udp_bind_reject_total`, `gateway_udp_bind_rate_limit_reject_total`, `gateway_udp_bind_block_total`의 증가 시점 확인
+2. source IP/포트 분포를 확인해 단일 공격원인지, NAT 뒤 정상 사용자 다수인지 구분
+3. 오탐이면 `GATEWAY_UDP_BIND_FAIL_WINDOW_MS`, `GATEWAY_UDP_BIND_FAIL_LIMIT`, `GATEWAY_UDP_BIND_BLOCK_MS`를 완화
+4. 공격이면 edge(LB/WAF)에서 선차단하고, 필요 시 `GATEWAY_UDP_LISTEN` 비활성으로 TCP-only 복귀
 
 ## 4. Smoke 테스트 절차
 1. devclient 실행 → `/login runbook` → `/join lobby` → `/chat runbook-check`

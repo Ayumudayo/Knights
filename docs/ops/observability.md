@@ -42,6 +42,7 @@ pwsh scripts/check_observability.ps1
 - `write-behind.json`: `wb_pending`이 감소/평탄화되는지, `wb_flush_*`가 증가하는지
 - `infra.json`: redis/postgres exporter가 up인지
 - `load-balancer.json`: HAProxy connection/health 추세가 보이는지
+- `gateway-udp-quality.json`: delivery별 forward, reason별 drop, jitter/rtt/loss 추세가 보이는지
 
 ## 3. Metrics Catalog (Current)
 
@@ -76,6 +77,15 @@ pwsh scripts/check_observability.ps1
 - Backend guardrail config:
   - `gateway_backend_connect_timeout_ms` (gauge)
   - `gateway_backend_send_queue_max_bytes` (gauge)
+- UDP ingress/bind guardrails:
+  - `gateway_udp_enabled` (gauge)
+  - `gateway_udp_packets_total`, `gateway_udp_receive_error_total` (counters)
+  - `gateway_udp_bind_ticket_issued_total`, `gateway_udp_bind_success_total`, `gateway_udp_bind_reject_total` (counters)
+  - `gateway_udp_bind_rate_limit_reject_total`, `gateway_udp_bind_block_total` (counters)
+  - `gateway_udp_forward_total`, `gateway_udp_replay_drop_total`, `gateway_udp_reorder_drop_total`, `gateway_udp_duplicate_drop_total`, `gateway_udp_retransmit_total` (counters)
+  - `gateway_udp_loss_estimated_total` (counter; seq-gap 기반 추정치)
+  - `gateway_udp_jitter_ms_last`, `gateway_udp_rtt_ms_last` (gauges; latest observed)
+  - `gateway_udp_bind_ttl_ms`, `gateway_udp_bind_fail_window_ms`, `gateway_udp_bind_fail_limit`, `gateway_udp_bind_block_ms` (gauges)
 
 ### wb_worker
 - Build: `knights_build_info{...} 1`
@@ -120,6 +130,15 @@ max_over_time(wb_pending[5m])
 - redis/postgres exporter down: `docker/stack/docker-compose.yml`의 `observability` profile이 올라왔는지 확인한다.
 - chat 상세 로그가 기대보다 적음: 최신 서버 경로에서는 고빈도 로그(`CHAT_SEND` 본문, whisper 상태, publish 카운트)가 노이즈 절감을 위해 `debug` 또는 샘플링으로 조정되어 기본 `info`에서 보이지 않을 수 있다.
 
-## 6. Tracing (Roadmap)
+## 6. Alert Rules (Gateway UDP)
+
+- Prometheus rule file: `docker/observability/prometheus/alerts.yml`
+- 기본 경보:
+  - `GatewayUdpBindAbuseSpike`: bind rate-limit reject 급증
+  - `GatewayUdpEstimatedLossHigh`: 추정 loss ratio > 5%
+  - `GatewayUdpReplayDropSpike`: replay/reorder drop 급증
+  - `GatewayUdpJitterHigh`: jitter 지속 고수준
+
+## 7. Tracing (Roadmap)
 
 OpenTelemetry/OTLP는 아직 `docker/stack` 표준 런타임에 포함되어 있지 않다. `/metrics` + structured log를 우선 기준으로 하고, tracing은 이후 단계에서 추가한다.

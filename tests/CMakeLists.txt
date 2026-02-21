@@ -74,11 +74,14 @@ add_executable(core_general_tests
     core/test_core_metrics.cpp
     core/test_core_paths.cpp
     core/test_core_net.cpp
+    core/test_udp_bind_abuse_guard.cpp
+    core/test_udp_sequenced_metrics.cpp
     core/test_security_compression.cpp
 )
 target_include_directories(core_general_tests PRIVATE
     ${CMAKE_SOURCE_DIR}/core/include
     ${CMAKE_SOURCE_DIR}/server/include
+    ${CMAKE_SOURCE_DIR}/gateway/include
 )
 target_link_libraries(core_general_tests PRIVATE
     GTest::gtest_main

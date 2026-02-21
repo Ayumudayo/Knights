@@ -20,6 +20,8 @@
 #include <boost/asio/steady_timer.hpp>
 
 #include "gateway/auth/authenticator.hpp"
+#include "gateway/udp_bind_abuse_guard.hpp"
+#include "gateway/udp_sequenced_metrics.hpp"
 #include "server/core/app/app_host.hpp"
 #include "server/core/net/hive.hpp"
 #include "server/core/net/listener.hpp"
@@ -266,9 +268,9 @@ public:
         boost::asio::ip::udp::endpoint udp_endpoint;
         std::uint64_t udp_nonce{0};
         std::uint64_t udp_expires_unix_ms{0};
+        std::uint64_t udp_ticket_issued_unix_ms{0};
         std::string udp_token;
-        std::uint32_t udp_last_seq{0};
-        bool udp_last_seq_initialized{false};
+        UdpSequencedMetrics udp_sequenced_metrics;
     };
     std::mutex session_mutex_;
     std::unordered_map<std::string, SessionState> sessions_;
@@ -286,11 +288,15 @@ public:
     std::size_t backend_send_queue_max_bytes_{256 * 1024};
     std::string udp_listen_host_;
     std::uint16_t udp_listen_port_{0};
-    std::string udp_bind_secret_;
-    std::uint32_t udp_bind_ttl_ms_{5000};
-    std::unique_ptr<boost::asio::ip::udp::socket> udp_socket_;
-    boost::asio::ip::udp::endpoint udp_remote_endpoint_;
-    std::array<std::uint8_t, 2048> udp_read_buffer_{};
+     std::string udp_bind_secret_;
+     std::uint32_t udp_bind_ttl_ms_{5000};
+     std::uint32_t udp_bind_fail_window_ms_{10000};
+     std::uint32_t udp_bind_fail_limit_{5};
+     std::uint32_t udp_bind_block_ms_{60000};
+     UdpBindAbuseGuard udp_bind_abuse_guard_;
+     std::unique_ptr<boost::asio::ip::udp::socket> udp_socket_;
+     boost::asio::ip::udp::endpoint udp_remote_endpoint_;
+     std::array<std::uint8_t, 2048> udp_read_buffer_{};
 
      // State & Storage
      std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
@@ -303,10 +309,21 @@ public:
      std::atomic<std::uint64_t> udp_packets_total_{0};
      std::atomic<std::uint64_t> udp_receive_error_total_{0};
      std::atomic<std::uint64_t> udp_bind_ticket_issued_total_{0};
-     std::atomic<std::uint64_t> udp_bind_success_total_{0};
-     std::atomic<std::uint64_t> udp_bind_reject_total_{0};
-     std::atomic<std::uint64_t> udp_forward_total_{0};
-     std::atomic<std::uint64_t> udp_replay_drop_total_{0};
+      std::atomic<std::uint64_t> udp_bind_success_total_{0};
+      std::atomic<std::uint64_t> udp_bind_reject_total_{0};
+      std::atomic<std::uint64_t> udp_bind_block_total_{0};
+      std::atomic<std::uint64_t> udp_bind_rate_limit_reject_total_{0};
+      std::atomic<std::uint64_t> udp_forward_total_{0};
+      std::atomic<std::uint64_t> udp_forward_reliable_ordered_total_{0};
+      std::atomic<std::uint64_t> udp_forward_reliable_total_{0};
+      std::atomic<std::uint64_t> udp_forward_unreliable_sequenced_total_{0};
+      std::atomic<std::uint64_t> udp_replay_drop_total_{0};
+      std::atomic<std::uint64_t> udp_reorder_drop_total_{0};
+      std::atomic<std::uint64_t> udp_duplicate_drop_total_{0};
+      std::atomic<std::uint64_t> udp_retransmit_total_{0};
+      std::atomic<std::uint64_t> udp_loss_estimated_total_{0};
+      std::atomic<std::uint64_t> udp_jitter_ms_last_{0};
+      std::atomic<std::uint64_t> udp_rtt_ms_last_{0};
      std::atomic<bool> udp_enabled_{false};
   };
 
