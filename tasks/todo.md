@@ -155,19 +155,19 @@
 
 완료 기준:
 
-- [ ] 운영팀이 투트랙 장애 대응을 문서만으로 수행 가능
+- [x] 운영팀이 투트랙 장애 대응을 문서만으로 수행 가능
 
 ---
 
 ## 6) CI/빌드/테스트 체계
 
-- [ ] CMake 옵션(UDP on/off, feature flag) 정비
-- [ ] `.github/workflows/ci.yml`에 schema/policy/test 단계 추가
-- [ ] 빠른 테스트와 느린 테스트를 분리해 파이프라인 최적화
+- [x] CMake 옵션(UDP on/off, feature flag) 정비
+- [x] `.github/workflows/ci.yml`에 schema/policy/test 단계 추가
+- [x] 빠른 테스트와 느린 테스트를 분리해 파이프라인 최적화
 
 완료 기준:
 
-- [ ] main 브랜치에서 지속적으로 안정적인 CI 결과 확보
+- [x] main 브랜치에서 지속적으로 안정적인 CI 결과 확보
 
 ---
 
@@ -175,19 +175,19 @@
 
 ## 7.1 롤아웃
 
-- [ ] canary 환경에서 UDP 대상 opcode 제한 오픈
-- [ ] 핵심 메트릭 안정화 확인 후 점진 확장
-- [ ] 이슈 발생 시 즉시 feature flag rollback
+- [x] canary 환경에서 UDP 대상 opcode 제한 오픈
+- [x] 핵심 메트릭 안정화 확인 후 점진 확장
+- [x] 이슈 발생 시 즉시 feature flag rollback
 
 ## 7.2 롤백
 
-- [ ] UDP ingress 즉시 차단 절차 검증
-- [ ] TCP-only 모드 복귀 시 데이터/세션 정합성 확인
-- [ ] 사후 분석 및 재시도 조건 문서화
+- [x] UDP ingress 즉시 차단 절차 검증
+- [x] TCP-only 모드 복귀 시 데이터/세션 정합성 확인
+- [x] 사후 분석 및 재시도 조건 문서화
 
 완료 기준:
 
-- [ ] 10분 내 안전 롤백이 가능함을 리허설로 증명
+- [x] 10분 내 안전 롤백이 가능함을 리허설로 증명
 
 ---
 

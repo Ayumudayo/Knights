@@ -42,6 +42,9 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile dock
 
 # end-to-end rehearsal (10분 기준)
 pwsh scripts/rehearse_udp_rollout_rollback.ps1
+
+# 재리허설(이미지 재빌드 생략)
+pwsh scripts/rehearse_udp_rollout_rollback.ps1 -NoBuild
 ```
 
 ## 종료
