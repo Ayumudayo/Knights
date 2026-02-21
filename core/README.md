@@ -1,25 +1,25 @@
-# server_core
+# 코어 라이브러리(server_core)
 
 `core`는 Knights 프로젝트 전역에서 공유하는 C++20 정적 라이브러리(Static Library)입니다.
 Boost.Asio 기반의 고성능 네트워크 계층(Hive/SessionListener/Session + TransportListener/TransportConnection), 멀티스레딩 지원(JobQueue, TaskScheduler), 메모리 관리(MemoryPool), 그리고 로깅 및 유틸리티를 제공합니다.
 
 ## 주요 기능
 
-### 1. 네트워크 (Network)
+### 1. 네트워크(Network)
 - **비동기 I/O**: Boost.Asio `io_context`와 `strand`를 활용한 Lock-Free에 가까운 동시성 모델.
 - **세션/연결 관리**: `server_app`은 `SessionListener`/`Session`, `gateway_app`은 `TransportListener`/`TransportConnection` 조합으로 TCP 수명주기를 관리합니다.
 - **패킷 처리**: `Dispatcher`를 통해 수신된 패킷을 적절한 핸들러로 라우팅합니다.
 
-### 2. 동시성 (Concurrency)
+### 2. 동시성(Concurrency)
 - **JobQueue**: 특정 컨텍스트(예: 방, 유저) 내에서 순차적 실행을 보장하는 작업 큐.
 - **TaskScheduler**: 지연된 작업이나 주기적인 작업을 스케줄링.
 - **ThreadManager**: 워커 스레드 풀을 관리하고 `io_context`를 구동.
 
-### 3. 메모리 (Memory)
+### 3. 메모리(Memory)
 - **MemoryPool**: 고정 크기 블록 할당을 통해 메모리 파편화를 방지하고 할당/해제 속도를 최적화.
 - **BufferManager**: 네트워크 송수신 버퍼를 풀링하여 관리.
 
-### 4. 유틸리티 (Utility)
+### 4. 유틸리티(Utility)
 - **Async Logger**: 백그라운드 스레드를 이용한 비동기 로깅으로 메인 로직 스레드의 블로킹 방지.
 - **Config/Options**: 런타임 옵션 구조체 제공(예: `SessionOptions`). 로컬 `.env` 로딩은 스크립트에서 처리.
 
@@ -39,7 +39,7 @@ core/
 └─ src/            # 구현체 (.cpp)
 ```
 
-## 빌드 방법 (Build)
+## 빌드 방법(Build)
 
 이 프로젝트는 **CMake**와 **Visual Studio 2022**를 지원하며, `vcpkg`를 통해 의존성을 관리합니다.
 
@@ -59,7 +59,7 @@ pwsh scripts/build.ps1 -Config Debug -Target server_core
 cmake --build --preset windows-debug --target server_core
 ```
 
-## 사용 예시 (Example)
+## 사용 예시(Example)
 
 서버를 구동하는 기본적인 흐름은 다음과 같습니다. (의사 코드)
 
@@ -85,13 +85,13 @@ int main() {
 }
 ```
 
-## 최신 변경 사항 (Recent Changes)
+## 최신 변경 사항(Recent Changes)
 - **Async Logging**: `log::info`, `log::error` 등이 이제 비동기로 동작하여 성능 저하를 최소화합니다.
 - **Async Logger Enqueue 최적화**: 내부 큐 삽입 경로를 move-friendly하게 조정해 로그 라인 enqueue 시 불필요한 문자열 복사를 줄였습니다.
 - **Heartbeat**: `Session`은 설정된 주기마다 자동으로 `MSG_PING`을 전송하여 연결 상태를 확인합니다.
 - **Gather-Write**: 여러 개의 작은 패킷을 보낼 때 `gather-write`를 사용하여 시스템 콜 비용을 줄였습니다.
 
-## API 문서
+## 공개 API 문서
 - API 경계/분류: `docs/core-api-boundary.md`
 - API 개요: `docs/core-api/overview.md`
 - 호환성 정책: `docs/core-api/compatibility-policy.md`

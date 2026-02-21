@@ -1,4 +1,4 @@
-# gateway_app
+# 게이트웨이 애플리케이션(gateway_app)
 
 `gateway/` 는 TCP 클라이언트 연결을 수용하는 프런트 엔드(Edge Gateway)입니다.
 
@@ -31,7 +31,7 @@ gateway/
 - 현재 방식은 "이미 유효한 바인딩은 재사용(Sticky)"하고, 바인딩이 없거나 만료된 경우에만 "가장 한가한 서버 선택(Least Connections)"을 적용해
   사용자 경험과 분산 효율을 동시에 맞춥니다.
 
-### Auth 확장 예시
+### 인증(Auth) 확장 예시
 ```cpp
 class TokenAuthenticator : public gateway::auth::IAuthenticator {
  public:
@@ -51,8 +51,8 @@ class TokenAuthenticator : public gateway::auth::IAuthenticator {
 | `GATEWAY_LISTEN` | TCP 수신 주소:포트 | `0.0.0.0:6000` |
 | `GATEWAY_ID` | 인스턴스 식별자 (Presence, 로그) | `gateway-default` |
 | `REDIS_URI` | Redis URI (Instance Registry/SessionDirectory) | `tcp://127.0.0.1:6379` |
-| `SERVER_REGISTRY_PREFIX` | Instance Registry key prefix (server_app과 동일) | `gateway/instances/` |
-| `SERVER_REGISTRY_TTL` | Instance Registry TTL seconds | `30` |
+| `SERVER_REGISTRY_PREFIX` | Instance Registry 키 접두사 (server_app과 동일) | `gateway/instances/` |
+| `SERVER_REGISTRY_TTL` | Instance Registry TTL(초) | `30` |
 | `METRICS_PORT` | `/metrics` HTTP 포트 | `6001` |
 | `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS` | backend connect timeout(ms) | `5000` |
 | `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES` | backend 전송 대기 큐 상한 바이트 | `262144` |

@@ -1,4 +1,4 @@
-# wb_dlq_replayer
+# 사후 처리 큐(DLQ) 재처리기(wb_dlq_replayer)
 
 `wb_dlq_replayer`는 write-behind DLQ(Stream)로 떨어진 이벤트를 다시 PostgreSQL에 적재하고, 성공 여부에 따라 DLQ → 본 스트림 또는 DEAD 스트림으로 정리하는 유틸리티다. 장애 복구 시 DLQ를 빠르게 비우고, 재시도 정책을 조정할 때 사용한다.
 

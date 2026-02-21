@@ -1,4 +1,4 @@
-# wb_worker
+# 쓰기 지연 워커(wb_worker)
 
 `wb_worker`는 Redis Streams로 발행되는 write-behind 이벤트를 읽어 PostgreSQL에 적재하는 콘솔 애플리케이션이다. 채팅 서버(`server_app`)에서 `WRITE_BEHIND_ENABLED=1`이 설정되면 로그인, 룸 입장/퇴장, 세션 종료 같은 이벤트가 Redis Stream으로 기록되고, `wb_worker`가 이를 배치 단위로 DB에 반영한다.
 
@@ -46,7 +46,7 @@ tools/wb_worker/
 `WB_DLQ_ON_ERROR=0` 이고 `WB_ACK_ON_ERROR=1` 이면, 처리 실패 이벤트가 재시도/보관 없이 ACK되어 유실될 수 있다.
 운영 환경에서는 `WB_DLQ_ON_ERROR=1`을 권장한다.
 
-### Pending reclaim (PEL)
+### 대기 항목(Pending) 회수(reclaim, PEL)
 `WB_RECLAIM_*`는 컨슈머 크래시/정지로 남은 pending 항목을 자동 회수하기 위한 설정이다.
 
 주의: `XAUTOCLAIM`은 Redis 6.2+에서만 지원한다. (구버전이면 `WB_RECLAIM_ENABLED=0`)
@@ -58,7 +58,7 @@ tools/wb_worker/
 | `WB_RECLAIM_MIN_IDLE_MS` | reclaim 최소 idle(ms) | `5000` |
 | `WB_RECLAIM_COUNT` | 회수 시도 건수 | `200` |
 
-### DB 재연결 백오프
+### 데이터베이스(DB) 재연결 백오프
 | 이름 | 설명 | 기본값 |
 | --- | --- | --- |
 | `WB_DB_RECONNECT_BASE_MS` | DB 재연결 지수 백오프 시작값(ms) | `500` |

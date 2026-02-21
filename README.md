@@ -5,16 +5,16 @@
 
 **Knights**는 AI 에이전트를 사용해 C++20로 작성된 고성능 분산 채팅 시스템입니다. 마이크로서비스 아키텍처를 채택하여 확장성을 보장하며, Redis와 PostgreSQL을 활용한 견고한 데이터 처리 파이프라인을 갖추고 있습니다.
 
-## 🚀 프로젝트 개요 (Overview)
+## 🚀 프로젝트 개요
 
 이 프로젝트는 대규모 트래픽을 처리할 수 있는 채팅 서버 스택을 구현하는 것을 목표로 합니다. 최신 C++ 표준(C++20)과 고성능 비동기 네트워크 라이브러리(Boost.Asio)를 기반으로 하며, 다음과 같은 핵심 가치를 추구합니다.
 
--   **High Performance**: Lock-free 알고리즘과 비동기 I/O를 적극 활용하여 처리량을 극대화합니다.
--   **Reliability**: 메시지 유실 없는 시스템을 위해 Write-Behind 패턴과 Dead Letter Queue(DLQ)를 구현했습니다.
--   **Scalability**: (외부) TCP 로드밸런서(예: HAProxy) + Gateway + Server로 역할을 분리하여 수평 확장이 용이합니다.
--   **Observability**: 모든 컴포넌트는 Prometheus 메트릭을 노출하여 실시간 모니터링이 가능합니다.
+-   **고성능(High Performance)**: Lock-free 알고리즘과 비동기 I/O를 적극 활용하여 처리량을 극대화합니다.
+-   **신뢰성(Reliability)**: 메시지 유실 없는 시스템을 위해 Write-Behind 패턴과 Dead Letter Queue(DLQ)를 구현했습니다.
+-   **확장성(Scalability)**: (외부) TCP 로드밸런서(예: HAProxy) + Gateway + Server로 역할을 분리하여 수평 확장이 용이합니다.
+-   **관측성(Observability)**: 모든 컴포넌트는 Prometheus 메트릭을 노출하여 실시간 모니터링이 가능합니다.
 
-## 🏗️ 아키텍처 (Architecture)
+## 🏗️ 아키텍처
 
 시스템은 크게 5가지 주요 컴포넌트로 구성됩니다.
 
@@ -140,7 +140,7 @@ flowchart TB
 - 서버는 Redis Streams에 이벤트를 먼저 기록하고, `wb_worker`가 배치로 Postgres에 반영해 hot path 부하를 분리한다.
 - 이 구조는 성능(낮은 지연)과 신뢰성(재처리/DLQ)을 동시에 맞추기 위한 절충안이다.
 
-## ✨ 주요 기능 (Key Features)
+## ✨ 주요 기능
 
 -   **Modern C++20**: Concept, Coroutine(일부), Module(준비 중) 등 최신 문법 활용.
 -   **Redis Streams & Pub/Sub**: 분산 환경에서의 메시지 큐 및 실시간 이벤트 전파.
@@ -150,7 +150,7 @@ flowchart TB
     -   DB 쓰기 실패 시 Redis DLQ로 이동 후 `wb_worker`가 재처리.
 -   **Client GUI**: Dear ImGui 기반의 그래픽 클라이언트로 직관적인 사용성과 한국어 지원.
 
-## 📂 서브 프로젝트 (Sub-projects)
+## 📂 서브 프로젝트
 
 | 프로젝트 | 경로 | 설명 |
 | :--- | :--- | :--- |
@@ -161,9 +161,9 @@ flowchart TB
 | **Client GUI** | [`client_gui/`](client_gui/README.md) | Dear ImGui 기반 그래픽 채팅 클라이언트 |
 | **Tools** | [`tools/`](tools/README.md) | Write-Behind 워커, 마이그레이션 도구 등 |
 
-## 🛠️ 시작하기 (Getting Started)
+## 🛠️ 시작하기
 
-### 필수 요구 사항 (Prerequisites)
+### 필수 요구 사항
 
 -   **OS**: Windows 10/11 (개발) + Linux(Docker) 런타임(검증/운영)
 -   **Compiler**: MSVC 19.3x+ (Visual Studio 2022), Clang 14+, GCC 11+
@@ -173,32 +173,32 @@ flowchart TB
     -   Redis 6.0+
     -   PostgreSQL 13+
 
-### 환경 설정 (Configuration)
+### 환경 설정
 
 애플리케이션은 **OS 환경 변수**를 읽어 설정됩니다.
 로컬 개발에서는 `.env.example`를 복사해 `.env`를 만들고, 스크립트들이 이를 로드하도록 사용할 수 있습니다.
 (코드 자체에는 `.env` 자동 로더가 없습니다.)
 
 ```ini
-# Core
+# 코어(Core)
 DB_URI=postgresql://knights:password@127.0.0.1:5432/knights_db
 REDIS_URI=tcp://127.0.0.1:6379
 
-# server_app
+# 서버 앱(server_app)
 PORT=5000
 SERVER_ADVERTISE_HOST=127.0.0.1
 SERVER_REGISTRY_PREFIX=gateway/instances/
 
-# gateway_app
+# 게이트웨이 앱(gateway_app)
 GATEWAY_LISTEN=0.0.0.0:6000
 GATEWAY_ID=gateway-default
 
-# Metrics
-# METRICS_PORT is per-process. Set different values per terminal/script.
-# METRICS_PORT=9100
+# 메트릭(Metrics)
+# 프로세스별 METRICS_PORT 설정입니다. 터미널/스크립트마다 다른 값을 사용하세요.
+# 예시: METRICS_PORT=9100
 ```
 
-### 빌드 및 실행 (Build & Run)
+### 빌드 및 실행
 
 개발은 Windows에서 하되, 서버 스택(HAProxy/gateway/server/worker)은 **Linux 런타임(Docker Desktop의 Linux containers)** 으로 실행하는 흐름을 표준으로 둡니다.
 
@@ -220,7 +220,7 @@ pwsh scripts/configure_windows_ninja.ps1 -CopyCompileCommands
 **2. 서버 스택 실행 (권장: Docker/Stack)**
 
 ```powershell
-# HAProxy 포함 전체 스택 (검증용 표본)
+# 전체 스택 기동(HAProxy 포함, 검증용 표본)
 scripts/deploy_docker.ps1 -Action up -Detached -Build
 ```
 
@@ -240,7 +240,7 @@ scripts/deploy_docker.ps1 -Action down
 .\build-windows\client_gui\Debug\client_gui.exe
 ```
 
-## 🧪 테스트 (Testing)
+## 🧪 테스트
 
 **단위 테스트 (Unit Tests)**
 
@@ -260,7 +260,7 @@ scripts/deploy_docker.ps1 -Action up -Detached -Build
 scripts/deploy_docker.ps1 -Action logs
 ```
 
-## 📚 문서 (Documentation)
+## 📚 문서
 
 더 깊이 있는 기술적인 내용은 `docs/` 디렉토리에서 확인할 수 있습니다.
 

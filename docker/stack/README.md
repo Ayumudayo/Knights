@@ -1,4 +1,4 @@
-# Docker Stack (Verification)
+# 도커(Docker) 스택 (검증)
 
 `docker/stack/docker-compose.yml`는 검증/스모크 테스트용으로 전체 스택을 Docker로 기동한다.
 
@@ -11,10 +11,10 @@
 권장: `scripts/deploy_docker.ps1`를 사용한다. (base 이미지 빌드/compose profile/포트 매핑을 일관되게 유지)
 
 ```powershell
-# Stack up (build + detached)
+# 스택 기동(build + detached)
 pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build
 
-# Stack up + Observability(Prometheus/Grafana)
+# 스택 기동 + 관측성(Observability: Prometheus/Grafana)
 pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 
 # 또는 wrapper 사용
@@ -40,7 +40,7 @@ UDP canary/rollback 리허설은 env override로 실행한다:
 pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-canary.example
 pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-rollback.example
 
-# end-to-end rehearsal (10분 기준)
+# 종단 간 리허설(end-to-end, 10분 기준)
 pwsh scripts/rehearse_udp_rollout_rollback.ps1
 
 # 재리허설(이미지 재빌드 생략)
@@ -53,5 +53,5 @@ pwsh scripts/rehearse_udp_rollout_rollback.ps1 -NoBuild
 pwsh scripts/deploy_docker.ps1 -Action down
 ```
 
-## Notes
+## 참고
 - `server_app`은 (실험) chat hook 플러그인을 사용할 수 있다. 기본 스택은 `CHAT_HOOK_PLUGINS_DIR=/app/plugins`로 샘플 플러그인을 로드한다. (`server/README.md` 참고)

@@ -1,9 +1,9 @@
-# Server App
+# 서버 애플리케이션
 
 `server_app`은 Knights 프로젝트의 메인 채팅 서버 애플리케이션입니다.
 `core` 라이브러리를 기반으로 구축되었으며, 클라이언트 연결 관리, 채팅 로직 처리, 데이터 저장(DB/Redis), 그리고 인스턴스 레지스트리 등록 등의 역할을 수행합니다.
 
-## 아키텍처 (Architecture)
+## 아키텍처
 
 서버는 크게 **Bootstrap**, **Router**, **Service** 계층으로 구성됩니다.
 
@@ -25,7 +25,7 @@
         - **Redis**: 실시간 메시지 캐싱, Pub/Sub(분산 채팅), Presence(접속 현황), Write-behind(이벤트 스트림).
         - **PostgreSQL**: 영구적인 데이터 저장(유저 정보, 채팅 기록 등). Write-behind 워커에 의해 비동기적으로 저장될 수도 있습니다.
 
-## 주요 기능 (Features)
+## 주요 기능
 
 - **Opcode 라우팅**: 패킷의 Opcode에 따라 적절한 핸들러로 분기합니다.
 - **Snapshot + Redis Cache**: 방 입장 시 최근 메시지를 Redis(LIST/LRU)에서 우선 조회하여 빠르게 로딩하고, 부족하면 DB에서 가져옵니다.
@@ -36,16 +36,16 @@
 - **Instance Registry**: 서버 시작 시 자신의 주소(Host/Port)를 Redis에 등록하고 주기적으로 Heartbeat를 갱신합니다. 로드 밸런서(`gateway`)는 이를 통해 활성 서버 목록을 파악합니다.
 - **Metrics**: `/metrics` 엔드포인트(HTTP)를 통해 Prometheus 호환 지표를 노출합니다.
 
-## 빌드 및 실행 (Build & Run)
+## 빌드 및 실행
 
 ### 빌드
 프로젝트 루트에서 빌드 스크립트를 사용하여 빌드합니다. (내부적으로 CMake Presets 사용)
 
 ```powershell
-# Debug 빌드
+# 디버그(Debug) 빌드
 pwsh scripts/build.ps1 -Config Debug -Target server_app
 
-# Release 빌드 (RelWithDebInfo)
+# 릴리스(Release) 빌드 (RelWithDebInfo)
 pwsh scripts/build.ps1 -Config RelWithDebInfo -Target server_app
 ```
 
@@ -63,7 +63,7 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
 .\build-windows\server\Debug\server_app.exe 5000
 ```
 
-## 환경 변수 설정 (Configuration)
+## 환경 변수 설정
 
 서버는 OS 환경 변수를 통해 동작을 제어할 수 있습니다.
 로컬에서는 `.env.example`를 복사해 `.env`를 만든 뒤, 실행 스크립트/쉘에서 로드해 사용할 수 있습니다.
@@ -77,8 +77,8 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
 | `USE_REDIS_PUBSUB` | Redis Pub/Sub을 이용한 분산 채팅 활성화 여부 | `0` |
 | `SERVER_ADVERTISE_HOST` | 레지스트리에 등록할 호스트 주소 (게이트웨이가 접근 가능한 주소) | `127.0.0.1` |
 | `SERVER_ADVERTISE_PORT` | 레지스트리에 등록할 포트(옵션) | `5000` |
-| `SERVER_REGISTRY_PREFIX` | Instance Registry key prefix | `gateway/instances/` |
-| `SERVER_REGISTRY_TTL` | Instance Registry TTL seconds | `30` |
+| `SERVER_REGISTRY_PREFIX` | Instance Registry 키 접두사 | `gateway/instances/` |
+| `SERVER_REGISTRY_TTL` | Instance Registry TTL(초) | `30` |
 | `METRICS_PORT` | 메트릭 수집을 위한 HTTP 포트 | `9090` |
 | `CHAT_HOOK_PLUGINS_DIR` | (실험, 권장) 플러그인 디렉터리(모든 `.so/.dll`을 파일명 순으로 로드) | `/app/plugins` |
 | `CHAT_HOOK_PLUGIN_PATHS` | (실험) 플러그인 경로 목록(순서 고정, 구분자 `;` 또는 `,`) | `/app/plugins/10_chat_hook_sample.so;/app/plugins/20_chat_hook_tag.so` |
@@ -90,7 +90,7 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
 | `CHAT_JOB_QUEUE_MAX` | 서버 로직 작업 큐 최대 길이(트래픽 스파이크 시 백프레셔/메모리 보호) | `8192` |
 | `CHAT_DB_JOB_QUEUE_MAX` | DB 작업 큐 최대 길이(DB 지연 시 백프레셔/메모리 보호) | `4096` |
 
-## Chat Hook Plugin (Experimental)
+## 채팅 훅(Chat Hook) 플러그인 (실험)
 
 `server_app`은 `MSG_CHAT_SEND` 경로에 hot-reload 가능한 플러그인 훅을 붙일 수 있습니다.
 
@@ -102,16 +102,16 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
   - `/app/plugins/staging/10_chat_hook_sample_v2.so` (swap 용)
 - Docker 스택 기본 설정: `docker/stack/docker-compose.yml`에서 `CHAT_HOOK_PLUGINS_DIR=/app/plugins`
 
-Hot reload(예시):
+핫 리로드 예시:
 
 ```bash
-# lock/sentinel (optional)
+# 잠금 파일(lock/sentinel, 선택)
 docker exec knights-stack-server-1-1 touch /app/plugins/10_chat_hook_sample_LOCK
 
-# swap binary
+# 바이너리 교체(swap)
 docker exec knights-stack-server-1-1 cp /app/plugins/staging/10_chat_hook_sample_v2.so /app/plugins/10_chat_hook_sample.so
 
-# unlock
+# 잠금 해제(unlock)
 docker exec knights-stack-server-1-1 rm -f /app/plugins/10_chat_hook_sample_LOCK
 ```
 

@@ -1,4 +1,4 @@
-# wb_emit
+# 이벤트 발행기(wb_emit)
 
 `wb_emit`은 Redis Streams 기반 write-behind 파이프라인을 스모크 테스트하기 위한 간단한 이벤트 발행기다. `server_app`을 띄우지 않고도 임의의 이벤트를 스트림에 추가할 수 있어 `wb_worker`, `wb_dlq_replayer` 동작을 검증하거나 대시보드/알람을 점검할 때 유용하다.
 

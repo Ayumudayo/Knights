@@ -1,4 +1,4 @@
-# wb_check
+# 적재 확인 도구(wb_check)
 
 `wb_check`는 특정 `event_id`가 PostgreSQL `session_events` 테이블에 적재되었는지 빠르게 확인하는 CLI 도구다. write-behind 파이프라인을 테스트하거나 DLQ 재처리 이후 검증할 때 사용한다.
 

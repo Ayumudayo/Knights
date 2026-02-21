@@ -1,12 +1,12 @@
-# admin_app
+# 관리자 앱(admin_app)
 
-`admin_app`은 운영 관리 콘솔을 위한 control-plane 서비스다.
+`admin_app`은 운영 관리 콘솔을 위한 제어면(control-plane) 서비스다.
 
-현재 제공 endpoint:
+현재 제공 엔드포인트:
 
 - `/metrics`
 - `/healthz`, `/readyz`
-- `/admin` (browser UI, source: `tools/admin_app/admin_ui.html`)
+- `/admin` (브라우저 UI, 소스(source): `tools/admin_app/admin_ui.html`)
 - `/api/v1/auth/context` (JSON)
 - `/api/v1/overview` (JSON)
 - `/api/v1/instances` (JSON)
@@ -28,24 +28,24 @@
 
 | 이름 | 설명 | 기본값 |
 | --- | --- | --- |
-| `METRICS_PORT` | admin HTTP 포트 | `39200` |
+| `METRICS_PORT` | 관리자 HTTP 포트 | `39200` |
 | `ADMIN_POLL_INTERVAL_MS` | 백그라운드 상태 수집 주기(ms) | `1000` |
-| `ADMIN_AUDIT_TREND_MAX_POINTS` | overview audit_trend 히스토리 최대 포인트 수 | `300` |
-| `ADMIN_INSTANCE_METRICS_PORT` | instance detail 조회 시 metrics/ready probe 포트 | `9090` |
+| `ADMIN_AUDIT_TREND_MAX_POINTS` | overview `audit_trend` 히스토리 최대 포인트 수 | `300` |
+| `ADMIN_INSTANCE_METRICS_PORT` | 인스턴스 상세 조회 시 metrics/ready probe 포트 | `9090` |
 | `REDIS_URI` | Redis 연결 문자열(인스턴스/세션 조회용) | (unset) |
-| `SERVER_REGISTRY_PREFIX` | 인스턴스 레지스트리 prefix | `gateway/instances/` |
-| `GATEWAY_SESSION_PREFIX` | 세션 디렉터리 key prefix | `gateway/session/` |
-| `REDIS_CHANNEL_PREFIX` | fanout/admin command channel prefix | `` |
-| `WB_WORKER_METRICS_URL` | wb_worker metrics URL | `http://127.0.0.1:39093/metrics` |
-| `GRAFANA_BASE_URL` | Grafana base URL 링크 | `http://127.0.0.1:33000` |
-| `PROMETHEUS_BASE_URL` | Prometheus base URL 링크 | `http://127.0.0.1:39090` |
+| `SERVER_REGISTRY_PREFIX` | 인스턴스 레지스트리 접두어(prefix) | `gateway/instances/` |
+| `GATEWAY_SESSION_PREFIX` | 세션 디렉터리 키(key) 접두어(prefix) | `gateway/session/` |
+| `REDIS_CHANNEL_PREFIX` | fanout/admin 명령 채널 접두어(prefix) | `` |
+| `WB_WORKER_METRICS_URL` | wb_worker 메트릭 URL | `http://127.0.0.1:39093/metrics` |
+| `GRAFANA_BASE_URL` | Grafana 기본 URL 링크 | `http://127.0.0.1:33000` |
+| `PROMETHEUS_BASE_URL` | Prometheus 기본 URL 링크 | `http://127.0.0.1:39090` |
 | `ADMIN_AUTH_MODE` | 인증 모드 (`off`, `header`, `bearer`, `header_or_bearer`) | `off` |
-| `ADMIN_OFF_ROLE` | `ADMIN_AUTH_MODE=off`일 때 적용할 role (`viewer/operator/admin`) | `admin` |
-| `ADMIN_AUTH_USER_HEADER` | header 인증 시 사용자 header 이름 | `X-Admin-User` |
-| `ADMIN_AUTH_ROLE_HEADER` | header 인증 시 역할 header 이름 | `X-Admin-Role` |
+| `ADMIN_OFF_ROLE` | `ADMIN_AUTH_MODE=off`일 때 적용할 역할(role) (`viewer/operator/admin`) | `admin` |
+| `ADMIN_AUTH_USER_HEADER` | header 인증 시 사용자 헤더(header) 이름 | `X-Admin-User` |
+| `ADMIN_AUTH_ROLE_HEADER` | header 인증 시 역할 헤더(header) 이름 | `X-Admin-Role` |
 | `ADMIN_BEARER_TOKEN` | bearer 인증 토큰 값 | (unset) |
-| `ADMIN_BEARER_ACTOR` | bearer 인증 성공 시 actor 값 | `token-user` |
-| `ADMIN_BEARER_ROLE` | bearer 인증 성공 시 role 값 (`viewer/operator/admin`) | `viewer` |
+| `ADMIN_BEARER_ACTOR` | bearer 인증 성공 시 주체(actor) 값 | `token-user` |
+| `ADMIN_BEARER_ROLE` | bearer 인증 성공 시 역할(role) 값 (`viewer/operator/admin`) | `viewer` |
 
 ## 빌드
 
@@ -64,7 +64,7 @@ set METRICS_PORT=39200
 
 - `http://127.0.0.1:39200/admin`
 
-## Docker Stack
+## 도커(Docker) 스택
 
 `docker/stack`에 `admin-app` 서비스가 포함된다.
 
@@ -86,40 +86,40 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 
 `/api/v1/*`는 다음 쿼리 파라미터를 지원한다.
 
-- `timeout_ms` (optional, max `5000`)
-- `limit` (optional, max `500`)
-- `cursor` (optional)
+- `timeout_ms` (선택, 최대 `5000`)
+- `limit` (선택, 최대 `500`)
+- `cursor` (선택)
 
-## Write Actions (Phase 2)
+## 쓰기 액션 (2단계)
 
-`admin_app`는 아래 write endpoint를 제공한다. 현재 MetricsHttpServer 제약으로 body 대신 query parameter를 사용한다.
+`admin_app`은 아래 쓰기 엔드포인트를 제공한다. 현재 `MetricsHttpServer` 제약으로 body 대신 query 파라미터(parameter)를 사용한다.
 
 - `POST /api/v1/users/disconnect`
-  - `client_id` 또는 `client_ids`(comma separated)
-  - `reason` (optional)
+  - `client_id` 또는 `client_ids`(쉼표 구분)
+  - `reason` (선택)
 - `POST /api/v1/users/mute`
 - `POST /api/v1/users/unmute`
 - `POST /api/v1/users/ban`
 - `POST /api/v1/users/unban`
 - `POST /api/v1/users/kick`
-  - 공통: `client_id` 또는 `client_ids`(comma separated)
-  - 공통: `reason` (optional)
-  - `mute`/`ban`은 `duration_sec` (optional)
+  - 공통: `client_id` 또는 `client_ids`(쉼표 구분)
+  - 공통: `reason` (선택)
+  - `mute`/`ban`은 `duration_sec` (선택)
 - `POST /api/v1/announcements`
-  - `text` (required, max 512 bytes)
-  - `priority` (`info|warn|critical`, optional)
+  - `text` (필수, 최대 512 bytes)
+  - `priority` (`info|warn|critical`, 선택)
 - `PATCH /api/v1/settings`
   - `key` (`presence_ttl_sec|recent_history_limit|room_recent_maxlen`)
-  - `value` (unsigned integer)
+  - `value` (부호 없는 정수)
 
 설정 key/range 검증은 `server/include/server/config/runtime_settings.hpp`의 공통 규칙을 사용한다.
-동일 규칙이 `admin_app` 입력 검증과 `server_app` 런타임 적용 경로에 함께 적용되어 문서/코드 drift를 줄인다.
+동일 규칙이 `admin_app` 입력 검증과 `server_app` 런타임 적용 경로에 함께 적용되어 문서/코드 드리프트(drift)를 줄인다.
 
 권한:
 
-- `viewer`: read-only
-- `operator`: disconnect/announcement 가능
-- `admin`: runtime settings + moderation 포함 전체 가능
+- `viewer`: 조회 전용(read-only)
+- `operator`: 연결 종료/공지(disconnect/announcement) 가능
+- `admin`: 런타임 설정(runtime settings) + moderation 포함 전체 가능
 
 ## 감사 로그
 
@@ -130,7 +130,7 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 - `result`, `status_code`, `latency_ms`
 - `source_ip`, `timestamp`
 
-## Overview 트렌드
+## 개요(Overview) 트렌드
 
 `GET /api/v1/overview`는 `counts` 외에 `audit_trend`를 제공한다.
 
