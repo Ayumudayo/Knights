@@ -109,9 +109,44 @@ jobs:
             cmake --build --preset linux-debug --target core_public_api_smoke core_public_api_headers_compile core_public_api_stable_header_scenarios --parallel; \
             ctest --preset linux-test -R 'CorePublicApi|CoreApiBoundaryFixtures|CoreApiStableGovernanceFixtures' --output-on-failure"
 
-  windows-build-test:
+  windows-fast-tests:
     runs-on: windows-latest
     timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Enable MSVC Developer Command Prompt
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Validate Opcode Specs
+        shell: pwsh
+        run: |
+          python tools/gen_opcode_docs.py --check
+
+      - name: Validate Wire Codec Specs
+        shell: pwsh
+        run: |
+          python tools/gen_wire_codec.py protocol/wire_map.json core/include/server/wire/codec.hpp
+          git diff --exit-code -- core/include/server/wire/codec.hpp
+
+      - name: Build Fast Test Target (Debug)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug -Target core_general_tests
+
+      - name: Run Fast Policy/Transport Tests
+        shell: pwsh
+        run: |
+          ctest --preset windows-test -R "DispatcherTest|OpcodePolicyTest|UdpBindAbuseGuardTest|UdpSequencedMetricsTest" --output-on-failure
+
+  windows-slow-tests:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    needs: windows-fast-tests
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -127,10 +162,10 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug
 
-      - name: Run Unit Tests (ctest)
+      - name: Run Slow Unit Tests (ctest)
         shell: pwsh
         run: |
-          ctest --preset windows-test
+          ctest --preset windows-test -E "DispatcherTest|OpcodePolicyTest|UdpBindAbuseGuardTest|UdpSequencedMetricsTest" --output-on-failure
 
   linux-docker-stack:
     runs-on: ubuntu-latest
@@ -153,6 +188,14 @@ jobs:
       - name: Build Base Image (knights-base)
         run: |
           docker build -f Dockerfile.base -t knights-base:latest .
+
+      - name: Build gateway_app with UDP ingress OFF
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/app" \
+            -w /app \
+            knights-base:latest \
+            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; cmake --preset linux -DKNIGHTS_ENABLE_GATEWAY_UDP_INGRESS=OFF; cmake --build --preset linux-debug --target gateway_app --parallel"
 
       - name: ASan/UBSan Build (server_app)
         run: |

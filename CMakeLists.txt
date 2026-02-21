@@ -6,6 +6,7 @@ option(SERVER_ENABLE_PROFILING "Enable profiling markers" OFF)
 option(SERVER_USE_HEADER_ONLY_BOOST_SYSTEM "Use header-only boost::system (no lib link)" OFF)
 option(KNIGHTS_ENABLE_SANITIZERS "Enable sanitizers (ASan+UBSan)" OFF)
 option(KNIGHTS_ENABLE_IPO "Enable interprocedural optimization (IPO/LTO)" OFF)
+option(KNIGHTS_ENABLE_GATEWAY_UDP_INGRESS "Enable gateway UDP ingress feature path" ON)
 option(BUILD_SERVER_STACK "Build server libraries and server_app" ON)
 option(BUILD_GATEWAY_APP "Build gateway_app" ON)
 

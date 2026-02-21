@@ -71,6 +71,12 @@ constexpr std::uint32_t kDefaultUdpBindFailWindowMs = 10000;
 constexpr std::uint32_t kDefaultUdpBindFailLimit = 5;
 constexpr std::uint32_t kDefaultUdpBindBlockMs = 60000;
 
+#if defined(KNIGHTS_ENABLE_GATEWAY_UDP_INGRESS) && (KNIGHTS_ENABLE_GATEWAY_UDP_INGRESS == 1)
+constexpr bool kGatewayUdpIngressBuildEnabled = true;
+#else
+constexpr bool kGatewayUdpIngressBuildEnabled = false;
+#endif
+
 std::uint64_t unix_time_ms() {
     const auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
         std::chrono::system_clock::now().time_since_epoch());
@@ -596,6 +602,9 @@ GatewayApp::GatewayApp()
         stream << "# TYPE gateway_udp_enabled gauge\n";
         stream << "gateway_udp_enabled " << (udp_enabled_.load(std::memory_order_relaxed) ? 1 : 0) << "\n";
 
+        stream << "# TYPE gateway_udp_ingress_feature_enabled gauge\n";
+        stream << "gateway_udp_ingress_feature_enabled " << (kGatewayUdpIngressBuildEnabled ? 1 : 0) << "\n";
+
         stream << "# TYPE gateway_udp_packets_total counter\n";
         stream << "gateway_udp_packets_total " << udp_packets_total_.load(std::memory_order_relaxed) << "\n";
 
@@ -912,6 +921,10 @@ std::vector<std::uint8_t> GatewayApp::make_udp_bind_res_frame(std::uint16_t code
 }
 
 std::optional<std::vector<std::uint8_t>> GatewayApp::make_udp_bind_ticket_frame(const std::string& session_id) {
+    if (!kGatewayUdpIngressBuildEnabled) {
+        return std::nullopt;
+    }
+
     if (udp_listen_port_ == 0) {
         return std::nullopt;
     }
@@ -1215,6 +1228,12 @@ void GatewayApp::configure_gateway() {
         "GatewayApp invalid GATEWAY_UDP_BIND_BLOCK_MS; using default"
     );
 
+    if (!kGatewayUdpIngressBuildEnabled && udp_listen_port_ != 0) {
+        server::core::log::warn("GatewayApp UDP ingress build flag is OFF; ignoring GATEWAY_UDP_LISTEN");
+        udp_listen_host_.clear();
+        udp_listen_port_ = 0;
+    }
+
     udp_bind_abuse_guard_.configure(udp_bind_fail_window_ms_, udp_bind_fail_limit_, udp_bind_block_ms_);
 
     allow_anonymous_ = true;
@@ -1230,6 +1249,7 @@ void GatewayApp::configure_gateway() {
         + " udp_bind_fail_window_ms=" + std::to_string(udp_bind_fail_window_ms_)
         + " udp_bind_fail_limit=" + std::to_string(udp_bind_fail_limit_)
         + " udp_bind_block_ms=" + std::to_string(udp_bind_block_ms_)
+        + " udp_ingress_feature=" + std::string(kGatewayUdpIngressBuildEnabled ? "on" : "off")
         + " backend_connect_timeout_ms=" + std::to_string(backend_connect_timeout_ms_)
         + " backend_send_queue_max_bytes=" + std::to_string(backend_send_queue_max_bytes_)
         + " allow_anonymous=" + std::string(allow_anonymous_ ? "1" : "0"));
@@ -1315,6 +1335,11 @@ void GatewayApp::start_listener() {
 }
 
 void GatewayApp::start_udp_listener() {
+    if (!kGatewayUdpIngressBuildEnabled) {
+        udp_enabled_.store(false, std::memory_order_relaxed);
+        return;
+    }
+
     if (udp_listen_port_ == 0) {
         udp_enabled_.store(false, std::memory_order_relaxed);
         return;
@@ -1375,6 +1400,10 @@ void GatewayApp::stop_udp_listener() {
 }
 
 void GatewayApp::do_udp_receive() {
+    if (!kGatewayUdpIngressBuildEnabled) {
+        return;
+    }
+
     if (!udp_socket_) {
         return;
     }
