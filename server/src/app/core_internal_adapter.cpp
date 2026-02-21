@@ -13,6 +13,12 @@
 #include "server/core/util/crash_handler.hpp"
 #include "server/storage/postgres/connection_pool.hpp"
 
+/**
+ * @brief Implements bootstrap adapters that bridge server_app to server_core internals.
+ *
+ * This unit centralizes creation, lifecycle, and registry helper calls so
+ * app bootstrap code stays isolated from concrete core implementation details.
+ */
 namespace server::app::core_internal {
 
 std::shared_ptr<server::core::net::ConnectionRuntimeState> make_connection_runtime_state() {

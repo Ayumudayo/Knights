@@ -49,6 +49,7 @@ public:
     /**
      * @brief 내부 소켓 객체를 반환합니다.
      * 주로 연결 수락(Accept) 시 소켓을 초기화하기 위해 사용됩니다.
+     * @return 내부 TCP 소켓 참조
      */
     socket_type& socket();
 
@@ -66,6 +67,7 @@ public:
 
     /**
      * @brief 연결이 종료되었는지 확인합니다.
+     * @return 연결이 정지 상태면 `true`
      */
     bool is_stopped() const;
 

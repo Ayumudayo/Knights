@@ -127,6 +127,11 @@ jobs:
         run: |
           python tools/gen_opcode_docs.py --check
 
+      - name: Validate Doxygen Coverage
+        shell: pwsh
+        run: |
+          python tools/check_doxygen_coverage.py
+
       - name: Validate Wire Codec Specs
         shell: pwsh
         run: |

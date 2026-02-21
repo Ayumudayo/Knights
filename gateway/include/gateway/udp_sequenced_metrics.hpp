@@ -4,16 +4,24 @@
 
 namespace gateway {
 
+/**
+ * @brief Tracks sequence-based UDP quality signals for a single bound session.
+ *
+ * The tracker identifies duplicates/reorders and estimates loss and jitter
+ * using packet sequence and receive-time deltas.
+ */
 class UdpSequencedMetrics {
 public:
+    /** @brief Classification and quality deltas for one packet update. */
     struct UpdateResult {
-        bool accepted{false};
-        bool duplicate{false};
-        bool reordered{false};
-        std::uint64_t estimated_lost_packets{0};
-        std::uint64_t jitter_ms{0};
+        bool accepted{false};                    ///< Packet accepted as forward progress.
+        bool duplicate{false};                   ///< Packet sequence duplicated latest accepted seq.
+        bool reordered{false};                   ///< Packet sequence older than latest accepted seq.
+        std::uint64_t estimated_lost_packets{0}; ///< Estimated missing packets before this packet.
+        std::uint64_t jitter_ms{0};              ///< Interarrival jitter delta in milliseconds.
     };
 
+    /** @brief Clears tracker state, typically on rebind. */
     void reset() {
         initialized_ = false;
         last_seq_ = 0;
@@ -21,6 +29,12 @@ public:
         last_interarrival_ms_ = 0;
     }
 
+    /**
+     * @brief Processes one packet sample and updates quality statistics.
+     * @param seq Packet sequence number from transport header.
+     * @param recv_unix_ms Packet receive unix timestamp in milliseconds.
+     * @return Packet classification and estimated quality deltas.
+     */
     UpdateResult on_packet(std::uint32_t seq, std::uint64_t recv_unix_ms) {
         UpdateResult result{};
 

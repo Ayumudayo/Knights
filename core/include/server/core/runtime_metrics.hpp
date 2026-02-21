@@ -124,9 +124,15 @@ void record_packet_payload(std::size_t bytes);
  */
 void record_dispatch_opcode(std::uint16_t opcode);
 
-/** @brief 메인 JobQueue 현재 깊이를 기록합니다. */
+/**
+ * @brief 메인 JobQueue 현재 깊이를 기록합니다.
+ * @param depth 현재 큐 깊이
+ */
 void record_job_queue_depth(std::size_t depth);
-/** @brief 메인 JobQueue 용량을 등록합니다. */
+/**
+ * @brief 메인 JobQueue 용량을 등록합니다.
+ * @param capacity 큐 최대 용량
+ */
 void register_job_queue_capacity(std::size_t capacity);
 /** @brief 메인 JobQueue 제출 거부 횟수를 기록합니다. */
 void record_job_queue_reject();
@@ -137,9 +143,15 @@ void record_job_queue_reject();
  */
 void record_job_queue_push_wait(std::chrono::nanoseconds waited);
 
-/** @brief DB JobQueue 현재 깊이를 기록합니다. */
+/**
+ * @brief DB JobQueue 현재 깊이를 기록합니다.
+ * @param depth 현재 DB 큐 깊이
+ */
 void record_db_job_queue_depth(std::size_t depth);
-/** @brief DB JobQueue 용량을 등록합니다. */
+/**
+ * @brief DB JobQueue 용량을 등록합니다.
+ * @param capacity DB 큐 최대 용량
+ */
 void register_db_job_queue_capacity(std::size_t capacity);
 /** @brief DB JobQueue 제출 거부 횟수를 기록합니다. */
 void record_db_job_queue_reject();
@@ -155,7 +167,10 @@ void record_db_job_processed();
 /** @brief DB 작업 처리 실패 건수를 기록합니다. */
 void record_db_job_failed();
 
-/** @brief 메모리 풀 총 capacity를 등록합니다. */
+/**
+ * @brief 메모리 풀 총 capacity를 등록합니다.
+ * @param capacity 풀 전체 블록 용량
+ */
 void register_memory_pool_capacity(std::size_t capacity);
 /** @brief 메모리 풀 사용량 증가를 기록합니다. */
 void record_memory_pool_acquire();

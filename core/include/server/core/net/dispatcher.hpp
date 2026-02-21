@@ -55,6 +55,7 @@ public:
                   server::core::protocol::TransportKind transport) const;
 
 private:
+    /** @brief 등록 핸들러와 opcode 정책을 함께 보관하는 테이블 엔트리입니다. */
     struct Entry {
         handler_t handler;
         policy_t policy;

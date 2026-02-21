@@ -6,6 +6,7 @@
 
 namespace server::core::security {
 
+/** @brief AES-256-GCM 암복호화 유틸리티입니다. */
 class Cipher {
 public:
     static constexpr size_t KEY_SIZE = 32; // AES-256
@@ -41,6 +42,8 @@ public:
     
     /**
      * @brief OpenSSL `RAND_bytes`로 암호학적으로 안전한 난수를 생성합니다.
+     * @param size 생성할 바이트 길이
+     * @return 생성된 난수 바이트 배열
      */
     static std::vector<uint8_t> generate_random_bytes(size_t size);
 };

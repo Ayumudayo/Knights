@@ -25,14 +25,20 @@ public:
     Hive(const Hive&) = delete;
     Hive& operator=(const Hive&) = delete;
 
-    /** @brief 내부 `io_context` 참조를 반환합니다. */
+    /**
+     * @brief 내부 `io_context` 참조를 반환합니다.
+     * @return 공유 실행 컨텍스트 참조
+     */
     io_context& context();
 
     /** @brief 이벤트 루프를 실행합니다. */
     void run();
     /** @brief 이벤트 루프 정지를 요청합니다. */
     void stop();
-    /** @brief 정지 상태를 조회합니다. */
+    /**
+     * @brief 정지 상태를 조회합니다.
+     * @return 정지 상태면 `true`
+     */
     bool is_stopped() const;
 
 private:

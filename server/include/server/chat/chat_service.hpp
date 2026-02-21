@@ -60,6 +60,7 @@ public:
                 std::shared_ptr<server::core::storage::IConnectionPool> db_pool = {},
                 std::shared_ptr<server::storage::redis::IRedisClient> redis = {});
 
+    /** @brief ChatService 리소스를 정리하고 플러그인/구독을 종료합니다. */
     ~ChatService();
 
     // ======================================================================
@@ -72,6 +73,8 @@ public:
      * - 토큰 검증 (현재는 단순 닉네임 기반)
      * - 중복 접속 처리 (기존 세션 끊기)
      * - 유저 상태 등록
+     * @param s 요청을 보낸 세션
+     * @param payload 로그인 요청 payload
      */
     void on_login(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -80,11 +83,15 @@ public:
      * - 방 존재 여부 확인 및 생성
      * - 비밀번호 검사 (비공개 방)
      * - 방 멤버십 등록 및 브로드캐스팅
+     * @param s 요청을 보낸 세션
+     * @param payload 방 입장 요청 payload
      */
     void on_join(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 방 퇴장 요청 (MSG_LEAVE_ROOM) 처리
+     * @param s 요청을 보낸 세션
+     * @param payload 방 퇴장 요청 payload
      */
     void on_leave(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -92,6 +99,8 @@ public:
      * @brief 채팅 메시지 전송 (MSG_CHAT_SEND) 처리
      * - 메시지 DB 저장 (비동기/Write-behind)
      * - 같은 방의 모든 유저에게 브로드캐스팅
+     * @param s 요청을 보낸 세션
+     * @param payload 채팅 전송 요청 payload
      */
     void on_chat_send(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -99,6 +108,8 @@ public:
      * @brief 귓속말 요청 (MSG_WHISPER_REQ) 처리
      * - 대상 유저 찾기 (로컬 또는 Redis를 통해 다른 서버 검색)
      * - 메시지 전송
+     * @param s 요청을 보낸 세션
+     * @param payload 귓속말 요청 payload
      */
     void on_whisper(NetSession& s, std::span<const std::uint8_t> payload);
 
@@ -106,29 +117,38 @@ public:
      * @brief 핑(Ping) 요청 (MSG_PING) 처리
      * - 연결이 살아있는지 확인하는 Heartbeat
      * - PONG 응답 전송
+     * @param s 요청을 보낸 세션
+     * @param payload 핑 요청 payload
      */
     void on_ping(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 방 목록 요청 (MSG_ROOMS_REQ) 처리
      * - 현재 활성화된 방 목록 반환
+     * @param s 요청을 보낸 세션
+     * @param payload 방 목록 요청 payload
      */
     void on_rooms_request(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 방 참여자 목록 요청 (MSG_ROOM_USERS_REQ) 처리
+     * @param s 요청을 보낸 세션
+     * @param payload 방 사용자 목록 요청 payload
      */
     void on_room_users_request(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 상태 갱신 요청 (MSG_REFRESH_REQ) 처리
      * - 클라이언트가 재접속 후 놓친 메시지 등을 요청할 때 사용
+     * @param s 요청을 보낸 세션
+     * @param payload 상태 갱신 요청 payload
      */
     void on_refresh_request(NetSession& s, std::span<const std::uint8_t> payload);
 
     /**
      * @brief 세션 종료 시 호출 (연결 끊김)
      * - 유저 상태 정리 (방 나가기 처리 등)
+     * @param s 종료된 세션
      */
     void on_session_close(std::shared_ptr<NetSession> s);
 
@@ -147,16 +167,21 @@ public:
     /**
      * @brief 해당 방의 모든 유저에게 상태 갱신 알림(MSG_REFRESH_NOTIFY)을 전송합니다.
      * 로컬 세션에게 전송하고, Redis를 통해 다른 서버에도 전파합니다.
+     * @param room 상태 갱신을 전파할 방 이름
      */
     void broadcast_refresh(const std::string& room);
 
     /**
      * @brief 해당 방의 로컬 세션에게만 상태 갱신 알림을 전송합니다.
      * Redis Subscriber에서 호출하거나, broadcast_refresh 내부에서 사용됩니다.
+     * @param room 상태 갱신을 전송할 방 이름
      */
     void broadcast_refresh_local(const std::string& room);
 
-    // Redis Pub/Sub로 전달된 원격 귓속말 payload를 로컬 대상 세션에게 전달합니다.
+    /**
+     * @brief Redis Pub/Sub로 수신한 원격 귓속말 payload를 로컬 대상 세션에 전달합니다.
+     * @param body 직렬화된 귓속말 이벤트 payload
+     */
     void deliver_remote_whisper(const std::vector<std::uint8_t>& body);
 
     /**
@@ -181,6 +206,8 @@ public:
      * - presence_ttl_sec
      * - recent_history_limit
      * - room_recent_maxlen
+     * @param key 설정 키
+     * @param value 설정 값(문자열)
      */
     void admin_apply_runtime_setting(const std::string& key, const std::string& value);
 
@@ -197,22 +224,28 @@ public:
                                      std::uint32_t duration_sec,
                                      const std::string& reason);
 
+    /** @brief 단일 채팅 훅 플러그인의 런타임 메트릭 스냅샷입니다. */
     struct ChatHookPluginMetric {
-        std::string file;
-        bool loaded{false};
-        std::string name;
-        std::string version;
-        std::uint64_t reload_attempt_total{0};
-        std::uint64_t reload_success_total{0};
-        std::uint64_t reload_failure_total{0};
+        std::string file;                        ///< 플러그인 파일 경로
+        bool loaded{false};                      ///< 현재 로드 성공 여부
+        std::string name;                        ///< 플러그인 이름
+        std::string version;                     ///< 플러그인 버전 문자열
+        std::uint64_t reload_attempt_total{0};  ///< reload 시도 누적 횟수
+        std::uint64_t reload_success_total{0};  ///< reload 성공 누적 횟수
+        std::uint64_t reload_failure_total{0};  ///< reload 실패 누적 횟수
     };
 
+    /** @brief 채팅 훅 플러그인 체인의 집계 메트릭 스냅샷입니다. */
     struct ChatHookPluginsMetrics {
-        bool enabled{false};
-        std::string mode; // none|dir|paths|single
-        std::vector<ChatHookPluginMetric> plugins;
+        bool enabled{false};                          ///< 플러그인 기능 활성화 여부
+        std::string mode;                             ///< 로드 모드(`none|dir|paths|single`)
+        std::vector<ChatHookPluginMetric> plugins;    ///< 플러그인별 메트릭 목록
     };
 
+    /**
+     * @brief 현재 플러그인 로더 상태를 운영 메트릭 스냅샷으로 반환합니다.
+     * @return 플러그인 활성화/모드/개별 reload 메트릭 집계
+     */
     ChatHookPluginsMetrics chat_hook_plugins_metrics() const;
 
 private:
@@ -227,6 +260,7 @@ private:
     struct HookPluginState;
 
     // Write-behind (지연 쓰기) 설정
+    /** @brief write-behind 동작 파라미터 집합입니다. */
     struct WriteBehindConfig {
         bool enabled{false};
         std::string stream_key{"session_events"};
@@ -235,6 +269,7 @@ private:
     };
 
     // Presence (접속 현황) 설정
+    /** @brief presence 키 TTL/prefix 설정입니다. */
     struct PresenceConfig {
         unsigned int ttl{30}; // 초 단위
         std::string prefix;
@@ -242,7 +277,9 @@ private:
 
     // 서버의 전체 상태를 관리하는 구조체
     // 멀티스레드 환경에서 안전하게 접근하기 위해 mutex로 보호됩니다.
+    /** @brief 세션/방/제재 상태를 보관하는 서버 메모리 상태 컨테이너입니다. */
     struct State {
+        /** @brief 만료 시각을 가진 제재 상태(뮤트/밴) 엔트리입니다. */
         struct TimedPenalty {
             std::chrono::steady_clock::time_point expires_at{};
             std::string reason;
@@ -307,6 +344,7 @@ private:
     PresenceConfig presence_{};
     
     // 메시지 히스토리 캐싱 설정
+    /** @brief 스냅샷/refresh 경로의 최근 메시지 캐시 파라미터입니다. */
     struct HistoryConfig {
         std::size_t recent_limit{20};
         std::size_t max_list_len{200};

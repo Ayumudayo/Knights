@@ -37,6 +37,7 @@ public:
     using OnLoginRes = std::function<void(std::string effective_user, std::uint32_t sid, bool is_admin)>;
     using OnBroadcast = std::function<void(std::string room, std::string sender, std::string text, std::uint16_t flags, std::uint32_t sender_sid)>;
     using OnRoomUsers = std::function<void(std::string room, std::vector<std::string> users)>;
+    /** @brief 스냅샷 메시지의 송신자/본문/시각 필드입니다. */
     struct SnapshotMessage {
         std::string sender;
         std::string text;

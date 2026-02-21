@@ -63,9 +63,10 @@ public:
 private:
     std::string make_key(const std::string& client_id) const;
 
+    /** @brief 로컬 캐시에서 client_id -> backend 매핑과 만료 시각을 보관합니다. */
     struct CacheEntry {
-        std::string backend;
-        std::chrono::steady_clock::time_point expires;
+        std::string backend;                         ///< 캐시된 backend ID
+        std::chrono::steady_clock::time_point expires; ///< 로컬 캐시 만료 시각
     };
 
     std::shared_ptr<server::storage::redis::IRedisClient> redis_;

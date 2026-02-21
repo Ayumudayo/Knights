@@ -39,9 +39,15 @@ public:
     void start();
     /** @brief accept 루프를 중지합니다. */
     void stop();
-    /** @brief 리스너 정지 여부를 반환합니다. */
+    /**
+     * @brief 리스너 정지 여부를 반환합니다.
+     * @return 리스너가 정지 상태면 `true`
+     */
     bool is_stopped() const;
-    /** @brief 실제 바인딩된 로컬 endpoint를 반환합니다. */
+    /**
+     * @brief 실제 바인딩된 로컬 endpoint를 반환합니다.
+     * @return 바인딩된 로컬 TCP endpoint
+     */
     boost::asio::ip::tcp::endpoint local_endpoint() const;
 
 protected:

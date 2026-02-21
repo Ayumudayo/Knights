@@ -47,11 +47,12 @@ public:
         bool sticky_hit{false};
     };
 
+    /** @brief TCP 응답으로 전달되는 UDP bind ticket 정보입니다. */
     struct UdpBindTicket {
-        std::string session_id;
-        std::uint64_t nonce{0};
-        std::uint64_t expires_unix_ms{0};
-        std::string token;
+        std::string session_id;           ///< gateway 내부 세션 ID
+        std::uint64_t nonce{0};           ///< bind nonce
+        std::uint64_t expires_unix_ms{0}; ///< ticket 만료 시각(Epoch ms)
+        std::string token;                ///< bind 검증 토큰
     };
 
     /**
@@ -106,7 +107,10 @@ public:
         /** @brief backend 연결을 종료합니다. */
         void close();
 
-        /** @brief gateway 내부 세션 ID를 반환합니다. */
+        /**
+         * @brief gateway 내부 세션 ID를 반환합니다.
+         * @return backend 연결과 매핑된 session ID
+         */
         const std::string& session_id() const;
 
     private:
@@ -229,11 +233,12 @@ public:
      void stop_udp_listener();
      void do_udp_receive();
 
+     /** @brief UDP bind 요청 payload 파싱 결과입니다. */
      struct ParsedUdpBindRequest {
-         std::string session_id;
-         std::uint64_t nonce{0};
-         std::uint64_t expires_unix_ms{0};
-         std::string token;
+         std::string session_id;           ///< gateway 내부 세션 ID
+         std::uint64_t nonce{0};           ///< bind ticket nonce
+         std::uint64_t expires_unix_ms{0}; ///< ticket 만료 시각(Epoch ms)
+         std::string token;                ///< bind ticket 서명 토큰
      };
 
      std::vector<std::uint8_t> make_udp_bind_res_frame(std::uint16_t code,
@@ -261,16 +266,17 @@ public:
      void start_infrastructure_probe();
      void stop_infrastructure_probe();
 
+    /** @brief gateway 세션별 TCP/UDP 바인딩 상태를 보관하는 내부 상태입니다. */
     struct SessionState {
-        BackendConnectionPtr session;
-        std::string client_id;
-        bool udp_bound{false};
-        boost::asio::ip::udp::endpoint udp_endpoint;
-        std::uint64_t udp_nonce{0};
-        std::uint64_t udp_expires_unix_ms{0};
-        std::uint64_t udp_ticket_issued_unix_ms{0};
-        std::string udp_token;
-        UdpSequencedMetrics udp_sequenced_metrics;
+        BackendConnectionPtr session;              ///< backend TCP 연결 핸들
+        std::string client_id;                     ///< sticky 조회용 클라이언트 ID
+        bool udp_bound{false};                     ///< UDP endpoint 바인딩 완료 여부
+        boost::asio::ip::udp::endpoint udp_endpoint; ///< 바인딩된 UDP endpoint
+        std::uint64_t udp_nonce{0};                ///< 마지막 발급 nonce
+        std::uint64_t udp_expires_unix_ms{0};      ///< bind ticket 만료 시각
+        std::uint64_t udp_ticket_issued_unix_ms{0}; ///< bind ticket 발급 시각
+        std::string udp_token;                     ///< bind 검증 토큰
+        UdpSequencedMetrics udp_sequenced_metrics; ///< UDP 순서/품질 추적기
     };
     std::mutex session_mutex_;
     std::unordered_map<std::string, SessionState> sessions_;

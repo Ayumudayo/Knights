@@ -7,6 +7,7 @@ namespace server::core {
 
 class JobQueue;
 
+/** @brief JobQueue 기반 워커 스레드 풀 수명주기를 관리합니다. */
 class ThreadManager {
 public:
     /**

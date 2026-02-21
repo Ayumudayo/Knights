@@ -48,7 +48,10 @@ public:
     /** @brief 워커 스레드를 중지하고 잔여 작업을 정리합니다. */
     void stop();
 
-    /** @brief 실행 중 여부를 반환합니다. */
+    /**
+     * @brief 실행 중 여부를 반환합니다.
+     * @return 워커 풀이 실행 중이면 `true`
+     */
     bool running() const;
 
     /**

@@ -6,6 +6,7 @@
 
 namespace server::core::compression {
 
+/** @brief LZ4 기반 압축/복원 유틸리티입니다. */
 class Compressor {
 public:
     /**
@@ -31,6 +32,8 @@ public:
     
     /**
      * @brief 입력 크기에 대한 최대 압축 결과 크기를 반환합니다.
+     * @param input_size 원본 입력 데이터 크기(바이트)
+     * @return LZ4 기준 최대 압축 버퍼 크기(바이트)
      *
      * 전송 버퍼를 미리 할당할 때 사용해 재할당 비용을 줄일 수 있습니다.
      */

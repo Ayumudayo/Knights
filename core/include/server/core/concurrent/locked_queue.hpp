@@ -107,6 +107,7 @@ protected:
     std::size_t capacity_{0}; // 0이면 무제한
 };
 
+/** @brief 종료 신호를 지원하는 블로킹 소비자 큐입니다. */
 template <typename T>
 class LockedWaitQueue : public LockedQueue<T> {
 public:

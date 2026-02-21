@@ -198,3 +198,66 @@
 - [x] UDP 대상 opcode의 손실/중복/역순 테스트가 통과한다.
 - [x] 메트릭/알람/런북이 운영 수준으로 준비된다.
 - [x] 단계별 rollout/rollback이 실제 리허설로 검증된다.
+
+---
+
+## 9) Doxygen 전면 개선 TODO
+
+진행 메모 (audit snapshot):
+
+- non-generated 헤더 중 Doxygen 태그 전무: 6개
+- 선언 인접 Doxygen 누락(휴리스틱): 55건
+- 임계 런타임 `.cpp` 중 `@brief` 누락: 1개 (`server/src/app/core_internal_adapter.cpp`)
+
+## 9.1 기준/범위 고정
+
+- [ ] `docs/naming-conventions.md` 2.1 기준으로 "필수 대상"(public API 헤더 + 임계 런타임 `.cpp`) 확정
+- [ ] 생성 파일 경계 확정(직접 수정 금지):
+  - `core/include/server/core/protocol/system_opcodes.hpp`
+  - `server/include/server/protocol/game_opcodes.hpp`
+  - `core/include/server/wire/codec.hpp`
+- [ ] private/internal 선언(예: `gateway_app.hpp` 내부 `SessionState`)은 필수 범위에서 제외할지 정책 명시
+
+## 9.2 1차 블로커 해소 (파일 단위 태그 전무)
+
+- [x] `core/include/server/core/api/version.hpp` Doxygen 추가
+- [x] `core/include/server/core/protocol/opcode_policy.hpp` Doxygen 추가
+- [x] `server/include/server/app/core_internal_adapter.hpp` Doxygen 추가
+- [x] `server/include/server/config/runtime_settings.hpp` Doxygen 추가
+- [x] `gateway/include/gateway/udp_bind_abuse_guard.hpp` Doxygen 추가
+- [x] `gateway/include/gateway/udp_sequenced_metrics.hpp` Doxygen 추가
+- [x] `server/src/app/core_internal_adapter.cpp` 파일/모듈 `@brief` 추가
+
+## 9.3 2차 고우선 보강 (누락 건수 상위)
+
+- [x] `server/include/server/chat/chat_service.hpp` 공개 타입/핵심 public 함수 문서화
+- [x] `server/include/server/state/instance_registry.hpp` 인터페이스 계약(`@param/@return/@note`) 보강
+- [x] `core/include/server/core/storage/repositories.hpp` 모델/필드 의미 문서화
+- [x] `server/include/server/storage/redis/client.hpp` 옵션/계약 문서화
+- [x] `core/include/server/core/concurrent/task_scheduler.hpp` 스케줄/시간 단위/스레드 계약 문서화
+
+## 9.4 3차 잔여 누락 정리 (모듈별)
+
+- [x] core 모듈 잔여 누락 정리 (`core/include/server/core/*`)
+- [x] server 모듈 잔여 누락 정리 (`server/include/server/*`)
+- [x] gateway 모듈 잔여 누락 정리 (`gateway/include/gateway/*`)
+- [x] client_gui 모듈 잔여 누락 정리 (`client_gui/include/client/*`)
+
+## 9.5 생성기 경로 개선 (generated 헤더 대응)
+
+- [x] `tools/gen_opcodes.py`가 생성 헤더에 최소 Doxygen 헤더 블록을 출력하도록 확장
+- [x] `tools/gen_wire_codec.py`가 생성 헤더에 최소 Doxygen 헤더 블록을 출력하도록 확장
+- [x] 생성 산출물 재생성 후 `--check` 경로와 충돌 없는지 검증
+
+## 9.6 자동 검증/회귀 방지
+
+- [x] Doxygen 커버리지 점검 스크립트(`tools/check_doxygen_coverage.py`) 추가
+- [x] CI에 문서화 검증 단계 추가(생성 파일 예외 규칙 포함)
+- [x] 실패 리포트에 "파일/심볼/누락 태그"를 출력하도록 정비
+
+완료 기준:
+
+- [x] non-generated public API 헤더의 class/struct에 `@brief` 100%
+- [x] public 함수(인자/반환 존재)의 `@param/@return` 100%
+- [x] 임계 런타임 `.cpp`의 `@brief` 100%
+- [x] generated 헤더는 generator 경로로 관리되며 커버리지 정책이 CI에 고정됨
