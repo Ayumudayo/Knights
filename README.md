@@ -124,6 +124,8 @@ flowchart TB
     style StateLayer fill:#ffebee,stroke:#ffcdd2
 ```
 
+운영/장애 대응 관점의 상세 다이어그램은 `docs/ops/architecture-diagrams.md`를 참고하세요.
+
 ## 왜 이 구조인가?
 
 ### 1) 왜 HAProxy(L4) + Gateway를 같이 쓰는가
@@ -270,3 +272,4 @@ scripts/deploy_docker.ps1 -Action logs
 -   [**Redis Strategy**](docs/db/redis-strategy.md): Redis 활용 전략 (Streams, Pub/Sub)
 -   [**Write-Behind Pattern**](docs/db/write-behind.md): 쓰기 지연 처리 패턴 상세
 -   [**Observability**](docs/ops/observability.md): 모니터링 및 로깅 가이드
+-   [**Ops Architecture Diagrams**](docs/ops/architecture-diagrams.md): 제어면/UDP 전환 상세 다이어그램
