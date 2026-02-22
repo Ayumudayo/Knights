@@ -124,7 +124,7 @@ flowchart TB
     style StateLayer fill:#ffebee,stroke:#ffcdd2
 ```
 
-## 왜 이 구조인가? (비전공자 온보딩용)
+## 왜 이 구조인가?
 
 ### 1) 왜 HAProxy(L4) + Gateway를 같이 쓰는가
 - HAProxy는 TCP 분산에는 매우 강하지만, 애플리케이션 프레임(opcode) 해석이나 인증/세션 스티키 정책은 담당하지 않는다.
@@ -148,7 +148,7 @@ flowchart TB
 -   **Fault Tolerance**:
     -   Gateway/Server 장애 시 자동 재접속 및 세션 복구.
     -   DB 쓰기 실패 시 Redis DLQ로 이동 후 `wb_worker`가 재처리.
--   **Client GUI**: Dear ImGui 기반의 그래픽 클라이언트로 직관적인 사용성과 한국어 지원.
+-   **Client GUI**: Dear ImGui 기반의 그래픽 클라이언트로 직관적인 사용성.
 
 ## 📂 서브 프로젝트
 
