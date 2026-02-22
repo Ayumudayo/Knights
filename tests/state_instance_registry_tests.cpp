@@ -66,6 +66,21 @@ public:
         return it->second;
     }
 
+    bool mget(const std::vector<std::string>& keys,
+              std::vector<std::optional<std::string>>& out) override {
+        out.clear();
+        out.reserve(keys.size());
+        for (const auto& key : keys) {
+            auto it = store_.find(key);
+            if (it == store_.end()) {
+                out.push_back(std::nullopt);
+            } else {
+                out.push_back(it->second);
+            }
+        }
+        return true;
+    }
+
     std::string last_key;
     std::string last_value;
     unsigned int last_ttl{0};
