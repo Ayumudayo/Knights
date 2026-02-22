@@ -3,6 +3,7 @@ import struct
 import subprocess
 import sys
 import time
+from typing import Optional
 
 HOST = "127.0.0.1"
 PORT = 6000  # HAProxy frontend
@@ -107,22 +108,27 @@ def redis_get_session_backend(user_name: str):
     return out
 
 
+def resolve_backend_with_retry(user_name: str, retries: int = 60, sleep_sec: float = 0.1) -> Optional[str]:
+    for _ in range(retries):
+        backend = redis_get_session_backend(user_name)
+        if backend:
+            return backend
+        time.sleep(sleep_sec)
+    return None
+
+
 def main() -> int:
     sender_name = f"ws_sender_{int(time.time())}"
     sender = ChatClient(sender_name)
     recipient = None
+    same_backend_holders: list[ChatClient] = []
 
     try:
         sender.connect()
         if not sender.login():
             return 1
 
-        sender_backend = None
-        for _ in range(20):
-            sender_backend = redis_get_session_backend(sender_name)
-            if sender_backend:
-                break
-            time.sleep(0.1)
+        sender_backend = resolve_backend_with_retry(sender_name)
         if not sender_backend:
             print("Failed to resolve sender backend from Redis session directory")
             return 1
@@ -131,24 +137,21 @@ def main() -> int:
         recipient_name = None
 
         # Retry recipient login until it lands on a different backend.
-        for attempt in range(8):
-            if recipient is not None:
-                recipient.close()
-                recipient = None
+        # Keep 일부 same-backend 연결을 잠시 유지해 least-connections 관측치가 갱신될 시간을 줍니다.
+        max_attempts = 24
+        attempt_delay_sec = 0.75
+        max_holders = 3
+        for attempt in range(max_attempts):
 
             candidate = f"ws_recipient_{int(time.time())}_{attempt}"
             r = ChatClient(candidate)
             r.connect()
             if not r.login():
                 r.close()
+                time.sleep(attempt_delay_sec)
                 continue
 
-            backend = None
-            for _ in range(20):
-                backend = redis_get_session_backend(candidate)
-                if backend:
-                    break
-                time.sleep(0.1)
+            backend = resolve_backend_with_retry(candidate)
 
             if backend and backend != sender_backend:
                 recipient = r
@@ -156,7 +159,16 @@ def main() -> int:
                 recipient_backend = backend
                 break
 
-            r.close()
+            # 같은 backend에 배치된 연결을 짧게 유지해 라우팅 편향을 완화합니다.
+            if backend == sender_backend:
+                same_backend_holders.append(r)
+                if len(same_backend_holders) > max_holders:
+                    old = same_backend_holders.pop(0)
+                    old.close()
+            else:
+                r.close()
+
+            time.sleep(attempt_delay_sec)
 
         if recipient is None or recipient_name is None or recipient_backend is None:
             print("Could not place sender/recipient on different server backends")
@@ -190,6 +202,8 @@ def main() -> int:
         print(f"FAIL: {e}")
         return 1
     finally:
+        for holder in same_backend_holders:
+            holder.close()
         if recipient is not None:
             recipient.close()
         sender.close()

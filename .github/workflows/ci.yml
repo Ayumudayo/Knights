@@ -4,6 +4,9 @@ on:
   push:
   pull_request:
 
+env:
+  PYTHONIOENCODING: utf-8
+
 # 동일 ref의 이전 실행을 취소합니다.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,12 +16,29 @@ jobs:
   core-api-consumer-windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      VCPKG_FEATURE_FLAGS: manifests,binarycaching
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.cache/vcpkg/archives,readwrite
+      VCPKG_DOWNLOADS: ${{ github.workspace }}/.cache/vcpkg/downloads
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Cache vcpkg artifacts (Windows)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/vcpkg/archives
+            .cache/vcpkg/downloads
+            build-windows/vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
+            ${{ runner.os }}-vcpkg-
 
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -86,14 +106,24 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Docker Info
         run: |
           docker version
           docker compose version
 
-      - name: Build Base Image (knights-base)
-        run: |
-          docker build -f Dockerfile.base -t knights-base:latest .
+      - name: Build Base Image (knights-base) with cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.base
+          tags: knights-base:latest
+          load: true
+          cache-from: type=gha,scope=knights-base-${{ runner.os }}
+          cache-to: type=gha,mode=max,scope=knights-base-${{ runner.os }}
+          provenance: false
 
       - name: Run Core API Contract Checks and Linux Consumer Tests
         run: |
@@ -112,12 +142,29 @@ jobs:
   windows-fast-tests:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      VCPKG_FEATURE_FLAGS: manifests,binarycaching
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.cache/vcpkg/archives,readwrite
+      VCPKG_DOWNLOADS: ${{ github.workspace }}/.cache/vcpkg/downloads
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Cache vcpkg artifacts (Windows)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/vcpkg/archives
+            .cache/vcpkg/downloads
+            build-windows/vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
+            ${{ runner.os }}-vcpkg-
 
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -164,12 +211,29 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 60
     needs: windows-fast-tests
+    env:
+      VCPKG_FEATURE_FLAGS: manifests,binarycaching
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
+      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.cache/vcpkg/archives,readwrite
+      VCPKG_DOWNLOADS: ${{ github.workspace }}/.cache/vcpkg/downloads
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           submodules: recursive
+
+      - name: Cache vcpkg artifacts (Windows)
+        uses: actions/cache@v4
+        with:
+          path: |
+            .cache/vcpkg/archives
+            .cache/vcpkg/downloads
+            build-windows/vcpkg_installed
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
+          restore-keys: |
+            ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
+            ${{ runner.os }}-vcpkg-
 
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -192,6 +256,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           submodules: recursive
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Validate Opcode Specs
         run: |
@@ -216,9 +283,27 @@ jobs:
           docker version
           docker compose version
 
-      - name: Build Base Image (knights-base)
-        run: |
-          docker build -f Dockerfile.base -t knights-base:latest .
+      - name: Build Base Image (knights-base) with cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.base
+          tags: knights-base:latest
+          load: true
+          cache-from: type=gha,scope=knights-base-${{ runner.os }}
+          cache-to: type=gha,mode=max,scope=knights-base-${{ runner.os }}
+          provenance: false
+
+      - name: Build App Image (knights-app) with cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          tags: knights-app:local
+          load: true
+          cache-from: type=gha,scope=knights-app-${{ runner.os }}
+          cache-to: type=gha,mode=max,scope=knights-app-${{ runner.os }}
+          provenance: false
 
       - name: Build gateway_app with UDP ingress OFF
         run: |
@@ -236,10 +321,10 @@ jobs:
             knights-base:latest \
             bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan && cmake --build --preset linux-asan --target server_app --parallel"
 
-      - name: Start Stack (Build + Detached)
+      - name: Start Stack (Detached)
         shell: pwsh
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action up -Detached -Build
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action up -Detached
 
       - name: Wait For HAProxy
         run: |

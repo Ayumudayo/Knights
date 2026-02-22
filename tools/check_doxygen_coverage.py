@@ -345,8 +345,8 @@ def collect_critical_cpp_issues(root: Path) -> list[Issue]:
 
 
 def print_report(issues: list[Issue]) -> None:
-    print(f"[doxygen] 실패: {len(issues)}건")
-    print("[doxygen] 형식: file:line | symbol | missing_tags")
+    print(f"[doxygen] FAIL: {len(issues)} issue(s)")
+    print("[doxygen] format: file:line | symbol | missing_tags")
     for issue in issues:
         tags = ", ".join(issue.missing_tags)
         print(f"- {issue.file}:{issue.line} | {issue.symbol} | {tags}")
@@ -363,7 +363,7 @@ def main() -> int:
         print_report(issues)
         return 1
 
-    print("[doxygen] 통과: 커버리지 검증 성공")
+    print("[doxygen] OK: coverage check passed")
     return 0
 
 
