@@ -40,6 +40,13 @@ jobs:
             ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
             ${{ runner.os }}-vcpkg-
 
+      - name: Ensure vcpkg cache directories (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/archives" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/downloads" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/build-windows/vcpkg_installed" | Out-Null
+
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -166,6 +173,13 @@ jobs:
             ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
             ${{ runner.os }}-vcpkg-
 
+      - name: Ensure vcpkg cache directories (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/archives" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/downloads" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/build-windows/vcpkg_installed" | Out-Null
+
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -235,6 +249,13 @@ jobs:
             ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
             ${{ runner.os }}-vcpkg-
 
+      - name: Ensure vcpkg cache directories (Windows)
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/archives" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/downloads" | Out-Null
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/build-windows/vcpkg_installed" | Out-Null
+
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
 
@@ -299,6 +320,8 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          build-contexts: |
+            knights-base=docker-image://knights-base:latest
           tags: knights-app:local
           load: true
           cache-from: type=gha,scope=knights-app-${{ runner.os }}
