@@ -21,6 +21,7 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.cache/vcpkg/archives,readwrite
       VCPKG_DOWNLOADS: ${{ github.workspace }}/.cache/vcpkg/downloads
+      VCPKG_INSTALLED_DIR: ${{ github.workspace }}/build-windows/vcpkg_installed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -34,6 +35,7 @@ jobs:
           path: |
             .cache/vcpkg/archives
             .cache/vcpkg/downloads
+            vcpkg_installed
             build-windows/vcpkg_installed
           key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
           restore-keys: |
@@ -43,9 +45,14 @@ jobs:
       - name: Ensure vcpkg cache directories (Windows)
         shell: pwsh
         run: |
+          $buildInstalled = "${{ github.workspace }}/build-windows/vcpkg_installed"
+          $rootInstalled = "${{ github.workspace }}/vcpkg_installed"
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/archives" | Out-Null
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/downloads" | Out-Null
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/build-windows/vcpkg_installed" | Out-Null
+          New-Item -ItemType Directory -Force -Path $buildInstalled | Out-Null
+          if (-not (Test-Path $rootInstalled)) {
+            New-Item -ItemType Junction -Path $rootInstalled -Target $buildInstalled | Out-Null
+          }
 
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -154,6 +161,7 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.cache/vcpkg/archives,readwrite
       VCPKG_DOWNLOADS: ${{ github.workspace }}/.cache/vcpkg/downloads
+      VCPKG_INSTALLED_DIR: ${{ github.workspace }}/build-windows/vcpkg_installed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -167,6 +175,7 @@ jobs:
           path: |
             .cache/vcpkg/archives
             .cache/vcpkg/downloads
+            vcpkg_installed
             build-windows/vcpkg_installed
           key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
           restore-keys: |
@@ -176,9 +185,14 @@ jobs:
       - name: Ensure vcpkg cache directories (Windows)
         shell: pwsh
         run: |
+          $buildInstalled = "${{ github.workspace }}/build-windows/vcpkg_installed"
+          $rootInstalled = "${{ github.workspace }}/vcpkg_installed"
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/archives" | Out-Null
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/downloads" | Out-Null
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/build-windows/vcpkg_installed" | Out-Null
+          New-Item -ItemType Directory -Force -Path $buildInstalled | Out-Null
+          if (-not (Test-Path $rootInstalled)) {
+            New-Item -ItemType Junction -Path $rootInstalled -Target $buildInstalled | Out-Null
+          }
 
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -230,6 +244,7 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
       VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.cache/vcpkg/archives,readwrite
       VCPKG_DOWNLOADS: ${{ github.workspace }}/.cache/vcpkg/downloads
+      VCPKG_INSTALLED_DIR: ${{ github.workspace }}/build-windows/vcpkg_installed
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -243,6 +258,7 @@ jobs:
           path: |
             .cache/vcpkg/archives
             .cache/vcpkg/downloads
+            vcpkg_installed
             build-windows/vcpkg_installed
           key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
           restore-keys: |
@@ -252,9 +268,14 @@ jobs:
       - name: Ensure vcpkg cache directories (Windows)
         shell: pwsh
         run: |
+          $buildInstalled = "${{ github.workspace }}/build-windows/vcpkg_installed"
+          $rootInstalled = "${{ github.workspace }}/vcpkg_installed"
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/archives" | Out-Null
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/downloads" | Out-Null
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/build-windows/vcpkg_installed" | Out-Null
+          New-Item -ItemType Directory -Force -Path $buildInstalled | Out-Null
+          if (-not (Test-Path $rootInstalled)) {
+            New-Item -ItemType Junction -Path $rootInstalled -Target $buildInstalled | Out-Null
+          }
 
       - name: Enable MSVC Developer Command Prompt
         uses: ilammy/msvc-dev-cmd@v1
@@ -315,19 +336,6 @@ jobs:
           cache-to: type=gha,mode=max,scope=knights-base-${{ runner.os }}
           provenance: false
 
-      - name: Build App Image (knights-app) with cache
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: Dockerfile
-          build-contexts: |
-            knights-base=docker-image://knights-base:latest
-          tags: knights-app:local
-          load: true
-          cache-from: type=gha,scope=knights-app-${{ runner.os }}
-          cache-to: type=gha,mode=max,scope=knights-app-${{ runner.os }}
-          provenance: false
-
       - name: Build gateway_app with UDP ingress OFF
         run: |
           docker run --rm \
@@ -347,7 +355,7 @@ jobs:
       - name: Start Stack (Detached)
         shell: pwsh
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action up -Detached
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action up -Detached -Build
 
       - name: Wait For HAProxy
         run: |
