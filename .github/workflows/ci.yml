@@ -2,6 +2,8 @@ name: CI
 
 on:
   push:
+    branches:
+      - main
     paths-ignore:
       - "README.md"
       - "docs/**"
@@ -11,6 +13,9 @@ on:
       - "README.md"
       - "docs/**"
       - "**/*.md"
+  merge_group:
+    types:
+      - checks_requested
 
 env:
   PYTHONIOENCODING: utf-8
