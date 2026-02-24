@@ -206,6 +206,9 @@ GATEWAY_ID=gateway-default
 **1. 빌드**
 
 ```powershell
+# 클라이언트 전용 릴리즈 빌드 (Windows)
+scripts/build.ps1 -ClientOnly -Target client_gui
+
 # 전체 프로젝트 빌드 (Debug)
 scripts/build.ps1 -Config Debug
 ```
@@ -238,7 +241,7 @@ scripts/deploy_docker.ps1 -Action down
 **3. 클라이언트 실행**
 
 ```powershell
-.\build-windows\client_gui\Debug\client_gui.exe
+.\build-windows-client\client_gui\Release\client_gui.exe
 ```
 
 ## 🧪 테스트

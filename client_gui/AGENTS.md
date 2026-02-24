@@ -11,8 +11,8 @@ Windows-only ImGui developer client (connects to gateway/HAProxy).
 
 ## Build / Run (Windows)
 ```powershell
-pwsh scripts/build.ps1 -Config Debug -Target client_gui
-.\build-windows\client_gui\Debug\client_gui.exe
+pwsh scripts/build.ps1 -ClientOnly -Target client_gui
+.\build-windows-client\client_gui\Release\client_gui.exe
 ```
 
 ## Notes

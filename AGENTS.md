@@ -112,7 +112,7 @@ python tools/gen_opcode_docs.py --check
 - 비밀정보/개인정보를 로그에 남기지 말 것(운영/샘플 토큰 포함). `.env`는 커밋 금지.
 
 ## Notes
-- Docker 이미지: `knights-base:latest`(기반) -> `knights-app:local`(앱). `docker/stack`은 `observability` profile로 exporters/Prometheus/Grafana를 포함.
+- Docker 이미지: `knights-base:latest`(기반) + 서비스별 런타임 이미지(`knights-server:local`, `knights-gateway:local`, `knights-worker:local`, `knights-admin:local`, `knights-migrator:local`). `docker/stack`은 `observability` profile로 exporters/Prometheus/Grafana를 포함.
 - Dispatch latency quantile(p95/p99)는 최근 구간에 샘플이 없으면 NaN이 나올 수 있음(정상). 트래픽 주입 후 확인.
 - Gateway 하드닝 기본값: `GATEWAY_BACKEND_CONNECT_TIMEOUT_MS=5000`, `GATEWAY_BACKEND_SEND_QUEUE_MAX_BYTES=262144`; 관련 장애 카운터는 `gateway_backend_*` 메트릭으로 노출.
 - wb_worker는 Redis/DB 의존성 정상화 전 `ready=false`를 유지하고, DB 재연결 시 지수 백오프(+jitter)를 사용한다.

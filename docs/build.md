@@ -17,10 +17,13 @@ pwsh scripts/setup_vcpkg.ps1 -Triplet x64-windows
 
 ### 2) 빌드
 ```powershell
-# 전체 빌드
+# 권장: 경량 클라이언트 전용 릴리즈 빌드
+pwsh scripts/build.ps1 -ClientOnly -Target client_gui
+
+# 서버/테스트까지 포함한 전체 Windows 개발 빌드(필요할 때만)
 pwsh scripts/build.ps1 -Config Debug
 
-# 단일 타깃 빌드
+# 단일 타깃 빌드(서버 예시)
 pwsh scripts/build.ps1 -Config Debug -Target server_app
 ```
 
@@ -30,9 +33,10 @@ ctest --preset windows-test
 ```
 
 ### 4) 산출물 위치(예시)
-- `build-windows/server/Debug/server_app.exe`
-- `build-windows/gateway/Debug/gateway_app.exe`
-- `build-windows/Debug/wb_worker.exe`
+- `build-windows-client/client_gui/Release/client_gui.exe` (권장 client-only 빌드)
+- `build-windows/server/Debug/server_app.exe` (전체 Windows 빌드 시)
+- `build-windows/gateway/Debug/gateway_app.exe` (전체 Windows 빌드 시)
+- `build-windows/Debug/wb_worker.exe` (전체 Windows 빌드 시)
 
 ## 리눅스(Linux) (표준 런타임 = Docker 풀스택)
 

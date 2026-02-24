@@ -16,8 +16,11 @@
 단독으로 빌드하려면 다음 명령어를 참고하세요.
 
 ```powershell
-# 프로젝트 루트에서 실행
-cmake --build build-windows --target client_gui
+# 프로젝트 루트에서 실행 (권장: client-only release)
+pwsh scripts/build.ps1 -ClientOnly -Target client_gui
+
+# (직접 CMake 사용 시)
+cmake --build build-windows-client --config Release --target client_gui
 ```
 
 ## 🚀 사용법 (Usage)
