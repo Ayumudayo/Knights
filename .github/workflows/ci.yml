@@ -166,7 +166,7 @@ jobs:
             python3 tools/check_core_api_contracts.py --check-boundary; \
             python3 tools/check_core_api_contracts.py --check-boundary-fixtures; \
             python3 tools/check_core_api_contracts.py --check-stable-governance-fixtures; \
-            cmake --preset linux; \
+            cmake --preset linux -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=ON; \
             cmake --build --preset linux-debug --target core_public_api_smoke core_public_api_headers_compile core_public_api_stable_header_scenarios --parallel; \
             ctest --preset linux-test -R 'CorePublicApi|CoreApiBoundaryFixtures|CoreApiStableGovernanceFixtures' --output-on-failure"
 
@@ -363,7 +363,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/app" \
             -w /app \
             knights-base:latest \
-            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; cmake --preset linux -DKNIGHTS_ENABLE_GATEWAY_UDP_INGRESS=OFF; cmake --build --preset linux-debug --target gateway_app --parallel"
+            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; cmake --preset linux -DKNIGHTS_ENABLE_GATEWAY_UDP_INGRESS=OFF -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF; cmake --build --preset linux-debug --target gateway_app --parallel"
 
       - name: ASan/UBSan Build (server_app)
         run: |
@@ -371,7 +371,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/app" \
             -w /app \
             knights-base:latest \
-            bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan && cmake --build --preset linux-asan --target server_app --parallel"
+            bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF && cmake --build --preset linux-asan --target server_app --parallel"
 
       - name: Start Stack (Detached)
         shell: pwsh
