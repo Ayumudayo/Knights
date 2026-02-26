@@ -6,7 +6,7 @@ import urllib.error
 import urllib.request
 
 
-IMAGE = "knights-app:local"
+IMAGE = "knights-admin:local"
 TOKEN = "ci-admin-token"
 
 
