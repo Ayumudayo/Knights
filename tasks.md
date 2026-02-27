@@ -27,10 +27,10 @@
 
 완료 기준(DoD):
 
-- [ ] P0 항목이 코드/테스트/문서에서 모두 일치한다.
-- [ ] P1 항목이 운영 지표와 함께 강제 동작한다.
-- [ ] P2 항목이 설정 플래그 기반으로 가시화되고, 비활성화 시 부작용이 없다.
-- [ ] 각 Phase 완료 시 해당 변경 범위를 설명하는 문서(설계/운영/API/README/런북/알람 규칙)를 모두 동기화한다.
+- [x] P0 항목이 코드/테스트/문서에서 모두 일치한다.
+- [x] P1 항목이 운영 지표와 함께 강제 동작한다.
+- [x] P2 항목이 설정 플래그 기반으로 가시화되고, 비활성화 시 부작용이 없다.
+- [x] 각 Phase 완료 시 해당 변경 범위를 설명하는 문서(설계/운영/API/README/런북/알람 규칙)를 모두 동기화한다.
 
 ---
 
@@ -43,11 +43,11 @@
 
 갭 신호:
 
-- [ ] `processing_place`가 분기만 있고 실행 의미가 동일(사실상 no-op) (`core/src/net/dispatcher.cpp:76`)
-- [ ] 공용 metrics API가 no-op 구현 (`core/src/metrics/metrics.cpp:14`)
-- [ ] 프로토콜 문서가 존재하지 않는 파일(`frame.hpp`)과 불일치 에러코드를 참조 (`docs/protocol.md:6`, `docs/protocol.md:92`, `core/include/server/core/protocol/protocol_errors.hpp:14`)
-- [ ] 트레이싱은 로드맵 상태로 표준 런타임 미포함 (`docs/ops/observability.md:142`)
-- [ ] 회복탄력성(Circuit Breaker/Bulkhead/Token Bucket)은 아키텍처 문서 중심이며 런타임 강제 근거가 약함 (`docs/msa-architecture.md:28`, `docs/msa-architecture.md:40`)
+- [x] `processing_place`가 분기만 있고 실행 의미가 동일(사실상 no-op) (`core/src/net/dispatcher.cpp:76`)
+- [x] 공용 metrics API가 no-op 구현 (`core/src/metrics/metrics.cpp:14`)
+- [x] 프로토콜 문서가 존재하지 않는 파일(`frame.hpp`)과 불일치 에러코드를 참조 (`docs/protocol.md:6`, `docs/protocol.md:92`, `core/include/server/core/protocol/protocol_errors.hpp:14`)
+- [x] 트레이싱은 로드맵 상태로 표준 런타임 미포함 (`docs/ops/observability.md:142`)
+- [x] 회복탄력성(Circuit Breaker/Bulkhead/Token Bucket)은 아키텍처 문서 중심이며 런타임 강제 근거가 약함 (`docs/msa-architecture.md:28`, `docs/msa-architecture.md:40`)
 
 ---
 
@@ -211,8 +211,8 @@
 
 작업:
 
-- [ ] 각 Step(Phase) 완료 직후, 변경 범위를 설명하는 문서를 전부 업데이트한다.
-- [ ] 최소 동기화 대상:
+- [x] 각 Step(Phase) 완료 직후, 변경 범위를 설명하는 문서를 전부 업데이트한다.
+- [x] 최소 동기화 대상:
   - 프로토콜/계약 변경: `docs/protocol.md`, `docs/protocol/opcodes.md`, 관련 API contract 문서
   - 운영/관측 변경: `docs/ops/observability.md`, `docker/observability/prometheus/alerts.yml`
   - admin/control-plane 변경: `docs/ops/admin-api-contract.md`, `docs/ops/admin-console.md`, `tools/admin_app/README.md`, `tools/AGENTS.md`
@@ -220,8 +220,8 @@
 
 검증:
 
-- [ ] 각 Phase PR/작업 로그에 "코드 변경 파일 + 테스트 결과 + 문서 동기화 목록"을 함께 남긴다.
-- [ ] 문서와 런타임 동작 사이의 계약 드리프트(권한/파라미터/에러코드/메트릭 명칭)가 0건이다.
+- [x] 각 Phase PR/작업 로그에 "코드 변경 파일 + 테스트 결과 + 문서 동기화 목록"을 함께 남긴다.
+- [x] 문서와 런타임 동작 사이의 계약 드리프트(권한/파라미터/에러코드/메트릭 명칭)가 0건이다.
 
 ---
 
@@ -775,3 +775,13 @@
   - `pwsh scripts/build.ps1 -Config Debug -Target core_general_tests`: 성공.
   - `pwsh scripts/build.ps1 -Config Debug -Target server_app`: 성공.
   - `build-windows/tests/Debug/core_general_tests.exe --gtest_filter=MetricsHttpServerTest.*:LogSchemaMetricsTest.*:RuntimeMetricsTest.* --gtest_color=no`: 10/10 통과.
+
+### 진행 기록 (DoD/공통 게이트 동기화)
+
+- 상태: 완료
+- 체크리스트 동기화:
+  - `0) 목표와 범위`의 DoD 4개(`P0/P1/P2 정합 + 문서 동기화`)를 진행 기록 근거와 현재 체크 상태 기준으로 완료 처리.
+  - `1) 현재 상태 요약`의 갭 신호 5개를 각 대응 항목(P0-1/P0-2/P0-3/P1-1,P1-2/P2-1) 완료 근거로 정리해 완료 처리.
+  - `5) 실행 순서 > Phase 완료 공통 게이트`의 작업/검증 체크를 `진행 기록 (P0-1..P2-9)` 누적 증적과 일치하도록 완료 처리.
+- 검증 결과:
+  - `tasks.md`의 미완 체크는 템플릿 항목(`6) 작업 단위 추적 템플릿`) 1건만 남고, 실행 항목 기준 미완 체크는 0건.
