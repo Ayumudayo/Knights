@@ -72,3 +72,63 @@ groups:
         annotations:
           summary: "Gateway UDP jitter remains high"
           description: "Observed UDP jitter exceeded 150ms for 10m. Investigate network path or force TCP fallback."
+
+  - name: tls-certificate-expiry
+    rules:
+      - alert: TLSCertificateExpiringIn30Days
+        expr: (probe_ssl_earliest_cert_expiry - time()) <= (30 * 24 * 3600) and (probe_ssl_earliest_cert_expiry - time()) > (14 * 24 * 3600)
+        for: 4h
+        labels:
+          severity: info
+          service: edge
+        annotations:
+          summary: "TLS certificate expires in <= 30 days"
+          description: "Certificate for {{ $labels.instance }} is within the 30-day expiry window. Start renewal scheduling."
+
+      - alert: TLSCertificateExpiringIn14Days
+        expr: (probe_ssl_earliest_cert_expiry - time()) <= (14 * 24 * 3600) and (probe_ssl_earliest_cert_expiry - time()) > (7 * 24 * 3600)
+        for: 1h
+        labels:
+          severity: warning
+          service: edge
+        annotations:
+          summary: "TLS certificate expires in <= 14 days"
+          description: "Certificate for {{ $labels.instance }} is within the 14-day expiry window. Verify renewal rollout status."
+
+      - alert: TLSCertificateExpiringIn7Days
+        expr: (probe_ssl_earliest_cert_expiry - time()) <= (7 * 24 * 3600)
+        for: 5m
+        labels:
+          severity: critical
+          service: edge
+        annotations:
+          summary: "TLS certificate expires in <= 7 days"
+          description: "Certificate for {{ $labels.instance }} is in the critical expiry window. Rotate immediately."
+
+  - name: service-slo-burn-rate
+    rules:
+      - alert: ChatErrorBudgetBurnRateFast
+        expr: >-
+          (sum(rate(chat_frame_error_total[2h])) / clamp_min(sum(rate(chat_frame_total[2h])), 1)) > 0.01
+          and sum(rate(chat_frame_total[2h])) > 1
+        for: 2h
+        labels:
+          severity: critical
+          service: chat_server
+          slo_window: short
+        annotations:
+          summary: "chat_server fast burn-rate budget risk"
+          description: "2h error ratio exceeded 1% for 2h while traffic is present. Check recent deploys and dependency saturation."
+
+      - alert: ChatErrorBudgetBurnRateSlow
+        expr: >-
+          (sum(rate(chat_frame_error_total[12h])) / clamp_min(sum(rate(chat_frame_total[12h])), 1)) > 0.003
+          and sum(rate(chat_frame_total[12h])) > 1
+        for: 6h
+        labels:
+          severity: warning
+          service: chat_server
+          slo_window: long
+        annotations:
+          summary: "chat_server sustained burn-rate budget risk"
+          description: "12h error ratio exceeded 0.3% for 6h while traffic is present. Evaluate rollback or freeze risky feature changes."

@@ -15,6 +15,9 @@
 | Gateway backend circuit open | `gateway_backend_circuit_open==1` 지속 | (1) server_app readiness 확인 (2) `gateway_backend_*` 실패 지표 확인 (3) `GATEWAY_BACKEND_CIRCUIT_*` 임계치 점검 |
 | Gateway ingress rate-limit | `gateway_ingress_reject_rate_limit_total` 급증 | (1) 접속 폭주/공격 source 확인 (2) `GATEWAY_INGRESS_*` 임계치 조정 (3) gateway replica 확장 |
 | wb flush retry exhausted | `wb_flush_retry_exhausted_total` 증가 | (1) DB 가용성/락 상태 점검 (2) `WB_RETRY_*`/`WB_DB_RECONNECT_*` 조정 (3) reclaim backlog 증가 여부 확인 |
+| TLS cert expiry (30d) | `TLSCertificateExpiringIn30Days` 발생 | (1) 갱신 일정 확정 (2) 대상 인증서/SAN 목록 점검 (3) 스테이지 롤링 계획 수립 |
+| TLS cert expiry (14d) | `TLSCertificateExpiringIn14Days` 발생 | (1) 스테이지 갱신 리허설 (2) mTLS 체인 검증 (3) 본 배포 승인 |
+| TLS cert expiry (7d) | `TLSCertificateExpiringIn7Days` 발생 | (1) 즉시 인증서 교체 (2) legacy 예외 listener 포함 전수 반영 (3) 만료 임계치 해소 확인 |
 | Dispatch Exception | `chat_dispatch_exception_total` 급증 | (1) server_app 로그 (2) 최근 배포 롤백 |
 | UDP bind abuse | `gateway_udp_bind_rate_limit_reject_total` 증가 + `gateway_udp_bind_block_total` 증가 | (1) 공격/오탐 source IP 확인 (2) `GATEWAY_UDP_BIND_FAIL_*`/`GATEWAY_UDP_BIND_BLOCK_MS` 재검토 (3) 필요 시 임시로 UDP ingress 제한 |
 | UDP quality degradation | `GatewayUdpEstimatedLossHigh` 또는 `GatewayUdpJitterHigh` 발생 | (1) `gateway-udp-quality` 대시보드에서 loss/jitter/replay 분해 (2) 네트워크 구간 확인 (3) 필요 시 UDP 대상 opcode 축소 또는 TCP fallback |

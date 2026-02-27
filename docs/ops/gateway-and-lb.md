@@ -82,7 +82,16 @@ listen stats
   stats uri /
 ```
 
-### 3.2 운영 팁
+### 3.2 TLS 1.3/mTLS 운영 정책 (Prod)
+- 기본 edge listener는 TLS 1.3을 강제한다. (`ssl-min-ver TLSv1.3`)
+- 레거시 클라이언트 예외는 별도 포트 listener(TLS 1.2 only)로 분리하고, SNI allowlist로 대상 도메인을 제한한다.
+- LB->gateway/backend 내부 hop은 `ssl verify required` + 내부 CA로 mTLS를 강제한다.
+- 인증서 갱신은 30/14/7일 윈도우로 운영한다. (30일: 일정 확정, 14일: 리허설, 7일: 즉시 교체)
+
+검증/운영 템플릿:
+- `docker/stack/haproxy/haproxy.tls13.cfg`
+
+### 3.3 운영 팁
 - Gateway는 stateful TCP를 terminate하므로, HAProxy는 “연결 단위”로 분산한다.
 - Gateway의 sticky routing은 Redis(SessionDirectory)로 구현되어 있으므로, HAProxy가 어떤 Gateway로 보내더라도 동일 client_id에 대해 동일 backend로 라우팅될 수 있다.
 

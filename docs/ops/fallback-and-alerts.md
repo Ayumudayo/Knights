@@ -21,6 +21,9 @@
 | `sum(rate(gateway_udp_loss_estimated_total[5m])) / clamp_min(sum(rate(gateway_udp_forward_total[5m])), 1)` | > 0.05 (10m) | "UDP estimated loss high" |
 | `sum(rate(gateway_udp_replay_drop_total[5m]))` | > 2/s (10m) | "UDP replay/reorder drops high" |
 | `max_over_time(gateway_udp_jitter_ms_last[10m])` | > 150ms (10m) | "UDP jitter high" |
+| `(probe_ssl_earliest_cert_expiry - time()) <= 30d and > 14d` | 4h 지속 | "TLS cert expires in <= 30 days" |
+| `(probe_ssl_earliest_cert_expiry - time()) <= 14d and > 7d` | 1h 지속 | "TLS cert expires in <= 14 days" |
+| `(probe_ssl_earliest_cert_expiry - time()) <= 7d` | 5m 지속 | "TLS cert expires in <= 7 days" |
 
 AlertManager → Slack → On-call 순으로 전달하고, runbook 절차에 따라 대응한다.
 

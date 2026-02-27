@@ -39,6 +39,7 @@ pwsh scripts/smoke_metrics.ps1
 2) 트래픽 주입
 - 채팅 트래픽(권장): `client_gui` 또는 `dev_chat_cli`로 로그인/룸 입장/채팅 몇 회 수행
 - write-behind 왕복 검증(roundtrip, 도구 기반): `pwsh scripts/smoke_wb.ps1` (Streams -> DB 검증)
+- soak + 성능 회귀 게이트(로그인 RTT/처리량 + bounded queue): `python tests/python/verify_soak_perf_gate.py`
 
 3) Grafana 대시보드 유효성 확인
 - `server-metrics.json`: 활성 세션, 디스패치(dispatch) 지연(p50/p95/p99), 작업 큐 깊이가 움직이는지
@@ -57,17 +58,43 @@ pwsh scripts/smoke_metrics.ps1
   - `core_runtime_session_stopped_total` (counter)
   - `core_runtime_session_active` (gauge)
   - `core_runtime_dispatch_total`, `core_runtime_dispatch_unknown_total`, `core_runtime_dispatch_exception_total` (counters)
+  - `core_runtime_exception_recoverable_total`, `core_runtime_exception_fatal_total`, `core_runtime_exception_ignored_total` (counters)
   - `core_runtime_send_queue_drop_total`, `core_runtime_packet_error_total` (counters)
+  - `core_runtime_log_async_queue_depth`, `core_runtime_log_async_queue_capacity` (gauges)
+  - `core_runtime_log_async_queue_drop_total` (counter)
+  - `core_runtime_log_async_flush_total`, `core_runtime_log_async_flush_latency_sum_ns` (counters)
+  - `core_runtime_log_async_flush_latency_max_ns` (gauge)
+  - `core_runtime_log_masked_fields_total` (counter)
+  - 구조화 로그 품질:
+    - `core_log_schema_records_total{format="text|json"}` (counter)
+    - `core_log_schema_parse_success_total{format="text|json"}`, `core_log_schema_parse_failure_total{format="text|json"}` (counters)
+    - `core_log_schema_field_total{format="text|json",field="timestamp|level|component|trace_id|correlation_id|message|error_code"}` (counter)
+    - `core_log_schema_field_filled_total{format="text|json",field="..."}` (counter)
+  - `core_runtime_http_active_connections` (gauge)
+  - `core_runtime_http_connection_limit_reject_total`, `core_runtime_http_auth_reject_total` (counters)
+  - `core_runtime_http_header_timeout_total`, `core_runtime_http_body_timeout_total` (counters)
+  - `core_runtime_http_header_oversize_total`, `core_runtime_http_body_oversize_total`, `core_runtime_http_bad_request_total` (counters)
+  - `core_runtime_setting_reload_attempt_total`, `core_runtime_setting_reload_success_total`, `core_runtime_setting_reload_failure_total` (counters)
+  - `core_runtime_setting_reload_latency_sum_ns` (counter), `core_runtime_setting_reload_latency_max_ns` (gauge)
 
 ### 서버 앱(server_app)
 - 세션: `chat_session_active` (gauge), `chat_session_started_total`, `chat_session_stopped_total`
 - 세션 타임아웃: `chat_session_timeout_total`, `chat_session_write_timeout_total` (counters)
 - 프레임: `chat_frame_total`, `chat_frame_error_total`, `chat_frame_payload_*`
 - 디스패치: `chat_dispatch_total`, `chat_dispatch_unknown_total`, `chat_dispatch_exception_total`
+- 예외 분류: `chat_exception_recoverable_total`, `chat_exception_fatal_total`, `chat_exception_ignored_total`
 - 디스패치 지연:
   - 게이지(Gauges): `chat_dispatch_last_latency_ms`, `chat_dispatch_max_latency_ms`, `chat_dispatch_latency_avg_ms`
   - 히스토그램(Histogram): `chat_dispatch_latency_ms_bucket`, `chat_dispatch_latency_ms_sum`, `chat_dispatch_latency_ms_count`
 - 큐/DB: `chat_job_queue_depth`, `chat_db_job_queue_depth`, `chat_db_job_processed_total`, `chat_db_job_failed_total`
+- 로거/HTTP 제어면:
+  - `chat_log_async_queue_depth`, `chat_log_async_queue_capacity` (gauges)
+  - `chat_log_async_queue_drop_total`, `chat_log_async_flush_total`, `chat_log_async_flush_latency_sum_ns`, `chat_log_masked_fields_total` (counters)
+  - `chat_http_active_connections` (gauge)
+  - `chat_http_connection_limit_reject_total`, `chat_http_auth_reject_total` (counters)
+  - `chat_http_header_timeout_total`, `chat_http_body_timeout_total`, `chat_http_header_oversize_total`, `chat_http_body_oversize_total`, `chat_http_bad_request_total` (counters)
+  - `chat_runtime_setting_reload_attempt_total`, `chat_runtime_setting_reload_success_total`, `chat_runtime_setting_reload_failure_total`, `chat_runtime_setting_reload_latency_sum_ns` (counters)
+  - `chat_runtime_setting_reload_latency_max_ms` (gauge)
 - 팬아웃/구독(Fanout/Subscribe): `chat_subscribe_total`, `chat_self_echo_drop_total`, `chat_subscribe_last_lag_ms`
 - admin command 무결성:
   - `chat_admin_command_verify_ok_total`, `chat_admin_command_verify_fail_total` (counters)
@@ -170,6 +197,36 @@ max_over_time(wb_pending[5m])
   - `GatewayUdpEstimatedLossHigh`: 추정 loss ratio > 5%
   - `GatewayUdpReplayDropSpike`: replay/reorder drop 급증
   - `GatewayUdpJitterHigh`: jitter 지속 고수준
+  - `TLSCertificateExpiringIn30Days`: 인증서 만료 30일 이내(정보)
+  - `TLSCertificateExpiringIn14Days`: 인증서 만료 14일 이내(경고)
+  - `TLSCertificateExpiringIn7Days`: 인증서 만료 7일 이내(치명)
+  - `ChatErrorBudgetBurnRateFast`: chat frame 오류율이 단기 윈도우에서 budget 소진 속도로 상승(치명)
+  - `ChatErrorBudgetBurnRateSlow`: chat frame 오류율이 장기 윈도우에서 budget 소진 속도로 지속(경고)
+
+### 6.2 SLO burn-rate 기준
+
+- 핵심 SLI는 `chat_frame_error_total / chat_frame_total` 오류율을 사용한다.
+- 단기 burn-rate 경보:
+  - rule: `ChatErrorBudgetBurnRateFast`
+  - 기준: 2h 오류율 > 1%가 2h 지속
+- 장기 burn-rate 경보:
+  - rule: `ChatErrorBudgetBurnRateSlow`
+  - 기준: 12h 오류율 > 0.3%가 6h 지속
+- 운영 정책: burn-rate 경보 지속 시 신규 기능 rollout을 일시 중지하고, 최근 배포/의존성 포화/백프레셔 설정을 우선 점검한다.
+
+### 6.1 인증서 만료 알람 소스 메트릭
+
+- 기본 식은 blackbox exporter 메트릭 `probe_ssl_earliest_cert_expiry`를 사용한다.
+- 운영에서 x509 exporter를 사용할 경우 동일 임계치 식을 `x509_cert_not_after`로 치환해 적용한다.
+- 경보 윈도우는 서로 배타적으로 구성되어 30일/14일/7일 알람이 동시에 중복 발화되지 않는다.
+
+로컬 규칙 검증:
+
+```powershell
+pwsh scripts/check_prometheus_rules.ps1
+```
+
+위 스크립트는 `promtool check rules` + `promtool test rules`를 실행해, 테스트 입력(metric fixture)으로 30/14/7일 임계치 발화를 재현한다.
 
 ## 7. 트레이싱/상관키 (config-gated)
 
@@ -195,3 +252,42 @@ max_over_time(wb_pending[5m])
 
 4) tracing을 끄고 비교 검증한다(성능/부작용 점검).
 - `KNIGHTS_TRACING_ENABLED=0`으로 재기동 후 기능 동일성/지연 변화를 비교한다.
+
+### 7.2 구조화 로그 스키마와 품질 지표
+
+- `LOG_FORMAT=json`일 때 로그는 아래 고정 필드 스키마를 따른다.
+  - `timestamp`, `level`, `component`, `trace_id`, `correlation_id`, `message`, `error_code`
+- `trace_id`/`correlation_id`는 tracing 샘플링 상태에 따라 빈 문자열일 수 있으며, 필드 자체는 항상 출력한다.
+- 민감정보(`authorization bearer`, `token`, `password`, `secret`, `api_key`)는 로거 계층에서 `***`로 마스킹한다.
+
+파싱 성공률(5m, json):
+
+```promql
+sum(rate(core_log_schema_parse_success_total{format="json"}[5m]))
+/
+clamp_min(sum(rate(core_log_schema_records_total{format="json"}[5m])), 1)
+```
+
+필드 채움률 예시(`trace_id`, 5m, json):
+
+```promql
+sum(rate(core_log_schema_field_filled_total{format="json",field="trace_id"}[5m]))
+/
+clamp_min(sum(rate(core_log_schema_field_total{format="json",field="trace_id"}[5m])), 1)
+```
+
+## 8. 예외 정책 표 (throw/catch/convert-to-error)
+
+| 경계 | 예외/실패 조건 | 분류 | 신호(메트릭/로그) | convert-to-error code | 기본 대응 |
+| --- | --- | --- | --- | --- | --- |
+| Dispatcher handler (`core/src/net/dispatcher.cpp`) | `catch (const std::exception&)` | recoverable | `core_runtime_dispatch_exception_total`, `core_runtime_exception_recoverable_total`, 로그 키 `component=dispatcher error_code=INTERNAL_ERROR` | `INTERNAL_ERROR` | 요청만 실패 처리, 세션/프로세스는 유지 |
+| Dispatcher handler (`core/src/net/dispatcher.cpp`) | `catch (...)` | ignored | `core_runtime_dispatch_exception_total`, `core_runtime_exception_ignored_total`, 로그 키 `component=dispatcher error_code=INTERNAL_ERROR` | `INTERNAL_ERROR` | unknown 예외를 흡수하고 요청 실패로 변환 |
+| Dispatcher context/setup (`core/src/net/dispatcher.cpp`) | shared session 없음, worker queue 없음, unsupported place | recoverable/ignored | `core_runtime_dispatch_processing_place_reject_total`, `core_runtime_exception_ignored_total`, 로그 키 `component=dispatcher error_code=SERVER_BUSY|INTERNAL_ERROR` | `SERVER_BUSY` 또는 `INTERNAL_ERROR` | 재시도 가능한 busy/error로 변환 |
+| Server bootstrap periodic checks (`server/src/app/bootstrap.cpp`) | Redis/registry/I/O thread `std::exception` | recoverable | `core_runtime_exception_recoverable_total`, 로그 키 `component=server_bootstrap error_code=...` | N/A | 주기 작업만 실패로 처리하고 프로세스 유지 |
+| Server bootstrap cleanup (`server/src/app/bootstrap.cpp`) | shutdown path `catch (...)` | ignored | `core_runtime_exception_ignored_total` | N/A | 종료 시 best-effort 정리, 누락은 메트릭으로 추적 |
+| Server top-level (`server/src/app/bootstrap.cpp`) | `run_server` outer `catch (const std::exception&)` | fatal | `core_runtime_exception_fatal_total`, 로그 키 `component=server_bootstrap error_code=SERVER_FATAL` | N/A | 프로세스 실패 종료(비정상) |
+
+운영 추적 규칙:
+
+- 예외 경로는 최소 하나 이상의 메트릭(`recoverable/fatal/ignored`) 또는 구조화 로그 신호를 남긴다.
+- 장애 재현 시에는 `예외 발생 -> 메트릭 증가 -> 상관키 로그(trace_id/correlation_id) -> 대응` 순서로 확인한다.
