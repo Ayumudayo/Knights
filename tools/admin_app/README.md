@@ -41,6 +41,7 @@
 | `PROMETHEUS_BASE_URL` | Prometheus 기본 URL 링크 | `http://127.0.0.1:39090` |
 | `ADMIN_AUTH_MODE` | 인증 모드 (`off`, `header`, `bearer`, `header_or_bearer`) | `off` |
 | `ADMIN_READ_ONLY` | write endpoint 킬스위치(`1`이면 write 요청 차단) | `0` |
+| `ADMIN_COMMAND_SIGNING_SECRET` | admin fanout 명령 payload HMAC 서명 키(미설정 시 write publish 차단) | (unset) |
 | `ADMIN_OFF_ROLE` | `ADMIN_AUTH_MODE=off`일 때 적용할 역할(role) (`viewer/operator/admin`) | `admin` |
 | `ADMIN_AUTH_USER_HEADER` | header 인증 시 사용자 헤더(header) 이름 | `X-Admin-User` |
 | `ADMIN_AUTH_ROLE_HEADER` | header 인증 시 역할 헤더(header) 이름 | `X-Admin-Role` |
@@ -97,6 +98,10 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 
 `ADMIN_READ_ONLY=1`이면 아래 write 엔드포인트는 역할과 무관하게 `403` + `READ_ONLY`로 거부된다.
 `/api/v1/auth/context`의 `data.read_only`는 `true`가 되고, write capability(`disconnect/announce/settings/moderation`)는 모두 `false`로 내려간다.
+
+`ADMIN_COMMAND_SIGNING_SECRET`이 설정되면 write 명령 publish payload에
+`issued_at`, `nonce`, `signature`(HMAC-SHA256)가 자동 추가된다.
+미설정 상태에서는 write 명령 publish가 `503` + `MISCONFIGURED`로 거부된다.
 
 - `POST /api/v1/users/disconnect`
   - `client_id` 또는 `client_ids`(쉼표 구분)

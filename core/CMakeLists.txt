@@ -20,6 +20,7 @@ add_library(server_core
     src/util/crash_handler.cpp
     src/storage/db_worker_pool.cpp
     src/security/cipher.cpp
+    src/security/admin_command_auth.cpp
     src/compression/compressor.cpp
 )
 add_library(server_core::server_core ALIAS server_core)

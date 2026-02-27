@@ -35,6 +35,7 @@
 #include "server/config/runtime_settings.hpp"
 #include "server/core/metrics/build_info.hpp"
 #include "server/core/metrics/http_server.hpp"
+#include "server/core/security/admin_command_auth.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/paths.hpp"
 #include "server/state/instance_registry.hpp"
@@ -902,6 +903,7 @@ private:
         grafana_base_url_ = read_env_string("GRAFANA_BASE_URL", "http://127.0.0.1:33000");
         prometheus_base_url_ = read_env_string("PROMETHEUS_BASE_URL", "http://127.0.0.1:39090");
         admin_read_only_ = read_env_bool("ADMIN_READ_ONLY", false);
+        admin_command_signing_secret_ = read_env_string("ADMIN_COMMAND_SIGNING_SECRET", "");
 
         auth_mode_raw_ = read_env_string("ADMIN_AUTH_MODE", "off");
         auth_mode_ = parse_auth_mode(auth_mode_raw_);
@@ -930,6 +932,30 @@ private:
         if (admin_read_only_) {
             corelog::warn("admin_app write endpoints are disabled by ADMIN_READ_ONLY=1");
         }
+        if (admin_command_signing_secret_.empty()) {
+            corelog::warn("admin_app ADMIN_COMMAND_SIGNING_SECRET is empty; write command publish will be rejected");
+        }
+    }
+
+    std::optional<std::string>
+    build_signed_admin_message(std::unordered_map<std::string, std::string> fields, std::uint64_t request_id) {
+        if (admin_command_signing_secret_.empty()) {
+            command_signing_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            corelog::warn("admin_app command publish blocked: ADMIN_COMMAND_SIGNING_SECRET is not configured");
+            return std::nullopt;
+        }
+
+        if (!server::core::security::admin_command_auth::append_signature_fields(
+                fields,
+                admin_command_signing_secret_,
+                server::core::security::admin_command_auth::now_ms())) {
+            command_signing_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            corelog::error("admin_app command signing failed request_id=admin-" + std::to_string(request_id));
+            return std::nullopt;
+        }
+
+        return std::string("gw=admin_app\n")
+             + server::core::security::admin_command_auth::to_kv_payload(fields);
     }
 
     AuthContext authenticate_request(const server::core::metrics::MetricsHttpServer::HttpRequest& request) const {
@@ -1307,6 +1333,10 @@ private:
 
         stream << "# TYPE admin_poll_errors_total counter\n";
         stream << "admin_poll_errors_total " << poll_errors_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE admin_command_signing_errors_total counter\n";
+        stream << "admin_command_signing_errors_total "
+               << command_signing_errors_total_.load(std::memory_order_relaxed) << "\n";
 
         stream << "# TYPE admin_instances_cached gauge\n";
         {
@@ -2242,15 +2272,24 @@ private:
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:disconnect";
-        std::ostringstream payload;
-        payload << "op=disconnect\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "reason=" << sanitize_single_line(reason) << "\n";
-        payload << "client_ids=" << join_csv(deduped);
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = "disconnect";
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["reason"] = sanitize_single_line(reason);
+        fields["client_ids"] = join_csv(deduped);
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2322,15 +2361,24 @@ private:
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:announce";
-        std::ostringstream payload;
-        payload << "op=announce\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "priority=" << priority << "\n";
-        payload << "text=" << text;
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = "announce";
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["priority"] = priority;
+        fields["text"] = text;
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2397,7 +2445,7 @@ private:
                 json_details("value", value));
         }
 
-const auto* setting_rule = server::config::find_runtime_setting_rule(key);
+        const auto* setting_rule = server::config::find_runtime_setting_rule(key);
         if (setting_rule == nullptr) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(request_id, "400 Bad Request", "BAD_REQUEST", "unsupported setting key");
@@ -2413,15 +2461,24 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:settings";
-        std::ostringstream payload;
-        payload << "op=settings\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "key=" << sanitize_single_line(key) << "\n";
-        payload << "value=" << parsed_value;
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = "settings";
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["key"] = sanitize_single_line(key);
+        fields["value"] = std::to_string(parsed_value);
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2531,16 +2588,25 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:moderation";
-        std::ostringstream payload;
-        payload << "op=" << sanitize_single_line(op) << "\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "duration_sec=" << duration_sec << "\n";
-        payload << "reason=" << reason << "\n";
-        payload << "client_ids=" << join_csv(deduped);
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = sanitize_single_line(op);
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["duration_sec"] = std::to_string(duration_sec);
+        fields["reason"] = reason;
+        fields["client_ids"] = join_csv(deduped);
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2707,6 +2773,7 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
     std::string prometheus_base_url_;
     std::string admin_ui_html_;
     bool admin_read_only_{false};
+    std::string admin_command_signing_secret_;
 
     AdminAuthMode auth_mode_{AdminAuthMode::kOff};
     std::string auth_mode_raw_;
@@ -2750,6 +2817,7 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
     std::atomic<std::uint64_t> moderation_requests_total_{0};
     std::atomic<std::uint64_t> worker_requests_total_{0};
     std::atomic<std::uint64_t> poll_errors_total_{0};
+    std::atomic<std::uint64_t> command_signing_errors_total_{0};
     std::atomic<std::uint64_t> request_seq_{0};
 };
 

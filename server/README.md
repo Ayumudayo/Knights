@@ -80,6 +80,9 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
 | `SERVER_REGISTRY_PREFIX` | Instance Registry 키 접두사 | `gateway/instances/` |
 | `SERVER_REGISTRY_TTL` | Instance Registry TTL(초) | `30` |
 | `METRICS_PORT` | 메트릭 수집을 위한 HTTP 포트 | `9090` |
+| `ADMIN_COMMAND_SIGNING_SECRET` | admin fanout command 검증용 HMAC 서명 키(미설정 시 admin command 거부) | (unset) |
+| `ADMIN_COMMAND_TTL_MS` | admin fanout command payload TTL(ms) | `60000` |
+| `ADMIN_COMMAND_FUTURE_SKEW_MS` | admin fanout command 미래 시각 허용치(ms) | `5000` |
 | `CHAT_HOOK_PLUGINS_DIR` | (실험, 권장) 플러그인 디렉터리(모든 `.so/.dll`을 파일명 순으로 로드) | `/app/plugins` |
 | `CHAT_HOOK_PLUGIN_PATHS` | (실험) 플러그인 경로 목록(순서 고정, 구분자 `;` 또는 `,`) | `/app/plugins/10_chat_hook_sample.so;/app/plugins/20_chat_hook_tag.so` |
 | `CHAT_HOOK_PLUGIN_PATH` | (실험, 레거시) 단일 플러그인(.so/.dll) 경로 | `/app/plugins/10_chat_hook_sample.so` |

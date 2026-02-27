@@ -31,6 +31,15 @@ namespace services = server::core::util::services;
 extern std::atomic<std::uint64_t> g_subscribe_total;
 extern std::atomic<std::uint64_t> g_self_echo_drop_total;
 extern std::atomic<long long>     g_subscribe_last_lag_ms;
+extern std::atomic<std::uint64_t> g_admin_command_verify_ok_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_fail_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_replay_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_signature_mismatch_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_expired_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_future_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_missing_field_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_invalid_issued_at_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_secret_not_configured_total;
 
 namespace {
 
@@ -81,6 +90,21 @@ std::string render_metrics() {
     append_counter("chat_subscribe_total", g_subscribe_total.load());
     append_counter("chat_self_echo_drop_total", g_self_echo_drop_total.load());
     append_gauge("chat_subscribe_last_lag_ms", static_cast<long double>(g_subscribe_last_lag_ms.load()));
+    append_counter("chat_admin_command_verify_ok_total", g_admin_command_verify_ok_total.load());
+    append_counter("chat_admin_command_verify_fail_total", g_admin_command_verify_fail_total.load());
+    append_counter("chat_admin_command_verify_replay_total", g_admin_command_verify_replay_total.load());
+    append_counter(
+        "chat_admin_command_verify_signature_mismatch_total",
+        g_admin_command_verify_signature_mismatch_total.load());
+    append_counter("chat_admin_command_verify_expired_total", g_admin_command_verify_expired_total.load());
+    append_counter("chat_admin_command_verify_future_total", g_admin_command_verify_future_total.load());
+    append_counter("chat_admin_command_verify_missing_field_total", g_admin_command_verify_missing_field_total.load());
+    append_counter(
+        "chat_admin_command_verify_invalid_issued_at_total",
+        g_admin_command_verify_invalid_issued_at_total.load());
+    append_counter(
+        "chat_admin_command_verify_secret_not_configured_total",
+        g_admin_command_verify_secret_not_configured_total.load());
 
     append_counter("chat_accept_total", snap.accept_total);
     append_counter("chat_session_started_total", snap.session_started_total);

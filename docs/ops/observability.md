@@ -69,6 +69,11 @@ pwsh scripts/smoke_metrics.ps1
   - 히스토그램(Histogram): `chat_dispatch_latency_ms_bucket`, `chat_dispatch_latency_ms_sum`, `chat_dispatch_latency_ms_count`
 - 큐/DB: `chat_job_queue_depth`, `chat_db_job_queue_depth`, `chat_db_job_processed_total`, `chat_db_job_failed_total`
 - 팬아웃/구독(Fanout/Subscribe): `chat_subscribe_total`, `chat_self_echo_drop_total`, `chat_subscribe_last_lag_ms`
+- admin command 무결성:
+  - `chat_admin_command_verify_ok_total`, `chat_admin_command_verify_fail_total` (counters)
+  - `chat_admin_command_verify_replay_total`, `chat_admin_command_verify_signature_mismatch_total` (counters)
+  - `chat_admin_command_verify_expired_total`, `chat_admin_command_verify_future_total` (counters)
+  - `chat_admin_command_verify_missing_field_total`, `chat_admin_command_verify_invalid_issued_at_total`, `chat_admin_command_verify_secret_not_configured_total` (counters)
 - opcode별(hex): `chat_dispatch_opcode_total{opcode="0x0000"}`
 - opcode별(이름): `chat_dispatch_opcode_named_total{opcode="0x0000",name="MSG_*"}`
 - Chat hook 플러그인(실험):
@@ -125,6 +130,7 @@ pwsh scripts/smoke_metrics.ps1
 - 인증 트래픽: `admin_http_unauthorized_total`, `admin_http_forbidden_total` (counters)
 - API 종류별: `admin_overview_requests_total`, `admin_instances_requests_total`, `admin_session_lookup_requests_total`, `admin_worker_requests_total` (counters)
 - 폴링/캐시: `admin_poll_errors_total` (counter), `admin_instances_cached` (gauge)
+- 명령 서명: `admin_command_signing_errors_total` (counter)
 - 의존성/상태: `admin_redis_available`, `admin_worker_metrics_available`, `admin_read_only_mode` (gauges)
 
 ## 4. PromQL 예시

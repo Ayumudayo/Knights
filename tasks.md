@@ -445,14 +445,14 @@
 
 작업:
 
-- [ ] admin 명령 payload에 `issued_at`, `nonce`, `signature`를 추가한다.
-- [ ] server 수신측에서 서명 검증 + TTL 기반 재생 공격 차단을 강제한다.
-- [ ] 검증 실패 카운터/감사 로그를 표준 메트릭으로 노출한다.
+- [x] admin 명령 payload에 `issued_at`, `nonce`, `signature`를 추가한다.
+- [x] server 수신측에서 서명 검증 + TTL 기반 재생 공격 차단을 강제한다.
+- [x] 검증 실패 카운터/감사 로그를 표준 메트릭으로 노출한다.
 
 검증:
 
-- [ ] 변조/재전송 payload는 적용되지 않고 거절 사유가 메트릭/로그에 남는다.
-- [ ] 정상 payload만 fanout 명령으로 반영된다.
+- [x] 변조/재전송 payload는 적용되지 않고 거절 사유가 메트릭/로그에 남는다.
+- [x] 정상 payload만 fanout 명령으로 반영된다.
 
 ### P1-8. Admin 읽기 전용 킬스위치(`ADMIN_READ_ONLY`) 실체화
 
@@ -625,3 +625,33 @@
   - `python tests/python/verify_admin_auth.py`: 통과 (`PASS: admin auth mode smoke test`).
   - `python tests/python/verify_admin_read_only.py`: 통과 (`PASS: admin read-only mode smoke test`).
   - `lsp_diagnostics`: `tools/admin_app/main.cpp` 에러 없음(기존 `getenv` deprecation hint만 존재).
+
+### 진행 기록 (추가 갭 P1-7)
+
+- 상태: 완료
+- 코드 변경:
+  - `core/include/server/core/security/admin_command_auth.hpp`, `core/src/security/admin_command_auth.cpp`: admin command canonical KV 서명(HMAC-SHA256), `issued_at`/`nonce`/`signature` 부착, TTL/future-skew/replay 검증 유틸(상수시간 signature 비교 포함) 구현.
+  - `core/CMakeLists.txt`: `admin_command_auth.cpp`를 `server_core`에 명시 추가.
+  - `server/include/server/app/config.hpp`, `server/src/app/config.cpp`: `ADMIN_COMMAND_SIGNING_SECRET`, `ADMIN_COMMAND_TTL_MS`, `ADMIN_COMMAND_FUTURE_SKEW_MS` 설정 키 추가.
+  - `server/src/app/bootstrap.cpp`: admin fanout 채널(`disconnect/announce/settings/moderation`) 수신 시 서명 검증 + TTL 기반 replay 차단 강제, 실패 사유별 카운터/감사 로그 추가.
+  - `server/src/app/metrics_server.cpp`: `chat_admin_command_verify_*` 메트릭 노출 추가.
+  - `tools/admin_app/main.cpp`: write fanout payload에 `issued_at`/`nonce`/`signature` 자동 부착, 미설정 시 `503` + `MISCONFIGURED`로 publish 차단, `admin_command_signing_errors_total` 메트릭 추가.
+  - `tests/core/test_admin_command_auth.cpp`, `tests/CMakeLists.txt`: 서명 정합/변조/재전송/TTL/future-skew/미설정 시나리오 테스트 추가.
+  - `docker/stack/docker-compose.yml`: server/admin 서비스에 `ADMIN_COMMAND_SIGNING_SECRET` 및 server TTL/skew 설정 pass-through 추가.
+- 문서 동기화:
+  - `docs/configuration.md`: admin command 서명/TTL/future-skew 환경변수 반영.
+  - `server/README.md`: server_app admin command 무결성 환경변수 반영.
+  - `tools/admin_app/README.md`: write payload 서명 필드와 `ADMIN_COMMAND_SIGNING_SECRET` 계약 반영.
+  - `docs/ops/admin-api-contract.md`: write fanout payload(`issued_at`,`nonce`,`signature`) 및 `MISCONFIGURED` 오류 코드 반영.
+  - `docs/ops/admin-console.md`: 운영 안전장치에 admin command 무결성 검증 절차 반영.
+  - `docs/ops/observability.md`: server/admin command integrity 메트릭 반영.
+- 검증 결과:
+  - `lsp_diagnostics`: P1-7 변경 C++ 파일 에러 없음(기존 `getenv` 관련 hint만 존재).
+  - `pwsh scripts/build.ps1 -Config Debug -Target core_general_tests`: 성공.
+  - `pwsh scripts/build.ps1 -Config Debug -Target server_app`: 성공.
+  - `pwsh scripts/build.ps1 -Config Debug -Target server_general_tests`: 성공.
+  - `pwsh scripts/build.ps1 -Config Debug -Target admin_app`: 성공.
+  - `build-windows/tests/Debug/core_general_tests.exe --gtest_filter=AdminCommandAuthTest.* --gtest_color=no`: 6/6 통과.
+  - `build-windows/tests/Debug/server_general_tests.exe --gtest_color=no`: 19/19 통과.
+  - `python tests/python/verify_admin_auth.py`: 통과 (`PASS: admin auth mode smoke test`).
+  - `python tests/python/verify_admin_read_only.py`: 통과 (`PASS: admin read-only mode smoke test`).

@@ -94,6 +94,7 @@
 - `NOT_FOUND` (404)
 - `BAD_REQUEST` (400)
 - `UPSTREAM_UNAVAILABLE` (503)
+- `MISCONFIGURED` (503)
 - `TIMEOUT` (504)
 - `INTERNAL_ERROR` (500)
 
@@ -272,7 +273,9 @@
 동작:
 
 - Redis Pub/Sub channel `${REDIS_CHANNEL_PREFIX}fanout:admin:disconnect`로 최선 시도(best-effort) 발행
-- payload는 `client_ids`, `reason`, `actor`, `request_id`를 포함
+- payload는 `client_ids`, `reason`, `actor`, `request_id`, `issued_at`, `nonce`, `signature`를 포함
+- `signature`는 `ADMIN_COMMAND_SIGNING_SECRET` 기반 HMAC-SHA256 서명값
+- `ADMIN_COMMAND_SIGNING_SECRET` 미설정 시 `503` + `MISCONFIGURED`로 거부
 
 권한:
 
@@ -293,6 +296,9 @@
 동작:
 
 - Redis Pub/Sub channel `${REDIS_CHANNEL_PREFIX}fanout:admin:announce`
+- payload는 `text`, `priority`, `actor`, `request_id`, `issued_at`, `nonce`, `signature`를 포함
+- `signature`는 `ADMIN_COMMAND_SIGNING_SECRET` 기반 HMAC-SHA256 서명값
+- `ADMIN_COMMAND_SIGNING_SECRET` 미설정 시 `503` + `MISCONFIGURED`로 거부
 
 권한:
 
@@ -321,6 +327,9 @@
 동작:
 
 - Redis Pub/Sub channel `${REDIS_CHANNEL_PREFIX}fanout:admin:settings`
+- payload는 `key`, `value`, `actor`, `request_id`, `issued_at`, `nonce`, `signature`를 포함
+- `signature`는 `ADMIN_COMMAND_SIGNING_SECRET` 기반 HMAC-SHA256 서명값
+- `ADMIN_COMMAND_SIGNING_SECRET` 미설정 시 `503` + `MISCONFIGURED`로 거부
 
 권한:
 

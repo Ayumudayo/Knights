@@ -207,6 +207,8 @@ MVP는 write 액션까지 포함하므로 감사 로그를 필수로 남긴다.
 2. 쿼리 제한: pagination, timeout, max cardinality
 3. Redis key 조회는 범위 제한(prefix 고정) + 과도한 SCAN 금지
 4. 장애 시 `ADMIN_READ_ONLY=1`로 write endpoint를 즉시 차단하는 kill-switch 운영
+5. admin command fanout payload는 `issued_at`/`nonce`/`signature`를 포함하고,
+   `server_app` 수신측에서 HMAC 서명 + TTL + replay 검증을 통과한 경우만 적용
 
 ## 9. 단계별 실행 계획
 

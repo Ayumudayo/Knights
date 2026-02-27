@@ -45,6 +45,11 @@ struct ServerConfig {
     bool use_redis_pubsub = true;
     std::string gateway_id = "gw-default";
 
+    // Admin command integrity (P1-7)
+    std::string admin_command_signing_secret;
+    std::uint64_t admin_command_ttl_ms = 60'000;
+    std::uint64_t admin_command_future_skew_ms = 5'000;
+
     // 메트릭 설정
     unsigned short metrics_port = 0;
 

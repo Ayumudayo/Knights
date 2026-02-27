@@ -25,6 +25,7 @@
 #include "server/app/metrics_server.hpp"
 
 #include "server/core/net/dispatcher.hpp"
+#include "server/core/security/admin_command_auth.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/service_registry.hpp"
 #include "server/core/app/app_host.hpp"
@@ -45,6 +46,7 @@ namespace asio = boost::asio;
 namespace core = server::core;
 namespace corelog = server::core::log;
 namespace services = server::core::util::services;
+namespace admin_auth = server::core::security::admin_command_auth;
 
 namespace server::app {
 
@@ -58,6 +60,15 @@ namespace server::app {
 std::atomic<std::uint64_t> g_subscribe_total{0};
 std::atomic<std::uint64_t> g_self_echo_drop_total{0};
 std::atomic<long long>     g_subscribe_last_lag_ms{0};
+std::atomic<std::uint64_t> g_admin_command_verify_ok_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_fail_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_replay_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_signature_mismatch_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_expired_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_future_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_missing_field_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_invalid_issued_at_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_secret_not_configured_total{0};
 
 namespace {
 
@@ -416,6 +427,17 @@ int run_server(int argc, char** argv) {
             }
         }
 
+        admin_auth::VerifyOptions admin_verify_options;
+        admin_verify_options.ttl_ms = config.admin_command_ttl_ms;
+        admin_verify_options.future_skew_ms = config.admin_command_future_skew_ms;
+        auto admin_command_verifier = std::make_shared<admin_auth::Verifier>(
+            config.admin_command_signing_secret,
+            admin_verify_options);
+
+        if (config.use_redis_pubsub && config.admin_command_signing_secret.empty()) {
+            corelog::warn("ADMIN_COMMAND_SIGNING_SECRET is empty; admin fanout commands will be rejected");
+        }
+
         // 10. Redis Pub/Sub 구독 (분산 채팅용)
         if (redis && config.use_redis_pubsub) {
             // 통합 패턴 구독 (RedisClientImpl이 단일 구독만 지원하므로)
@@ -447,7 +469,8 @@ int run_server(int argc, char** argv) {
                                      gwid,
                                      refresh_prefix,
                                      room_prefix,
-                                     exact_channels](const std::string& channel, const std::string& message) {
+                                     exact_channels,
+                                     admin_command_verifier](const std::string& channel, const std::string& message) {
                 // 1. Self-Echo 방지
                 if (message.rfind("gw=", 0) == 0) {
                     auto nl = message.find('\n');
@@ -502,6 +525,56 @@ int run_server(int argc, char** argv) {
                     }
 
                     const std::string payload = message.substr(nl + 1);
+                    std::unordered_map<std::string, std::string> admin_fields;
+                    if (*exact_match != ExactFanoutChannel::kWhisper) {
+                        admin_fields = parse_kv_lines(payload);
+                        const admin_auth::VerifyResult verify_result = admin_command_verifier->verify(admin_fields);
+                        if (verify_result != admin_auth::VerifyResult::kOk) {
+                            g_admin_command_verify_fail_total.fetch_add(1, std::memory_order_relaxed);
+
+                            switch (verify_result) {
+                            case admin_auth::VerifyResult::kReplay:
+                                g_admin_command_verify_replay_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kSignatureMismatch:
+                                g_admin_command_verify_signature_mismatch_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kExpired:
+                                g_admin_command_verify_expired_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kFuture:
+                                g_admin_command_verify_future_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kMissingField:
+                                g_admin_command_verify_missing_field_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kInvalidIssuedAt:
+                                g_admin_command_verify_invalid_issued_at_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kSecretNotConfigured:
+                                g_admin_command_verify_secret_not_configured_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kOk:
+                                break;
+                            }
+
+                            const auto request_id_it = admin_fields.find("request_id");
+                            const auto actor_it = admin_fields.find("actor");
+                            const std::string request_id = request_id_it == admin_fields.end() ? std::string("unknown")
+                                                                                                 : request_id_it->second;
+                            const std::string actor = actor_it == admin_fields.end() ? std::string("unknown")
+                                                                                       : actor_it->second;
+                            corelog::warn(
+                                "admin command rejected channel=" + channel
+                                + " reason=" + admin_auth::to_string(verify_result)
+                                + " request_id=" + request_id
+                                + " actor=" + actor);
+                            return;
+                        }
+
+                        g_admin_command_verify_ok_total.fetch_add(1, std::memory_order_relaxed);
+                    }
+
                     switch (*exact_match) {
                     case ExactFanoutChannel::kWhisper: {
                         std::vector<std::uint8_t> body(payload.begin(), payload.end());
@@ -510,7 +583,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminDisconnect: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         auto it = fields.find("client_ids");
                         if (it == fields.end() || it->second.empty()) {
@@ -532,7 +605,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminAnnounce: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         const auto text_it = fields.find("text");
                         if (text_it == fields.end() || text_it->second.empty()) {
@@ -544,7 +617,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminSettings: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         const auto key_it = fields.find("key");
                         const auto value_it = fields.find("value");
@@ -557,7 +630,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminModeration: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         const auto op_it = fields.find("op");
                         const auto users_it = fields.find("client_ids");
