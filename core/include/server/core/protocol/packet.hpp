@@ -79,24 +79,33 @@ inline void decode_header(const std::uint8_t* in14, PacketHeader& h) {
     h.utc_ts_ms32 = read_be32(in14 + 10);
 }
 
-// UTF-8 형식을 대략 검증한다(오버롱 등 세부 검사는 생략한다).
+// UTF-8 엄격 검증: overlong, surrogate, 범위 초과 codepoint를 거부한다.
 inline bool is_valid_utf8(std::span<const std::uint8_t> s) {
     std::size_t i = 0;
     const std::size_t n = s.size();
     while (i < n) {
-        const auto byte = s[i];
-        if (byte < 0x80) {
+        const std::uint8_t byte0 = s[i];
+        if (byte0 < 0x80) {
             ++i;
             continue;
         }
 
+        std::uint32_t codepoint = 0;
         std::size_t follow = 0;
-        if ((byte & 0xE0) == 0xC0) {
+        std::uint32_t min_codepoint = 0;
+
+        if ((byte0 & 0xE0) == 0xC0) {
             follow = 1;
-        } else if ((byte & 0xF0) == 0xE0) {
+            codepoint = static_cast<std::uint32_t>(byte0 & 0x1F);
+            min_codepoint = 0x80;
+        } else if ((byte0 & 0xF0) == 0xE0) {
             follow = 2;
-        } else if ((byte & 0xF8) == 0xF0) {
+            codepoint = static_cast<std::uint32_t>(byte0 & 0x0F);
+            min_codepoint = 0x800;
+        } else if ((byte0 & 0xF8) == 0xF0) {
             follow = 3;
+            codepoint = static_cast<std::uint32_t>(byte0 & 0x07);
+            min_codepoint = 0x10000;
         } else {
             return false;
         }
@@ -104,11 +113,25 @@ inline bool is_valid_utf8(std::span<const std::uint8_t> s) {
         if (i + follow >= n) {
             return false;
         }
+
         for (std::size_t k = 1; k <= follow; ++k) {
-            if ((s[i + k] & 0xC0) != 0x80) {
+            const std::uint8_t cont = s[i + k];
+            if ((cont & 0xC0) != 0x80) {
                 return false;
             }
+            codepoint = (codepoint << 6) | static_cast<std::uint32_t>(cont & 0x3F);
         }
+
+        if (codepoint < min_codepoint) {
+            return false;
+        }
+        if (codepoint > 0x10FFFF) {
+            return false;
+        }
+        if (codepoint >= 0xD800 && codepoint <= 0xDFFF) {
+            return false;
+        }
+
         i += follow + 1;
     }
     return true;

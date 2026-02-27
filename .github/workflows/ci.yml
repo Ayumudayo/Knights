@@ -247,6 +247,17 @@ jobs:
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug -Target core_general_tests
 
+      - name: Build Protocol Fuzz Harness (Debug)
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug -Target protocol_fuzz_harness
+
+      - name: Run Protocol Fuzz Harness
+        shell: pwsh
+        run: |
+          $env:FUZZ_ITERATIONS = "120000"
+          .\build-windows\tests\Debug\protocol_fuzz_harness.exe
+
       - name: Run Fast Policy/Transport Tests
         shell: pwsh
         run: |
@@ -371,7 +382,16 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/app" \
             -w /app \
             knights-base:latest \
-            bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF && cmake --build --preset linux-asan --target server_app --parallel"
+            bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF && cmake --build --preset linux-asan --target server_app protocol_fuzz_harness --parallel"
+
+      - name: ASan Protocol Fuzz Harness
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/app" \
+            -w /app \
+            -e FUZZ_ITERATIONS=200000 \
+            knights-base:latest \
+            bash -lc "./build-linux-asan/tests/protocol_fuzz_harness"
 
       - name: Start Stack (Detached)
         shell: pwsh
@@ -463,6 +483,10 @@ jobs:
       - name: Smoke Test (Admin Control-Plane E2E)
         run: |
           python3 tests/python/verify_admin_control_plane_e2e.py
+
+      - name: Soak + Performance Regression Gate
+        run: |
+          PERF_P95_MAX_MS=300 PERF_P99_MAX_MS=700 PERF_MIN_THROUGHPUT_RPS=10 python3 tests/python/verify_soak_perf_gate.py
 
       - name: Verify Plugin Metrics
         run: |

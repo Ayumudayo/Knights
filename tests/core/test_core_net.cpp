@@ -356,3 +356,26 @@ TEST(OpcodePolicyTest, UdpBindOpcodePoliciesAreExpected) {
     EXPECT_TRUE(server::core::protocol::transport_allows(bind_res_policy.transport, TransportKind::kTcp));
     EXPECT_TRUE(server::core::protocol::transport_allows(bind_res_policy.transport, TransportKind::kUdp));
 }
+
+TEST(PacketUtf8Test, RejectsOverlongAndSurrogateSequences) {
+    const std::array<std::uint8_t, 2> overlong_slash{0xC0, 0xAF};
+    EXPECT_FALSE(server::core::protocol::is_valid_utf8(overlong_slash));
+
+    const std::array<std::uint8_t, 3> surrogate{0xED, 0xA0, 0x80};
+    EXPECT_FALSE(server::core::protocol::is_valid_utf8(surrogate));
+
+    const std::array<std::uint8_t, 4> out_of_range{0xF4, 0x90, 0x80, 0x80};
+    EXPECT_FALSE(server::core::protocol::is_valid_utf8(out_of_range));
+}
+
+TEST(PacketUtf8Test, AcceptsValidMultibyteUtf8) {
+    const std::array<std::uint8_t, 16> bytes{
+        0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x20,
+        0xE2, 0x82, 0xAC, // EUR
+        0x20,
+        0xF0, 0x9F, 0x98, 0x80, // grinning face
+        0x21,
+        0x0A,
+    };
+    EXPECT_TRUE(server::core::protocol::is_valid_utf8(bytes));
+}

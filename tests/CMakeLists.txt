@@ -1,5 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
+add_executable(protocol_fuzz_harness
+    core/protocol_fuzz_harness.cpp
+)
+target_include_directories(protocol_fuzz_harness PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+)
+target_link_libraries(protocol_fuzz_harness PRIVATE
+    server_core
+)
+add_test(NAME ProtocolFuzzHarness COMMAND protocol_fuzz_harness)
+set_tests_properties(ProtocolFuzzHarness PROPERTIES LABELS "fuzz")
+
 if (BUILD_GTEST_TESTS)
     find_package(GTest CONFIG REQUIRED)
 
