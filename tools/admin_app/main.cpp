@@ -30,6 +30,8 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include "server/core/app/app_host.hpp"
 #include "server/core/app/termination_signals.hpp"
 #include "server/config/runtime_settings.hpp"
@@ -532,6 +534,112 @@ std::unordered_map<std::string, std::string> parse_query_string(std::string_view
         start = end + 1;
     }
     return out;
+}
+
+std::string encode_query_string(const std::unordered_map<std::string, std::string>& params) {
+    std::vector<std::pair<std::string, std::string>> ordered;
+    ordered.reserve(params.size());
+    for (const auto& kv : params) {
+        ordered.emplace_back(kv.first, kv.second);
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
+
+    std::ostringstream out;
+    bool first = true;
+    for (const auto& [key, value] : ordered) {
+        if (!first) {
+            out << '&';
+        }
+        first = false;
+        out << key << '=' << value;
+    }
+    return out.str();
+}
+
+struct WriteParamsResult {
+    bool ok{true};
+    std::string error_status;
+    std::string error_code;
+    std::string error_message;
+    std::string merged_query;
+};
+
+WriteParamsResult merge_write_params_from_request(
+    std::string_view query,
+    const server::core::metrics::MetricsHttpServer::HttpRequest& request) {
+    WriteParamsResult result;
+    auto params = parse_query_string(query);
+
+    if (request.body.empty()) {
+        result.merged_query = encode_query_string(params);
+        return result;
+    }
+
+    std::string content_type;
+    if (const auto it = request.headers.find("content-type"); it != request.headers.end()) {
+        content_type = to_lower_ascii(trim_ascii(it->second));
+    }
+
+    const bool is_json = content_type.rfind("application/json", 0) == 0;
+    const bool is_form = content_type.rfind("application/x-www-form-urlencoded", 0) == 0;
+    if (!is_json && !is_form) {
+        result.ok = false;
+        result.error_status = "415 Unsupported Media Type";
+        result.error_code = "UNSUPPORTED_CONTENT_TYPE";
+        result.error_message = "write endpoints support application/json or application/x-www-form-urlencoded";
+        return result;
+    }
+
+    if (is_form) {
+        const auto body_params = parse_query_string(request.body);
+        for (const auto& [k, v] : body_params) {
+            params[k] = v;
+        }
+        result.merged_query = encode_query_string(params);
+        return result;
+    }
+
+    const auto parsed = nlohmann::json::parse(request.body, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object()) {
+        result.ok = false;
+        result.error_status = "400 Bad Request";
+        result.error_code = "BAD_REQUEST";
+        result.error_message = "malformed JSON body";
+        return result;
+    }
+
+    for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+        if (it.value().is_string()) {
+            params[it.key()] = it.value().get<std::string>();
+            continue;
+        }
+        if (it.value().is_number_integer()) {
+            params[it.key()] = std::to_string(it.value().get<long long>());
+            continue;
+        }
+        if (it.value().is_number_unsigned()) {
+            params[it.key()] = std::to_string(it.value().get<unsigned long long>());
+            continue;
+        }
+        if (it.value().is_array() && it.key() == "client_ids") {
+            std::vector<std::string> values;
+            for (const auto& item : it.value()) {
+                if (item.is_string()) {
+                    values.push_back(item.get<std::string>());
+                } else if (item.is_number_integer()) {
+                    values.push_back(std::to_string(item.get<long long>()));
+                } else if (item.is_number_unsigned()) {
+                    values.push_back(std::to_string(item.get<unsigned long long>()));
+                }
+            }
+            params[it.key()] = join_csv(values);
+        }
+    }
+
+    result.merged_query = encode_query_string(params);
+    return result;
 }
 
 QueryParseResult parse_common_query_options(std::string_view query) {
@@ -1500,6 +1608,7 @@ private:
         }
 
         QueryOptions query_options;
+        std::string write_query_string;
         if (!is_write_endpoint) {
             const QueryParseResult query = parse_common_query_options(split.query);
             if (!query.ok) {
@@ -1514,6 +1623,17 @@ private:
                         "\",\"value\":\"" + json_escape(query.error_value) + "\"}"));
             }
             query_options = query.options;
+        } else {
+            const WriteParamsResult write_params = merge_write_params_from_request(split.query, request);
+            if (!write_params.ok) {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return finalize(json_error(
+                    request_id,
+                    write_params.error_status,
+                    write_params.error_code,
+                    write_params.error_message));
+            }
+            write_query_string = write_params.merged_query;
         }
 
         auto require_role = [&](std::string_view minimum_role)
@@ -1570,7 +1690,7 @@ private:
                 return finalize(std::move(*forbidden));
             }
             disconnect_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return finalize(handle_disconnect_users(request_id, auth, split.query));
+            return finalize(handle_disconnect_users(request_id, auth, write_query_string));
         }
 
         if (is_announce) {
@@ -1578,7 +1698,7 @@ private:
                 return finalize(std::move(*forbidden));
             }
             announce_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return finalize(handle_announcement(request_id, auth, split.query));
+            return finalize(handle_announcement(request_id, auth, write_query_string));
         }
 
         if (is_settings) {
@@ -1586,7 +1706,7 @@ private:
                 return finalize(std::move(*forbidden));
             }
             settings_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return finalize(handle_runtime_setting(request_id, auth, split.query));
+            return finalize(handle_runtime_setting(request_id, auth, write_query_string));
         }
 
         if (is_user_moderation) {
@@ -1606,7 +1726,7 @@ private:
             } else {
                 op = "kick";
             }
-            return finalize(handle_user_moderation(request_id, auth, op, split.query));
+            return finalize(handle_user_moderation(request_id, auth, op, write_query_string));
         }
 
         if (path == "/api/v1/worker/write-behind") {

@@ -13,14 +13,14 @@
 - `/api/v1/instances/{instance_id}` (JSON)
 - `/api/v1/sessions/{client_id}` (JSON)
 - `/api/v1/users` (JSON)
-- `/api/v1/users/disconnect` (POST, query)
-- `/api/v1/users/mute` (POST, query)
-- `/api/v1/users/unmute` (POST, query)
-- `/api/v1/users/ban` (POST, query)
-- `/api/v1/users/unban` (POST, query)
-- `/api/v1/users/kick` (POST, query)
-- `/api/v1/announcements` (POST, query)
-- `/api/v1/settings` (PATCH, query)
+- `/api/v1/users/disconnect` (POST, query/body)
+- `/api/v1/users/mute` (POST, query/body)
+- `/api/v1/users/unmute` (POST, query/body)
+- `/api/v1/users/ban` (POST, query/body)
+- `/api/v1/users/unban` (POST, query/body)
+- `/api/v1/users/kick` (POST, query/body)
+- `/api/v1/announcements` (POST, query/body)
+- `/api/v1/settings` (PATCH, query/body)
 - `/api/v1/worker/write-behind` (JSON)
 - `/api/v1/metrics/links` (JSON)
 
@@ -48,6 +48,12 @@
 | `ADMIN_BEARER_TOKEN` | bearer 인증 토큰 값 | (unset) |
 | `ADMIN_BEARER_ACTOR` | bearer 인증 성공 시 주체(actor) 값 | `token-user` |
 | `ADMIN_BEARER_ROLE` | bearer 인증 성공 시 역할(role) 값 (`viewer/operator/admin`) | `viewer` |
+| `METRICS_HTTP_MAX_CONNECTIONS` | admin/metrics HTTP 동시 연결 상한 | `64` |
+| `METRICS_HTTP_HEADER_TIMEOUT_MS` | admin/metrics HTTP header read timeout(ms) | `5000` |
+| `METRICS_HTTP_BODY_TIMEOUT_MS` | admin/metrics HTTP body read timeout(ms) | `5000` |
+| `METRICS_HTTP_MAX_BODY_BYTES` | admin/metrics HTTP body 최대 크기(바이트) | `65536` |
+| `METRICS_HTTP_AUTH_TOKEN` | 설정 시 bearer 또는 `X-Metrics-Token` 인증 강제 | (unset) |
+| `METRICS_HTTP_ALLOWLIST` | 콤마 구분 source IP allowlist | (unset) |
 
 ## 빌드
 
@@ -94,7 +100,8 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 
 ## 쓰기 액션 (2단계)
 
-`admin_app`은 아래 쓰기 엔드포인트를 제공한다. 현재 `MetricsHttpServer` 제약으로 body 대신 query 파라미터(parameter)를 사용한다.
+`admin_app`은 아래 쓰기 엔드포인트를 제공한다. `MetricsHttpServer`는 `Content-Length` 기반 body read를 지원하므로,
+운영에서는 query 파라미터보다 JSON body 사용을 권장한다. (기존 query 호출은 호환 유지)
 
 `ADMIN_READ_ONLY=1`이면 아래 write 엔드포인트는 역할과 무관하게 `403` + `READ_ONLY`로 거부된다.
 `/api/v1/auth/context`의 `data.read_only`는 `true`가 되고, write capability(`disconnect/announce/settings/moderation`)는 모두 `false`로 내려간다.
@@ -118,7 +125,7 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
   - `text` (필수, 최대 512 bytes)
   - `priority` (`info|warn|critical`, 선택)
 - `PATCH /api/v1/settings`
-  - `key` (`presence_ttl_sec|recent_history_limit|room_recent_maxlen`)
+  - `key` (`presence_ttl_sec|recent_history_limit|room_recent_maxlen|chat_spam_threshold|chat_spam_window_sec|chat_spam_mute_sec|chat_spam_ban_sec|chat_spam_ban_violations`)
   - `value` (부호 없는 정수)
 
 설정 key/range 검증은 `server/include/server/config/runtime_settings.hpp`의 공통 규칙을 사용한다.

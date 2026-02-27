@@ -11,6 +11,7 @@
 #include <server/core/protocol/protocol_errors.hpp>
 #include <server/core/protocol/packet.hpp>
 #include <server/core/protocol/version.hpp>
+#include <server/core/runtime_metrics.hpp>
 #include <server/protocol/game_opcodes.hpp>
 #include "wire.pb.h"
 #include <boost/asio.hpp>
@@ -842,6 +843,40 @@ TEST_F(ChatServiceTest, RoomOwnerCanRemoveOwnRoom) {
 
     SendChat("owner_room", "/room remove");
     EXPECT_TRUE(WaitForBroadcastText("room removed: owner_room"));
+}
+
+TEST_F(ChatServiceTest, RuntimeSettingRejectsOutOfRangeWithoutCountingSuccess) {
+    const auto before = server::core::runtime_metrics::snapshot();
+
+    chat_service_->admin_apply_runtime_setting("recent_history_limit", "12");
+    ProcessJobs();
+    FlushSessionIO();
+
+    chat_service_->admin_apply_runtime_setting("room_recent_maxlen", "8");
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto after = server::core::runtime_metrics::snapshot();
+    EXPECT_EQ(after.runtime_setting_reload_attempt_total, before.runtime_setting_reload_attempt_total + 2);
+    EXPECT_EQ(after.runtime_setting_reload_success_total, before.runtime_setting_reload_success_total + 1);
+    EXPECT_EQ(after.runtime_setting_reload_failure_total, before.runtime_setting_reload_failure_total + 1);
+}
+
+TEST_F(ChatServiceTest, RuntimeSettingRejectsUnsupportedKeyAndInvalidValue) {
+    const auto before = server::core::runtime_metrics::snapshot();
+
+    chat_service_->admin_apply_runtime_setting("unknown_runtime_key", "11");
+    ProcessJobs();
+    FlushSessionIO();
+
+    chat_service_->admin_apply_runtime_setting("chat_spam_threshold", "NaN");
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto after = server::core::runtime_metrics::snapshot();
+    EXPECT_EQ(after.runtime_setting_reload_attempt_total, before.runtime_setting_reload_attempt_total + 2);
+    EXPECT_EQ(after.runtime_setting_reload_success_total, before.runtime_setting_reload_success_total);
+    EXPECT_EQ(after.runtime_setting_reload_failure_total, before.runtime_setting_reload_failure_total + 2);
 }
 
 // 세션 종료 테스트

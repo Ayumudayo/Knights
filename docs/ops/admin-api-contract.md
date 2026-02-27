@@ -240,7 +240,14 @@
 
 - 현재 접속 사용자 목록 조회(운영 선택/조치 대상)
 
-쿼리:
+요청 모델(query/body):
+
+- query 파라미터와 body를 병행 지원한다.
+- body가 존재하면 body 값이 동일 키의 query 파라미터를 override한다.
+- 지원 content-type: `application/json`, `application/x-www-form-urlencoded`
+- 지원하지 않는 content-type은 `415 Unsupported Media Type` + `UNSUPPORTED_CONTENT_TYPE`로 거부한다.
+
+쿼리/본문 필드:
 
 - 공통: `limit`, `cursor`
 - 추가: `room` (선택)
@@ -265,7 +272,14 @@
 
 - 선택한 사용자 세션 강제 종료 명령 발행
 
-쿼리:
+요청 모델(query/body):
+
+- query 파라미터와 body를 병행 지원한다.
+- body가 존재하면 body 값이 동일 키의 query 파라미터를 override한다.
+- 지원 content-type: `application/json`, `application/x-www-form-urlencoded`
+- malformed JSON body는 `400 Bad Request` + `BAD_REQUEST`로 거부한다.
+
+쿼리/본문 필드:
 
 - `client_id` 또는 `client_ids`(쉼표 구분) 중 하나 이상 필수
 - `reason` (선택)
@@ -288,7 +302,14 @@
 
 - 서버 전체 공지 명령 발행
 
-쿼리:
+요청 모델(query/body):
+
+- query 파라미터와 body를 병행 지원한다.
+- body가 존재하면 body 값이 동일 키의 query 파라미터를 override한다.
+- 지원 content-type: `application/json`, `application/x-www-form-urlencoded`
+- 지원하지 않는 content-type은 `415 Unsupported Media Type` + `UNSUPPORTED_CONTENT_TYPE`로 거부한다.
+
+쿼리/본문 필드:
 
 - `text` (필수, 최대 512 bytes)
 - `priority` (`info|warn|critical`, 선택)
@@ -317,6 +338,11 @@
   - `presence_ttl_sec` (`5..3600`)
   - `recent_history_limit` (`5..2000`)
   - `room_recent_maxlen` (`5..5000`)
+  - `chat_spam_threshold` (`3..100`)
+  - `chat_spam_window_sec` (`1..120`)
+  - `chat_spam_mute_sec` (`5..86400`)
+  - `chat_spam_ban_sec` (`10..604800`)
+  - `chat_spam_ban_violations` (`1..20`)
 - `value` (필수, 부호 없는 정수)
 
 구현 메모:

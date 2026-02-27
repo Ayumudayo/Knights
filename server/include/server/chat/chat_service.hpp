@@ -206,6 +206,11 @@ public:
      * - `presence_ttl_sec`
      * - `recent_history_limit`
      * - `room_recent_maxlen`
+      * - `chat_spam_threshold`
+      * - `chat_spam_window_sec`
+      * - `chat_spam_mute_sec`
+      * - `chat_spam_ban_sec`
+      * - `chat_spam_ban_violations`
      * @param key 설정 키
      * @param value 설정 값(문자열)
      */
