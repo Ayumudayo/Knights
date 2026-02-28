@@ -119,3 +119,55 @@ tests:
       - eval_time: 19h
         alertname: ChatErrorBudgetBurnRateFast
         exp_alerts: []
+
+  - interval: 1m
+    input_series:
+      - series: 'core_runtime_rudp_handshake_total{job="gateway",instance="gw-handshake",result="ok"}'
+        values: '0+60x180'
+      - series: 'core_runtime_rudp_handshake_total{job="gateway",instance="gw-handshake",result="fail"}'
+        values: '0+30x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RudpHandshakeFailureSpike
+        exp_alerts:
+          - exp_labels:
+              alertname: RudpHandshakeFailureSpike
+              service: gateway
+              severity: warning
+            exp_annotations:
+              summary: "RUDP handshake failure ratio is elevated"
+              description: "RUDP handshake failure ratio stayed above 20% for 10m. Reduce canary percent and inspect bind/auth path plus packet captures."
+
+  - interval: 1m
+    input_series:
+      - series: 'core_runtime_rudp_retransmit_total{job="gateway",instance="gw-retry"}'
+        values: '0+30x180'
+      - series: 'gateway_rudp_inner_forward_total{job="gateway",instance="gw-retry"}'
+        values: '0+120x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RudpRetransmitRatioHigh
+        exp_alerts:
+          - exp_labels:
+              alertname: RudpRetransmitRatioHigh
+              service: gateway
+              severity: warning
+            exp_annotations:
+              summary: "RUDP retransmit ratio is high"
+              description: "RUDP retransmits exceeded 15% of forwarded inner frames for 10m. Check network quality and narrow RUDP opcode allowlist if needed."
+
+  - interval: 1m
+    input_series:
+      - series: 'gateway_rudp_fallback_total{job="gateway",instance="gw-fallback"}'
+        values: '0+18x180'
+    alert_rule_test:
+      - eval_time: 2h
+        alertname: RudpFallbackSpike
+        exp_alerts:
+          - exp_labels:
+              alertname: RudpFallbackSpike
+              service: gateway
+              severity: warning
+            exp_annotations:
+              summary: "RUDP fallback rate is spiking"
+              description: "RUDP fallback events exceeded 0.1/s for 10m. Set GATEWAY_RUDP_CANARY_PERCENT=0 and verify TCP KPIs recover."

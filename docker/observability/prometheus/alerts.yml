@@ -73,6 +73,44 @@ groups:
           summary: "Gateway UDP jitter remains high"
           description: "Observed UDP jitter exceeded 150ms for 10m. Investigate network path or force TCP fallback."
 
+  - name: gateway-rudp-rollout
+    rules:
+      - alert: RudpHandshakeFailureSpike
+        expr: >-
+          (sum(rate(core_runtime_rudp_handshake_total{result="fail"}[5m]))
+          / clamp_min(sum(rate(core_runtime_rudp_handshake_total[5m])), 1)) > 0.2
+          and sum(rate(core_runtime_rudp_handshake_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "RUDP handshake failure ratio is elevated"
+          description: "RUDP handshake failure ratio stayed above 20% for 10m. Reduce canary percent and inspect bind/auth path plus packet captures."
+
+      - alert: RudpRetransmitRatioHigh
+        expr: >-
+          (sum(rate(core_runtime_rudp_retransmit_total[5m]))
+          / clamp_min(sum(rate(gateway_rudp_inner_forward_total[5m])), 1)) > 0.15
+          and sum(rate(gateway_rudp_inner_forward_total[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "RUDP retransmit ratio is high"
+          description: "RUDP retransmits exceeded 15% of forwarded inner frames for 10m. Check network quality and narrow RUDP opcode allowlist if needed."
+
+      - alert: RudpFallbackSpike
+        expr: sum(rate(gateway_rudp_fallback_total[5m])) > 0.1
+        for: 10m
+        labels:
+          severity: warning
+          service: gateway
+        annotations:
+          summary: "RUDP fallback rate is spiking"
+          description: "RUDP fallback events exceeded 0.1/s for 10m. Set GATEWAY_RUDP_CANARY_PERCENT=0 and verify TCP KPIs recover."
+
   - name: tls-certificate-expiry
     rules:
       - alert: TLSCertificateExpiringIn30Days
