@@ -6,6 +6,7 @@
 
 - Phase 1/2 범위로 `core/include/server/core/net/rudp/*`, `core/src/net/rudp/*`에 엔진/ACK/재전송 기본 구현이 추가되었다.
 - Phase 3 범위로 `gateway/src/gateway_app.cpp`에 RUDP adapter 분기(기본 OFF + canary + opcode allowlist + 세션 fallback)가 추가되었다.
+- Phase 4 범위로 impairment/flow-control/fallback 단위 테스트(`tests/core/test_rudp_*.cpp`)를 확장하고, CI에 `windows-rudp-off-regression`/`windows-rudp-on-scenarios` job을 추가했다.
 - 기본 경로는 여전히 OFF이며, `GATEWAY_RUDP_ENABLE=0` 또는 `GATEWAY_RUDP_CANARY_PERCENT=0`/allowlist 비어 있음 상태에서는 기존 경로를 사용한다.
 
 ## 1. 목표
