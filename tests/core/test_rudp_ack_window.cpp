@@ -34,3 +34,24 @@ TEST(RudpAckWindowImpairmentTest, ReorderPacketUpdatesAckMask) {
     EXPECT_EQ(reorder.ack_largest, 12u);
     EXPECT_EQ(reorder.ack_mask, 7u);
 }
+
+TEST(RudpAckWindowImpairmentTest, DeltaSixtyFourResetsMaskAndOlderPacketsBecomeStale) {
+    server::core::net::rudp::AckWindow window;
+
+    EXPECT_TRUE(window.observe(100).accepted);
+
+    const auto jump = window.observe(164);
+    EXPECT_TRUE(jump.accepted);
+    EXPECT_EQ(jump.ack_largest, 164u);
+    EXPECT_EQ(jump.ack_mask, 1u);
+
+    const auto stale = window.observe(100);
+    EXPECT_FALSE(stale.accepted);
+    EXPECT_TRUE(stale.duplicate);
+
+    const auto near_reorder = window.observe(163);
+    EXPECT_TRUE(near_reorder.accepted);
+    EXPECT_TRUE(near_reorder.reordered);
+    EXPECT_EQ(near_reorder.ack_largest, 164u);
+    EXPECT_EQ(near_reorder.ack_mask, 3u);
+}

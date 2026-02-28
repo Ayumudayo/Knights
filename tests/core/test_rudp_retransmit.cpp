@@ -38,3 +38,15 @@ TEST(RudpRetransmissionImpairmentTest, TimeoutBatchRespectsMaxBatchAndBackoffClo
     ASSERT_EQ(second.size(), 3u);
     EXPECT_EQ(second[0].retransmit_count, 2u);
 }
+
+TEST(RudpRetransmissionImpairmentTest, ZeroRtoOrBatchSkipsTimeoutCollection) {
+    server::core::net::rudp::RetransmissionQueue queue;
+    queue.push(1, 100, {0x01});
+
+    const auto zero_rto = queue.collect_timeouts(1000, 0, 8);
+    EXPECT_TRUE(zero_rto.empty());
+
+    const auto zero_batch = queue.collect_timeouts(1000, 200, 0);
+    EXPECT_TRUE(zero_batch.empty());
+    EXPECT_EQ(queue.inflight_packets(), 1u);
+}
