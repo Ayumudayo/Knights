@@ -511,7 +511,7 @@ jobs:
             -w /app \
             -e FUZZ_ITERATIONS=200000 \
             knights-base:latest \
-            bash -lc "./build-linux-asan/tests/protocol_fuzz_harness"
+            bash -lc "./build-linux/tests/protocol_fuzz_harness"
 
       - name: Start Stack (Detached)
         shell: pwsh
