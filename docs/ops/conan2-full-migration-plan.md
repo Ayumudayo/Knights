@@ -54,7 +54,7 @@
 | 파일 | 현재 결합 방식 | 전환 시 변경 내용 |
 |---|---|---|
 | `.github/workflows/ci.yml` | Windows job env에 `VCPKG_*`, cache key가 `vcpkg.json + setup_vcpkg + toolchain`, vcpkg restore/save telemetry 사용 | `conan-io/setup-conan@v1` + Conan cache 전략 + lockfile install 경로로 대체 |
-| `.github/workflows/vcpkg-prewarm.yml` | vcpkg prewarm 전용 workflow | `conan-prewarm.yml`(신규)로 대체 후 기존 prewarm 제거 |
+| `.github/workflows/vcpkg-prewarm.yml` | vcpkg prewarm 전용 workflow | Conan 전환 시 워크플로우 자체를 제거(별도 prewarm 미운영), required CI 내 Conan cache restore/save로 일원화 |
 | `.github/workflows/windows-sccache-poc.yml` | vcpkg cache + sccache 동시 실험 | Conan cache + sccache 조합으로 재작성 |
 
 ### 3.5 Docs
@@ -64,7 +64,7 @@
 | `README.md` | Dependency Manager를 vcpkg로 명시 | Conan2 기준 설치/빌드 안내로 갱신 |
 | `core/README.md` | 코어 빌드 설명에 vcpkg 전제 | Conan2 기준 안내로 갱신 |
 | `docs/db/write-behind.md` | `redis-plus-plus ... (vcpkg, x64-windows)` 표기 | provider 중립 표현 또는 Conan2 기준 정보로 수정 |
-| `docs/ops/ci-build-cache-optimization-report.md` | vcpkg cache/prewarm 중심 기술 | Conan cache/prewarm/lockfile 기준으로 재기술 |
+| `docs/ops/ci-build-cache-optimization-report.md` | vcpkg cache/prewarm 중심 기술 | Conan cache/lockfile 기준으로 재기술(별도 prewarm 미운영 원칙 반영) |
 
 ## 4) 단계별 실행 계획 (Full Migration)
 
@@ -159,8 +159,8 @@
    - `.github/workflows/ci.yml`에 `conan-io/setup-conan@v1` 도입.
    - lockfile 기반 install/build.
    - vcpkg cache telemetry/restore/save 단계 제거.
-3. prewarm 대체
-   - `vcpkg-prewarm.yml` 대체 Conan prewarm workflow 작성.
+3. prewarm 제거
+   - `vcpkg-prewarm.yml`를 retire하고, 별도 prewarm 없이 required CI cache 전략으로 운영.
 
 통과 조건:
 
@@ -351,3 +351,224 @@ Git submodule은 다음 Conan2 기능을 실질적으로 대체하기 어렵다.
   1) `external/imgui` 같은 소스 중심 라이브러리는 submodule 유지
   2) 패키지/전이 의존성/CI 재현성 영역은 Conan2 중심으로 전환
   3) `external/vcpkg` submodule화는 "Conan2 전환 실패 시 fallback 안정화" 용도로만 검토
+
+## 11) vcpkg 완전 대체 실행 계획 (컷오버 프로그램)
+
+본 섹션은 "PoC/병행"이 아니라 **기본 경로를 Conan2로 뒤집고 vcpkg 경로를 제거**하기 위한 상세 실행안이다.
+
+### 11.1 현재 기준선(2026-03-02)
+
+- Conan lane 로컬 검증은 통과했다.
+  - `pwsh scripts/build.ps1 -UseConan -Config Debug -MaxJobs 8`
+  - `ctest --preset windows-conan-test`
+- PR #7 기준 필수 CI 4개는 green이다.
+  - `core-api-consumer-linux`, `core-api-consumer-windows`, `linux-docker-stack`, `windows-fast-tests`
+- 하지만 required CI/job의 Windows 경로는 여전히 vcpkg env/cache/telemetry에 결합되어 있다.
+  - 근거: `.github/workflows/ci.yml`
+- 로컬 기본 preset/스크립트도 아직 vcpkg를 기본값으로 둔다.
+  - 근거: `CMakePresets.json`의 `windows*` 기본 preset, `scripts/build.ps1`의 비-Conan 기본 경로
+
+### 11.2 완전 대체 Definition of Done (DoD)
+
+아래 8개를 모두 만족해야 "완전 대체"로 판정한다.
+
+1. Windows required CI가 Conan-only 경로로 동작한다 (`ci.yml`에서 `VCPKG_*` 제거).
+2. 로컬 기본 명령(`scripts/build.ps1 -Config Debug`, `ctest --preset windows-test`)이 Conan 경로를 사용한다.
+3. vcpkg 전용 bootstrap/toolchain 파일이 main에서 제거된다.
+   - `scripts/setup_vcpkg.ps1`, `cmake/knights_vcpkg_toolchain.cmake`
+4. vcpkg prewarm 워크플로우가 제거되고, 별도 prewarm 없이 required CI의 Conan cache 운영으로 단순화된다.
+   - `.github/workflows/vcpkg-prewarm.yml` 삭제
+5. sccache PoC가 Conan 기준으로 동작한다.
+   - `.github/workflows/windows-sccache-poc.yml`
+6. 문서에서 vcpkg를 "현재 기본"으로 기술한 구문이 제거된다.
+7. `grep` 기준으로 운영 경로(vcpkg 키/스크립트 참조) 잔존이 없다.
+8. 컷오버 후 연속 3회 PR CI green + 1회 main push CI green.
+
+### 11.3 실행 스트림과 단계
+
+#### Stream A - CI 기본 경로 Conan 전환 (최우선)
+
+목표:
+
+- required CI의 Windows 잡을 Conan으로 전환하되, **job name은 유지**해 branch protection 변경을 최소화한다.
+
+수정 파일:
+
+- `.github/workflows/ci.yml`
+
+작업:
+
+1. Windows job env에서 `VCPKG_*` 제거, `CONAN_HOME` 추가.
+2. cache 키를 Conan 입력으로 교체.
+   - `conan.lock`, `conanfile.py`, `conan/profiles/**`, `scripts/setup_conan.ps1`, `scripts/build.ps1`
+3. Python + Conan 설치 단계(`conan>=2,<3`)와 lockfile 존재 검증 추가.
+4. 빌드 커맨드를 Conan 경로로 전환.
+   - `pwsh scripts/build.ps1 -UseConan -Config Debug`
+5. 테스트 커맨드를 Conan preset으로 전환.
+   - `ctest --preset windows-conan-test --output-on-failure`
+
+게이트:
+
+- required CI 4개 green 3연속.
+- Windows job wall-clock이 baseline 대비 +20% 이내(캐시 warm 이후 기준).
+
+롤백:
+
+- `ci.yml` 단일 revert로 즉시 복귀 가능.
+
+#### Stream B - Cache/SCCache 단순화 (Prewarm 제거)
+
+목표:
+
+- 별도 prewarm 워크플로우를 운영하지 않고, required CI + SCCache PoC를 Conan 캐시 구조로 단순화한다.
+
+수정 파일:
+
+- 수정: `.github/workflows/windows-sccache-poc.yml`
+- 삭제: `.github/workflows/vcpkg-prewarm.yml`
+
+작업:
+
+1. `vcpkg-prewarm.yml` 제거:
+   - prewarm 목적을 required CI cache 단계로 흡수
+2. `windows-sccache-poc.yml` 전환:
+   - vcpkg env/cache 제거
+   - Conan preset(권장: `windows-conan` 또는 `windows-ninja` Conan 변형) 사용
+3. telemetry 항목을 Conan cache 기준으로 재정의하고 required CI step summary에 집중.
+
+게이트:
+
+- `vcpkg-prewarm.yml` 제거 후 required CI 안정성 유지.
+- `windows-sccache-poc` 성공 + second build hit-rate 개선 확인.
+
+#### Stream C - 로컬 기본 경로 전환
+
+목표:
+
+- 개발자 기본 명령이 Conan을 타도록 바꾼다.
+
+수정 파일:
+
+- `scripts/build.ps1`
+- `CMakePresets.json`
+- `scripts/configure_windows_ninja.ps1` (preset 참조 시)
+
+작업:
+
+1. `scripts/build.ps1`에서 Windows 기본 경로를 Conan으로 전환.
+   - `-UseConan` 없이도 Conan lane 사용
+2. `windows`, `windows-client`, `windows-ninja` preset을 Conan 기반으로 교체.
+3. 필요 시 1 사이클 동안만 `*-vcpkg-legacy` hidden preset 제공(단, main 운영 가이드는 Conan 기준).
+
+게이트:
+
+- 기존 습관 명령이 그대로 동작하면서 Conan 경로로 빌드 성공:
+  - `pwsh scripts/build.ps1 -Config Debug`
+  - `ctest --preset windows-test`
+
+#### Stream D - vcpkg 자산 제거
+
+목표:
+
+- 코드/CI/문서의 vcpkg 운영 의존을 제거한다.
+
+수정/삭제 파일:
+
+- 삭제: `scripts/setup_vcpkg.ps1`
+- 삭제: `cmake/knights_vcpkg_toolchain.cmake`
+- 삭제(권장): `vcpkg.json`
+- 수정: `.gitignore` (`external/vcpkg/`, `vcpkg_installed/` 등 정리)
+
+작업:
+
+1. build/script/workflow에서 vcpkg 참조 제거 확인.
+2. 제거 커밋을 별도 원자 커밋으로 분리.
+3. `grep` 기반 잔존 참조 점검.
+
+검증 커맨드:
+
+```powershell
+git grep -n "setup_vcpkg|knights_vcpkg_toolchain|VCPKG_|vcpkg.json" -- . ":(exclude)docs/**"
+```
+
+게이트:
+
+- 위 커맨드 결과가 비어 있어야 함(운영 경로 기준).
+
+#### Stream E - 문서/운영 가이드 최종 정리
+
+목표:
+
+- 사용자/운영자가 더 이상 vcpkg를 기본 경로로 오해하지 않게 문서를 정합화한다.
+
+수정 파일:
+
+- `README.md`
+- `core/README.md`
+- `docs/db/write-behind.md`
+- `docs/ops/ci-build-cache-optimization-report.md`
+- `docs/ops/conan2-full-migration-plan.md` (본 문서)
+
+작업:
+
+1. 의존성 매니저 기본값을 Conan2로 일원화.
+2. 윈도우/CI 실행 예시 명령을 Conan 기준으로 교체.
+3. vcpkg는 "retired path"로만 언급.
+
+게이트:
+
+- docs 내 `vcpkg`는 historical note를 제외하고 제거.
+
+### 11.4 권장 커밋 순서(원자 단위)
+
+1. `ci.yml` Conan 전환
+2. `vcpkg-prewarm.yml` 제거
+3. `windows-sccache-poc.yml` Conan 전환
+4. `scripts/build.ps1` + `CMakePresets.json` 기본 경로 전환
+5. vcpkg 파일 삭제(`setup_vcpkg`, `knights_vcpkg_toolchain`, `vcpkg.json`)
+6. README/ops/docs 정리
+
+### 11.5 일정(권장)
+
+- Day 1: Stream A (CI required Windows Conan 전환)
+- Day 2: Stream B (prewarm 제거 + sccache 전환)
+- Day 3: Stream C (로컬 기본값 전환)
+- Day 4: Stream D (vcpkg 자산 제거)
+- Day 5: Stream E (문서 정리 + 최종 green 확인)
+
+### 11.6 최종 검증 패키지
+
+로컬:
+
+```powershell
+pwsh scripts/build.ps1 -Config Debug
+ctest --preset windows-test --output-on-failure
+pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build
+python tests/python/verify_pong.py
+python tests/python/test_load_balancing.py
+python tests/python/verify_whisper_cross_instance.py
+python tests/python/verify_admin_api.py
+python tests/python/verify_admin_auth.py
+python tests/python/verify_admin_control_plane_e2e.py
+python tests/python/verify_admin_read_only.py
+pwsh scripts/deploy_docker.ps1 -Action down
+```
+
+CI:
+
+- required checks 3회 연속 green
+- main push 1회 green
+- Conan cache hit telemetry 확보
+
+### 11.7 승인 기준 (Go / No-Go)
+
+Go:
+
+- 11.2 DoD 8항목 전부 충족
+- required CI 안정성 확보(연속 green)
+
+No-Go:
+
+- Conan 전환 후 required job flaky 증가
+- Windows 런타임 DLL 누락/링크 오류 재발
+- 캐시 전략 부재로 CI 시간이 운영 한계 초과
