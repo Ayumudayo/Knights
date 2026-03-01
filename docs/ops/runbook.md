@@ -12,9 +12,16 @@
 | --- | --- | --- |
 | Redis Lag | `chat_subscribe_last_lag_ms p95 > 200ms` | (1) Redis INFO latency (2) Pub/Sub 사용량 (3) 게이트웨이 로그 |
 | Write-behind backlog | `wb_pending > 500` | (1) DB 세션 확인 (2) `wb_worker` 로그 (3) DLQ 상태 |
+| Gateway backend circuit open | `gateway_backend_circuit_open==1` 지속 | (1) server_app readiness 확인 (2) `gateway_backend_*` 실패 지표 확인 (3) `GATEWAY_BACKEND_CIRCUIT_*` 임계치 점검 |
+| Gateway ingress rate-limit | `gateway_ingress_reject_rate_limit_total` 급증 | (1) 접속 폭주/공격 source 확인 (2) `GATEWAY_INGRESS_*` 임계치 조정 (3) gateway replica 확장 |
+| wb flush retry exhausted | `wb_flush_retry_exhausted_total` 증가 | (1) DB 가용성/락 상태 점검 (2) `WB_RETRY_*`/`WB_DB_RECONNECT_*` 조정 (3) reclaim backlog 증가 여부 확인 |
+| TLS cert expiry (30d) | `TLSCertificateExpiringIn30Days` 발생 | (1) 갱신 일정 확정 (2) 대상 인증서/SAN 목록 점검 (3) 스테이지 롤링 계획 수립 |
+| TLS cert expiry (14d) | `TLSCertificateExpiringIn14Days` 발생 | (1) 스테이지 갱신 리허설 (2) mTLS 체인 검증 (3) 본 배포 승인 |
+| TLS cert expiry (7d) | `TLSCertificateExpiringIn7Days` 발생 | (1) 즉시 인증서 교체 (2) legacy 예외 listener 포함 전수 반영 (3) 만료 임계치 해소 확인 |
 | Dispatch Exception | `chat_dispatch_exception_total` 급증 | (1) server_app 로그 (2) 최근 배포 롤백 |
 | UDP bind abuse | `gateway_udp_bind_rate_limit_reject_total` 증가 + `gateway_udp_bind_block_total` 증가 | (1) 공격/오탐 source IP 확인 (2) `GATEWAY_UDP_BIND_FAIL_*`/`GATEWAY_UDP_BIND_BLOCK_MS` 재검토 (3) 필요 시 임시로 UDP ingress 제한 |
 | UDP quality degradation | `GatewayUdpEstimatedLossHigh` 또는 `GatewayUdpJitterHigh` 발생 | (1) `gateway-udp-quality` 대시보드에서 loss/jitter/replay 분해 (2) 네트워크 구간 확인 (3) 필요 시 UDP 대상 opcode 축소 또는 TCP fallback |
+| RUDP handshake/retransmit/fallback 이상 | `RudpHandshakeFailureSpike`/`RudpRetransmitRatioHigh`/`RudpFallbackSpike` 발생 | (1) canary 비율 즉시 0으로 축소 (2) `GATEWAY_RUDP_ENABLE=0`으로 신규 세션 RUDP 차단 (3) TCP KPI 복귀 확인 후 원인 분석 |
 
 ## 3. 장애 시나리오
 ### 3.1 Redis 장애
@@ -45,6 +52,15 @@
 2. `gateway_udp_enabled` 상태 확인(gateway-1=1, gateway-2=0)
 3. rollback: `pwsh scripts/deploy_docker.ps1 -Action up -Detached -Observability -EnvFile docker/stack/.env.udp-rollback.example`
 4. rollback 후 `gateway_udp_enabled`가 양 gateway에서 0인지 확인하고 `python tests/python/verify_pong.py`로 TCP smoke 검증
+
+### 3.6 RUDP canary/rollback
+1. 전제 확인: 운영 런타임 기본값은 `GATEWAY_RUDP_ENABLE=0` 상태이며 canary 전개 시에도 allowlist 기반으로 신규 세션만 점진 적용한다
+2. canary 오픈: `GATEWAY_RUDP_ENABLE=1`, `GATEWAY_RUDP_CANARY_PERCENT=<소량>`, `GATEWAY_RUDP_OPCODE_ALLOWLIST=<opcode,...>` 설정 후 신규 세션에서만 관찰
+3. 모니터링: `RudpHandshakeFailureSpike`(실패율 >20%), `RudpRetransmitRatioHigh`(재전송비율 >15%), `RudpFallbackSpike`(fallback >0.1/s)와 원인 지표(`core_runtime_rudp_*`, `gateway_rudp_*`)를 함께 확인
+4. 이상 시 즉시 롤백:
+   - `GATEWAY_RUDP_CANARY_PERCENT=0`
+   - `GATEWAY_RUDP_ENABLE=0`
+   - TCP-only smoke(`python tests/python/verify_pong.py`)와 핵심 KPI 복귀 확인
 
 ## 4. 스모크 테스트 절차
 1. devclient 실행 → `/login runbook` → `/join lobby` → `/chat runbook-check`

@@ -3,6 +3,7 @@
 #include "server/chat/chat_service.hpp"
 #include "server/core/app/app_host.hpp"
 #include "server/core/metrics/build_info.hpp"
+#include "server/core/metrics/metrics.hpp"
 #include "server/core/protocol/system_opcodes.hpp"
 #include "server/core/runtime_metrics.hpp"
 #include "server/core/util/log.hpp"
@@ -30,6 +31,21 @@ namespace services = server::core::util::services;
 extern std::atomic<std::uint64_t> g_subscribe_total;
 extern std::atomic<std::uint64_t> g_self_echo_drop_total;
 extern std::atomic<long long>     g_subscribe_last_lag_ms;
+extern std::atomic<std::uint64_t> g_admin_command_verify_ok_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_fail_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_replay_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_signature_mismatch_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_expired_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_future_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_missing_field_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_invalid_issued_at_total;
+extern std::atomic<std::uint64_t> g_admin_command_verify_secret_not_configured_total;
+extern std::atomic<std::uint64_t> g_shutdown_drain_completed_total;
+extern std::atomic<std::uint64_t> g_shutdown_drain_timeout_total;
+extern std::atomic<std::uint64_t> g_shutdown_drain_forced_close_total;
+extern std::atomic<std::uint64_t> g_shutdown_drain_remaining_connections;
+extern std::atomic<long long> g_shutdown_drain_elapsed_ms;
+extern std::atomic<long long> g_shutdown_drain_timeout_ms;
 
 namespace {
 
@@ -66,6 +82,8 @@ std::string render_metrics() {
 
     // Build metadata (git hash/describe + build time)
     server::core::metrics::append_build_info(stream);
+    server::core::metrics::append_runtime_core_metrics(stream);
+    server::core::metrics::append_prometheus_metrics(stream);
 
     auto append_counter = [&](const char* name, std::uint64_t value) {
         stream << "# TYPE " << name << " counter\n" << name << ' ' << value << '\n';
@@ -78,6 +96,29 @@ std::string render_metrics() {
     append_counter("chat_subscribe_total", g_subscribe_total.load());
     append_counter("chat_self_echo_drop_total", g_self_echo_drop_total.load());
     append_gauge("chat_subscribe_last_lag_ms", static_cast<long double>(g_subscribe_last_lag_ms.load()));
+    append_counter("chat_admin_command_verify_ok_total", g_admin_command_verify_ok_total.load());
+    append_counter("chat_admin_command_verify_fail_total", g_admin_command_verify_fail_total.load());
+    append_counter("chat_admin_command_verify_replay_total", g_admin_command_verify_replay_total.load());
+    append_counter(
+        "chat_admin_command_verify_signature_mismatch_total",
+        g_admin_command_verify_signature_mismatch_total.load());
+    append_counter("chat_admin_command_verify_expired_total", g_admin_command_verify_expired_total.load());
+    append_counter("chat_admin_command_verify_future_total", g_admin_command_verify_future_total.load());
+    append_counter("chat_admin_command_verify_missing_field_total", g_admin_command_verify_missing_field_total.load());
+    append_counter(
+        "chat_admin_command_verify_invalid_issued_at_total",
+        g_admin_command_verify_invalid_issued_at_total.load());
+    append_counter(
+        "chat_admin_command_verify_secret_not_configured_total",
+        g_admin_command_verify_secret_not_configured_total.load());
+    append_counter("chat_shutdown_drain_completed_total", g_shutdown_drain_completed_total.load());
+    append_counter("chat_shutdown_drain_timeout_total", g_shutdown_drain_timeout_total.load());
+    append_counter("chat_shutdown_drain_forced_close_total", g_shutdown_drain_forced_close_total.load());
+    append_gauge(
+        "chat_shutdown_drain_remaining_connections",
+        static_cast<long double>(g_shutdown_drain_remaining_connections.load()));
+    append_gauge("chat_shutdown_drain_elapsed_ms", static_cast<long double>(g_shutdown_drain_elapsed_ms.load()));
+    append_gauge("chat_shutdown_drain_timeout_ms", static_cast<long double>(g_shutdown_drain_timeout_ms.load()));
 
     append_counter("chat_accept_total", snap.accept_total);
     append_counter("chat_session_started_total", snap.session_started_total);
@@ -97,6 +138,33 @@ std::string render_metrics() {
     append_counter("chat_dispatch_total", snap.dispatch_total);
     append_counter("chat_dispatch_unknown_total", snap.dispatch_unknown_total);
     append_counter("chat_dispatch_exception_total", snap.dispatch_exception_total);
+    append_counter("chat_exception_recoverable_total", snap.exception_recoverable_total);
+    append_counter("chat_exception_fatal_total", snap.exception_fatal_total);
+    append_counter("chat_exception_ignored_total", snap.exception_ignored_total);
+
+    stream << "# TYPE chat_dispatch_processing_place_calls_total counter\n";
+    stream << "chat_dispatch_processing_place_calls_total{place=\"inline\"} "
+           << snap.dispatch_processing_place_calls_total[0] << "\n";
+    stream << "chat_dispatch_processing_place_calls_total{place=\"worker\"} "
+           << snap.dispatch_processing_place_calls_total[1] << "\n";
+    stream << "chat_dispatch_processing_place_calls_total{place=\"room_strand\"} "
+           << snap.dispatch_processing_place_calls_total[2] << "\n";
+
+    stream << "# TYPE chat_dispatch_processing_place_reject_total counter\n";
+    stream << "chat_dispatch_processing_place_reject_total{place=\"inline\"} "
+           << snap.dispatch_processing_place_reject_total[0] << "\n";
+    stream << "chat_dispatch_processing_place_reject_total{place=\"worker\"} "
+           << snap.dispatch_processing_place_reject_total[1] << "\n";
+    stream << "chat_dispatch_processing_place_reject_total{place=\"room_strand\"} "
+           << snap.dispatch_processing_place_reject_total[2] << "\n";
+
+    stream << "# TYPE chat_dispatch_processing_place_exception_total counter\n";
+    stream << "chat_dispatch_processing_place_exception_total{place=\"inline\"} "
+           << snap.dispatch_processing_place_exception_total[0] << "\n";
+    stream << "chat_dispatch_processing_place_exception_total{place=\"worker\"} "
+           << snap.dispatch_processing_place_exception_total[1] << "\n";
+    stream << "chat_dispatch_processing_place_exception_total{place=\"room_strand\"} "
+           << snap.dispatch_processing_place_exception_total[2] << "\n";
 
     auto last_ms = static_cast<long double>(snap.dispatch_latency_last_ns) / 1'000'000.0L;
     auto max_ms = static_cast<long double>(snap.dispatch_latency_max_ns) / 1'000'000.0L;
@@ -142,6 +210,28 @@ std::string render_metrics() {
     append_gauge("chat_memory_pool_capacity", static_cast<long double>(snap.memory_pool_capacity));
     append_gauge("chat_memory_pool_in_use", static_cast<long double>(snap.memory_pool_in_use));
     append_gauge("chat_memory_pool_in_use_peak", static_cast<long double>(snap.memory_pool_in_use_peak));
+    append_gauge("chat_log_async_queue_depth", static_cast<long double>(snap.log_async_queue_depth));
+    append_gauge("chat_log_async_queue_capacity", static_cast<long double>(snap.log_async_queue_capacity));
+    append_counter("chat_log_async_queue_drop_total", snap.log_async_queue_drop_total);
+    append_counter("chat_log_async_flush_total", snap.log_async_flush_total);
+    append_counter("chat_log_async_flush_latency_sum_ns", snap.log_async_flush_latency_sum_ns);
+    append_counter("chat_log_masked_fields_total", snap.log_masked_fields_total);
+    append_gauge("chat_log_async_flush_latency_max_ms", static_cast<long double>(snap.log_async_flush_latency_max_ns) / 1'000'000.0L);
+    append_gauge("chat_http_active_connections", static_cast<long double>(snap.http_active_connections));
+    append_counter("chat_http_connection_limit_reject_total", snap.http_connection_limit_reject_total);
+    append_counter("chat_http_auth_reject_total", snap.http_auth_reject_total);
+    append_counter("chat_http_header_timeout_total", snap.http_header_timeout_total);
+    append_counter("chat_http_body_timeout_total", snap.http_body_timeout_total);
+    append_counter("chat_http_header_oversize_total", snap.http_header_oversize_total);
+    append_counter("chat_http_body_oversize_total", snap.http_body_oversize_total);
+    append_counter("chat_http_bad_request_total", snap.http_bad_request_total);
+    append_counter("chat_runtime_setting_reload_attempt_total", snap.runtime_setting_reload_attempt_total);
+    append_counter("chat_runtime_setting_reload_success_total", snap.runtime_setting_reload_success_total);
+    append_counter("chat_runtime_setting_reload_failure_total", snap.runtime_setting_reload_failure_total);
+    append_counter("chat_runtime_setting_reload_latency_sum_ns", snap.runtime_setting_reload_latency_sum_ns);
+    append_gauge(
+        "chat_runtime_setting_reload_latency_max_ms",
+        static_cast<long double>(snap.runtime_setting_reload_latency_max_ns) / 1'000'000.0L);
 
     if (!snap.opcode_counts.empty()) {
         stream << "# TYPE chat_dispatch_opcode_total counter\n";

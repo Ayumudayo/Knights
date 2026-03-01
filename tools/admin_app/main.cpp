@@ -30,11 +30,14 @@
 #include <boost/asio/streambuf.hpp>
 #include <boost/asio/write.hpp>
 
+#include <nlohmann/json.hpp>
+
 #include "server/core/app/app_host.hpp"
 #include "server/core/app/termination_signals.hpp"
 #include "server/config/runtime_settings.hpp"
 #include "server/core/metrics/build_info.hpp"
 #include "server/core/metrics/http_server.hpp"
+#include "server/core/security/admin_command_auth.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/paths.hpp"
 #include "server/state/instance_registry.hpp"
@@ -300,6 +303,38 @@ bool has_min_role(std::string_view actual, std::string_view required) {
     return role_rank(actual) >= role_rank(required);
 }
 
+bool read_env_bool(const char* key, bool fallback) {
+    if (const char* v = std::getenv(key); v && *v) {
+        std::string value(v);
+        std::size_t begin = 0;
+        while (begin < value.size() && std::isspace(static_cast<unsigned char>(value[begin])) != 0) {
+            ++begin;
+        }
+        std::size_t end = value.size();
+        while (end > begin && std::isspace(static_cast<unsigned char>(value[end - 1])) != 0) {
+            --end;
+        }
+        value = value.substr(begin, end - begin);
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char c) {
+            return static_cast<char>(std::tolower(c));
+        });
+        if (value == "1" || value == "true" || value == "yes" || value == "on") {
+            return true;
+        }
+        if (value == "0" || value == "false" || value == "no" || value == "off") {
+            return false;
+        }
+        corelog::warn(std::string("admin_app invalid ") + key + "; using fallback");
+    }
+    return fallback;
+}
+
+// Admin API role matrix single source of truth.
+constexpr std::string_view kRoleRequiredDisconnect = "admin";
+constexpr std::string_view kRoleRequiredAnnouncement = "operator";
+constexpr std::string_view kRoleRequiredSettings = "admin";
+constexpr std::string_view kRoleRequiredModeration = "admin";
+
 std::string url_decode(std::string_view raw) {
     std::string out;
     out.reserve(raw.size());
@@ -499,6 +534,112 @@ std::unordered_map<std::string, std::string> parse_query_string(std::string_view
         start = end + 1;
     }
     return out;
+}
+
+std::string encode_query_string(const std::unordered_map<std::string, std::string>& params) {
+    std::vector<std::pair<std::string, std::string>> ordered;
+    ordered.reserve(params.size());
+    for (const auto& kv : params) {
+        ordered.emplace_back(kv.first, kv.second);
+    }
+    std::sort(ordered.begin(), ordered.end(), [](const auto& lhs, const auto& rhs) {
+        return lhs.first < rhs.first;
+    });
+
+    std::ostringstream out;
+    bool first = true;
+    for (const auto& [key, value] : ordered) {
+        if (!first) {
+            out << '&';
+        }
+        first = false;
+        out << key << '=' << value;
+    }
+    return out.str();
+}
+
+struct WriteParamsResult {
+    bool ok{true};
+    std::string error_status;
+    std::string error_code;
+    std::string error_message;
+    std::string merged_query;
+};
+
+WriteParamsResult merge_write_params_from_request(
+    std::string_view query,
+    const server::core::metrics::MetricsHttpServer::HttpRequest& request) {
+    WriteParamsResult result;
+    auto params = parse_query_string(query);
+
+    if (request.body.empty()) {
+        result.merged_query = encode_query_string(params);
+        return result;
+    }
+
+    std::string content_type;
+    if (const auto it = request.headers.find("content-type"); it != request.headers.end()) {
+        content_type = to_lower_ascii(trim_ascii(it->second));
+    }
+
+    const bool is_json = content_type.rfind("application/json", 0) == 0;
+    const bool is_form = content_type.rfind("application/x-www-form-urlencoded", 0) == 0;
+    if (!is_json && !is_form) {
+        result.ok = false;
+        result.error_status = "415 Unsupported Media Type";
+        result.error_code = "UNSUPPORTED_CONTENT_TYPE";
+        result.error_message = "write endpoints support application/json or application/x-www-form-urlencoded";
+        return result;
+    }
+
+    if (is_form) {
+        const auto body_params = parse_query_string(request.body);
+        for (const auto& [k, v] : body_params) {
+            params[k] = v;
+        }
+        result.merged_query = encode_query_string(params);
+        return result;
+    }
+
+    const auto parsed = nlohmann::json::parse(request.body, nullptr, false);
+    if (parsed.is_discarded() || !parsed.is_object()) {
+        result.ok = false;
+        result.error_status = "400 Bad Request";
+        result.error_code = "BAD_REQUEST";
+        result.error_message = "malformed JSON body";
+        return result;
+    }
+
+    for (auto it = parsed.begin(); it != parsed.end(); ++it) {
+        if (it.value().is_string()) {
+            params[it.key()] = it.value().get<std::string>();
+            continue;
+        }
+        if (it.value().is_number_integer()) {
+            params[it.key()] = std::to_string(it.value().get<long long>());
+            continue;
+        }
+        if (it.value().is_number_unsigned()) {
+            params[it.key()] = std::to_string(it.value().get<unsigned long long>());
+            continue;
+        }
+        if (it.value().is_array() && it.key() == "client_ids") {
+            std::vector<std::string> values;
+            for (const auto& item : it.value()) {
+                if (item.is_string()) {
+                    values.push_back(item.get<std::string>());
+                } else if (item.is_number_integer()) {
+                    values.push_back(std::to_string(item.get<long long>()));
+                } else if (item.is_number_unsigned()) {
+                    values.push_back(std::to_string(item.get<unsigned long long>()));
+                }
+            }
+            params[it.key()] = join_csv(values);
+        }
+    }
+
+    result.merged_query = encode_query_string(params);
+    return result;
 }
 
 QueryParseResult parse_common_query_options(std::string_view query) {
@@ -869,6 +1010,8 @@ private:
 
         grafana_base_url_ = read_env_string("GRAFANA_BASE_URL", "http://127.0.0.1:33000");
         prometheus_base_url_ = read_env_string("PROMETHEUS_BASE_URL", "http://127.0.0.1:39090");
+        admin_read_only_ = read_env_bool("ADMIN_READ_ONLY", false);
+        admin_command_signing_secret_ = read_env_string("ADMIN_COMMAND_SIGNING_SECRET", "");
 
         auth_mode_raw_ = read_env_string("ADMIN_AUTH_MODE", "off");
         auth_mode_ = parse_auth_mode(auth_mode_raw_);
@@ -893,6 +1036,34 @@ private:
             && auth_bearer_token_.empty()) {
             corelog::warn("admin_app bearer auth mode selected but ADMIN_BEARER_TOKEN is empty");
         }
+
+        if (admin_read_only_) {
+            corelog::warn("admin_app write endpoints are disabled by ADMIN_READ_ONLY=1");
+        }
+        if (admin_command_signing_secret_.empty()) {
+            corelog::warn("admin_app ADMIN_COMMAND_SIGNING_SECRET is empty; write command publish will be rejected");
+        }
+    }
+
+    std::optional<std::string>
+    build_signed_admin_message(std::unordered_map<std::string, std::string> fields, std::uint64_t request_id) {
+        if (admin_command_signing_secret_.empty()) {
+            command_signing_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            corelog::warn("admin_app command publish blocked: ADMIN_COMMAND_SIGNING_SECRET is not configured");
+            return std::nullopt;
+        }
+
+        if (!server::core::security::admin_command_auth::append_signature_fields(
+                fields,
+                admin_command_signing_secret_,
+                server::core::security::admin_command_auth::now_ms())) {
+            command_signing_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            corelog::error("admin_app command signing failed request_id=admin-" + std::to_string(request_id));
+            return std::nullopt;
+        }
+
+        return std::string("gw=admin_app\n")
+             + server::core::security::admin_command_auth::to_kv_payload(fields);
     }
 
     AuthContext authenticate_request(const server::core::metrics::MetricsHttpServer::HttpRequest& request) const {
@@ -1271,6 +1442,10 @@ private:
         stream << "# TYPE admin_poll_errors_total counter\n";
         stream << "admin_poll_errors_total " << poll_errors_total_.load(std::memory_order_relaxed) << "\n";
 
+        stream << "# TYPE admin_command_signing_errors_total counter\n";
+        stream << "admin_command_signing_errors_total "
+               << command_signing_errors_total_.load(std::memory_order_relaxed) << "\n";
+
         stream << "# TYPE admin_instances_cached gauge\n";
         {
             std::lock_guard<std::mutex> lock(cache_mutex_);
@@ -1284,7 +1459,7 @@ private:
         stream << "admin_worker_metrics_available " << (worker_available_.load(std::memory_order_relaxed) ? 1 : 0) << "\n";
 
         stream << "# TYPE admin_read_only_mode gauge\n";
-        stream << "admin_read_only_mode 0\n";
+        stream << "admin_read_only_mode " << (admin_read_only_ ? 1 : 0) << "\n";
 
         stream << app_host_.dependency_metrics_text();
         return stream.str();
@@ -1423,7 +1598,17 @@ private:
                 "moderation endpoints require POST"));
         }
 
+        if (is_write_endpoint && admin_read_only_) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return finalize(json_error(
+                request_id,
+                "403 Forbidden",
+                "READ_ONLY",
+                "write endpoints are disabled by ADMIN_READ_ONLY"));
+        }
+
         QueryOptions query_options;
+        std::string write_query_string;
         if (!is_write_endpoint) {
             const QueryParseResult query = parse_common_query_options(split.query);
             if (!query.ok) {
@@ -1438,6 +1623,17 @@ private:
                         "\",\"value\":\"" + json_escape(query.error_value) + "\"}"));
             }
             query_options = query.options;
+        } else {
+            const WriteParamsResult write_params = merge_write_params_from_request(split.query, request);
+            if (!write_params.ok) {
+                http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+                return finalize(json_error(
+                    request_id,
+                    write_params.error_status,
+                    write_params.error_code,
+                    write_params.error_message));
+            }
+            write_query_string = write_params.merged_query;
         }
 
         auto require_role = [&](std::string_view minimum_role)
@@ -1490,31 +1686,31 @@ private:
         }
 
         if (is_disconnect) {
-            if (auto forbidden = require_role("admin")) {
+            if (auto forbidden = require_role(kRoleRequiredDisconnect)) {
                 return finalize(std::move(*forbidden));
             }
             disconnect_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return finalize(handle_disconnect_users(request_id, auth, split.query));
+            return finalize(handle_disconnect_users(request_id, auth, write_query_string));
         }
 
         if (is_announce) {
-            if (auto forbidden = require_role("operator")) {
+            if (auto forbidden = require_role(kRoleRequiredAnnouncement)) {
                 return finalize(std::move(*forbidden));
             }
             announce_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return finalize(handle_announcement(request_id, auth, split.query));
+            return finalize(handle_announcement(request_id, auth, write_query_string));
         }
 
         if (is_settings) {
-            if (auto forbidden = require_role("admin")) {
+            if (auto forbidden = require_role(kRoleRequiredSettings)) {
                 return finalize(std::move(*forbidden));
             }
             settings_requests_total_.fetch_add(1, std::memory_order_relaxed);
-            return finalize(handle_runtime_setting(request_id, auth, split.query));
+            return finalize(handle_runtime_setting(request_id, auth, write_query_string));
         }
 
         if (is_user_moderation) {
-            if (auto forbidden = require_role("admin")) {
+            if (auto forbidden = require_role(kRoleRequiredModeration)) {
                 return finalize(std::move(*forbidden));
             }
             moderation_requests_total_.fetch_add(1, std::memory_order_relaxed);
@@ -1530,7 +1726,7 @@ private:
             } else {
                 op = "kick";
             }
-            return finalize(handle_user_moderation(request_id, auth, op, split.query));
+            return finalize(handle_user_moderation(request_id, auth, op, write_query_string));
         }
 
         if (path == "/api/v1/worker/write-behind") {
@@ -1558,11 +1754,18 @@ private:
         data << "\"user\":\"" << json_escape(auth_user_header_name_) << "\",";
         data << "\"role\":\"" << json_escape(auth_role_header_name_) << "\"";
         data << "},";
+        data << "\"read_only\":" << bool_json(admin_read_only_) << ",";
+
+        const bool allow_disconnect = !admin_read_only_ && has_min_role(auth.role, kRoleRequiredDisconnect);
+        const bool allow_announce = !admin_read_only_ && has_min_role(auth.role, kRoleRequiredAnnouncement);
+        const bool allow_settings = !admin_read_only_ && has_min_role(auth.role, kRoleRequiredSettings);
+        const bool allow_moderation = !admin_read_only_ && has_min_role(auth.role, kRoleRequiredModeration);
+
         data << "\"capabilities\":{";
-        data << "\"disconnect\":" << bool_json(has_min_role(auth.role, "admin")) << ",";
-        data << "\"announce\":" << bool_json(has_min_role(auth.role, "operator")) << ",";
-        data << "\"settings\":" << bool_json(has_min_role(auth.role, "admin")) << ",";
-        data << "\"moderation\":" << bool_json(has_min_role(auth.role, "admin"));
+        data << "\"disconnect\":" << bool_json(allow_disconnect) << ",";
+        data << "\"announce\":" << bool_json(allow_announce) << ",";
+        data << "\"settings\":" << bool_json(allow_settings) << ",";
+        data << "\"moderation\":" << bool_json(allow_moderation);
         data << "}";
         data << "}";
         return json_ok(request_id, data.str());
@@ -1593,6 +1796,7 @@ private:
         data << "\"healthy\":" << bool_json(app_host_.healthy()) << ",";
         data << "\"ready\":" << bool_json(app_host_.ready()) << ",";
         data << "\"stop_requested\":" << bool_json(app_host_.stop_requested()) << ",";
+        data << "\"read_only\":" << bool_json(admin_read_only_) << ",";
         data << "\"services\":{";
         data << "\"redis\":{";
         data << "\"configured\":" << bool_json(!redis_uri_.empty()) << ",";
@@ -2188,15 +2392,24 @@ private:
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:disconnect";
-        std::ostringstream payload;
-        payload << "op=disconnect\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "reason=" << sanitize_single_line(reason) << "\n";
-        payload << "client_ids=" << join_csv(deduped);
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = "disconnect";
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["reason"] = sanitize_single_line(reason);
+        fields["client_ids"] = join_csv(deduped);
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2268,15 +2481,24 @@ private:
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:announce";
-        std::ostringstream payload;
-        payload << "op=announce\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "priority=" << priority << "\n";
-        payload << "text=" << text;
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = "announce";
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["priority"] = priority;
+        fields["text"] = text;
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2343,7 +2565,7 @@ private:
                 json_details("value", value));
         }
 
-const auto* setting_rule = server::config::find_runtime_setting_rule(key);
+        const auto* setting_rule = server::config::find_runtime_setting_rule(key);
         if (setting_rule == nullptr) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(request_id, "400 Bad Request", "BAD_REQUEST", "unsupported setting key");
@@ -2359,15 +2581,24 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:settings";
-        std::ostringstream payload;
-        payload << "op=settings\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "key=" << sanitize_single_line(key) << "\n";
-        payload << "value=" << parsed_value;
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = "settings";
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["key"] = sanitize_single_line(key);
+        fields["value"] = std::to_string(parsed_value);
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2477,16 +2708,25 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
         }
 
         const std::string channel = redis_channel_prefix_ + "fanout:admin:moderation";
-        std::ostringstream payload;
-        payload << "op=" << sanitize_single_line(op) << "\n";
-        payload << "actor=" << sanitize_single_line(auth.actor) << "\n";
-        payload << "request_id=admin-" << request_id << "\n";
-        payload << "duration_sec=" << duration_sec << "\n";
-        payload << "reason=" << reason << "\n";
-        payload << "client_ids=" << join_csv(deduped);
+        std::unordered_map<std::string, std::string> fields;
+        fields["op"] = sanitize_single_line(op);
+        fields["actor"] = sanitize_single_line(auth.actor);
+        fields["request_id"] = "admin-" + std::to_string(request_id);
+        fields["duration_sec"] = std::to_string(duration_sec);
+        fields["reason"] = reason;
+        fields["client_ids"] = join_csv(deduped);
 
-        const std::string message = "gw=admin_app\n" + payload.str();
-        if (!redis_->publish(channel, message)) {
+        const auto message = build_signed_admin_message(std::move(fields), request_id);
+        if (!message) {
+            http_errors_total_.fetch_add(1, std::memory_order_relaxed);
+            return json_error(
+                request_id,
+                "503 Service Unavailable",
+                "MISCONFIGURED",
+                "admin command signing is not configured");
+        }
+
+        if (!redis_->publish(channel, *message)) {
             http_errors_total_.fetch_add(1, std::memory_order_relaxed);
             return json_error(
                 request_id,
@@ -2652,6 +2892,8 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
     std::string grafana_base_url_;
     std::string prometheus_base_url_;
     std::string admin_ui_html_;
+    bool admin_read_only_{false};
+    std::string admin_command_signing_secret_;
 
     AdminAuthMode auth_mode_{AdminAuthMode::kOff};
     std::string auth_mode_raw_;
@@ -2695,6 +2937,7 @@ const auto* setting_rule = server::config::find_runtime_setting_rule(key);
     std::atomic<std::uint64_t> moderation_requests_total_{0};
     std::atomic<std::uint64_t> worker_requests_total_{0};
     std::atomic<std::uint64_t> poll_errors_total_{0};
+    std::atomic<std::uint64_t> command_signing_errors_total_{0};
     std::atomic<std::uint64_t> request_seq_{0};
 };
 

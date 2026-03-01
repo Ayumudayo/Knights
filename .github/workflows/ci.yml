@@ -42,18 +42,37 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Cache vcpkg artifacts (Windows)
-        uses: actions/cache@v4
+      - name: Mark vcpkg cache restore start (Windows)
+        shell: pwsh
+        run: |
+          "VCPKG_CACHE_RESTORE_START=$(Get-Date -AsUTC -Format o)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Restore vcpkg artifacts cache (Windows)
+        id: vcpkg_cache_restore
+        uses: actions/cache/restore@v4
         with:
           path: |
             .cache/vcpkg/archives
             .cache/vcpkg/downloads
-            vcpkg_installed
             build-windows/vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
             ${{ runner.os }}-vcpkg-
+
+      - name: Summarize vcpkg cache restore (Windows)
+        shell: pwsh
+        run: |
+          $start = [DateTime]::Parse($env:VCPKG_CACHE_RESTORE_START)
+          $elapsed = [Math]::Round(((Get-Date).ToUniversalTime() - $start).TotalSeconds, 2)
+          $hit = '${{ steps.vcpkg_cache_restore.outputs.cache-hit }}'
+          if ([string]::IsNullOrWhiteSpace($hit)) { $hit = 'false' }
+          $matchedKey = '${{ steps.vcpkg_cache_restore.outputs.cache-matched-key }}'
+          if ([string]::IsNullOrWhiteSpace($matchedKey)) { $matchedKey = 'N/A' }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '### vcpkg cache telemetry (Windows)'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- restore_hit: {0}" -f $hit)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- restore_elapsed_sec: {0}" -f $elapsed)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- restore_key: {0}" -f $matchedKey)
 
       - name: Ensure vcpkg cache directories (Windows)
         shell: pwsh
@@ -123,6 +142,42 @@ jobs:
         run: |
           ctest --preset windows-test -R "CorePublicApi|CoreApiBoundaryFixtures|CoreApiStableGovernanceFixtures" --output-on-failure
 
+      - name: Mark vcpkg cache save start (Windows)
+        if: success() && steps.vcpkg_cache_restore.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          "VCPKG_CACHE_SAVE_START=$(Get-Date -AsUTC -Format o)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Save vcpkg artifacts cache (Windows)
+        if: success() && steps.vcpkg_cache_restore.outputs.cache-hit != 'true'
+        id: vcpkg_cache_save
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .cache/vcpkg/archives
+            .cache/vcpkg/downloads
+            build-windows/vcpkg_installed
+          key: ${{ steps.vcpkg_cache_restore.outputs.cache-primary-key }}
+
+      - name: Summarize vcpkg cache save (Windows)
+        if: always()
+        shell: pwsh
+        run: |
+          $saveOutcome = '${{ steps.vcpkg_cache_save.outcome }}'
+          if ([string]::IsNullOrWhiteSpace($saveOutcome)) { $saveOutcome = 'unknown' }
+          if ('${{ steps.vcpkg_cache_restore.outputs.cache-hit }}' -eq 'true') {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- save_skipped: true (exact cache hit)'
+            return
+          }
+          if ([string]::IsNullOrWhiteSpace($env:VCPKG_CACHE_SAVE_START)) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- save_status: {0}" -f $saveOutcome)
+            return
+          }
+          $start = [DateTime]::Parse($env:VCPKG_CACHE_SAVE_START)
+          $elapsed = [Math]::Round(((Get-Date).ToUniversalTime() - $start).TotalSeconds, 2)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- save_status: {0}" -f $saveOutcome)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- save_elapsed_sec: {0}" -f $elapsed)
+
   core-api-consumer-linux:
     runs-on: ubuntu-latest
     timeout-minutes: 60
@@ -186,18 +241,37 @@ jobs:
           fetch-depth: 0
           submodules: recursive
 
-      - name: Cache vcpkg artifacts (Windows)
-        uses: actions/cache@v4
+      - name: Mark vcpkg cache restore start (Windows)
+        shell: pwsh
+        run: |
+          "VCPKG_CACHE_RESTORE_START=$(Get-Date -AsUTC -Format o)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Restore vcpkg artifacts cache (Windows)
+        id: vcpkg_cache_restore
+        uses: actions/cache/restore@v4
         with:
           path: |
             .cache/vcpkg/archives
             .cache/vcpkg/downloads
-            vcpkg_installed
             build-windows/vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
+          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
           restore-keys: |
             ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
             ${{ runner.os }}-vcpkg-
+
+      - name: Summarize vcpkg cache restore (Windows)
+        shell: pwsh
+        run: |
+          $start = [DateTime]::Parse($env:VCPKG_CACHE_RESTORE_START)
+          $elapsed = [Math]::Round(((Get-Date).ToUniversalTime() - $start).TotalSeconds, 2)
+          $hit = '${{ steps.vcpkg_cache_restore.outputs.cache-hit }}'
+          if ([string]::IsNullOrWhiteSpace($hit)) { $hit = 'false' }
+          $matchedKey = '${{ steps.vcpkg_cache_restore.outputs.cache-matched-key }}'
+          if ([string]::IsNullOrWhiteSpace($matchedKey)) { $matchedKey = 'N/A' }
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '### vcpkg cache telemetry (Windows)'
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- restore_hit: {0}" -f $hit)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- restore_elapsed_sec: {0}" -f $elapsed)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- restore_key: {0}" -f $matchedKey)
 
       - name: Ensure vcpkg cache directories (Windows)
         shell: pwsh
@@ -242,70 +316,62 @@ jobs:
           python tools/gen_wire_codec.py protocol/wire_map.json core/include/server/wire/codec.hpp
           git diff --exit-code -- core/include/server/wire/codec.hpp
 
-      - name: Build Fast Test Target (Debug)
-        shell: pwsh
-        run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug -Target core_general_tests
-
-      - name: Run Fast Policy/Transport Tests
-        shell: pwsh
-        run: |
-          ctest --preset windows-test -R "DispatcherTest|OpcodePolicyTest|UdpBindAbuseGuardTest|UdpSequencedMetricsTest" --output-on-failure
-
-  windows-slow-tests:
-    runs-on: windows-latest
-    timeout-minutes: 60
-    needs: windows-fast-tests
-    env:
-      VCPKG_FEATURE_FLAGS: manifests,binarycaching
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.cache/vcpkg/archives
-      VCPKG_BINARY_SOURCES: clear;files,${{ github.workspace }}/.cache/vcpkg/archives,readwrite
-      VCPKG_DOWNLOADS: ${{ github.workspace }}/.cache/vcpkg/downloads
-      VCPKG_INSTALLED_DIR: ${{ github.workspace }}/build-windows/vcpkg_installed
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          submodules: recursive
-
-      - name: Cache vcpkg artifacts (Windows)
-        uses: actions/cache@v4
-        with:
-          path: |
-            .cache/vcpkg/archives
-            .cache/vcpkg/downloads
-            vcpkg_installed
-            build-windows/vcpkg_installed
-          key: ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json', 'CMakePresets.json', 'scripts/setup_vcpkg.ps1', 'cmake/knights_vcpkg_toolchain.cmake') }}
-          restore-keys: |
-            ${{ runner.os }}-vcpkg-${{ hashFiles('vcpkg.json') }}-
-            ${{ runner.os }}-vcpkg-
-
-      - name: Ensure vcpkg cache directories (Windows)
-        shell: pwsh
-        run: |
-          $buildInstalled = "${{ github.workspace }}/build-windows/vcpkg_installed"
-          $rootInstalled = "${{ github.workspace }}/vcpkg_installed"
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/archives" | Out-Null
-          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/.cache/vcpkg/downloads" | Out-Null
-          New-Item -ItemType Directory -Force -Path $buildInstalled | Out-Null
-          if (-not (Test-Path $rootInstalled)) {
-            New-Item -ItemType Junction -Path $rootInstalled -Target $buildInstalled | Out-Null
-          }
-
-      - name: Enable MSVC Developer Command Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-
       - name: Build (Debug)
         shell: pwsh
         run: |
           pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug
 
-      - name: Run Slow Unit Tests (ctest)
+      - name: Build Protocol Fuzz Harness (Debug)
         shell: pwsh
         run: |
-          ctest --preset windows-test -E "DispatcherTest|OpcodePolicyTest|UdpBindAbuseGuardTest|UdpSequencedMetricsTest" --output-on-failure
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/build.ps1 -Config Debug -Target protocol_fuzz_harness
+
+      - name: Run Protocol Fuzz Harness
+        shell: pwsh
+        run: |
+          $env:FUZZ_ITERATIONS = "120000"
+          .\build-windows\tests\Debug\protocol_fuzz_harness.exe
+
+      - name: Run Windows Unit Tests (ctest)
+        shell: pwsh
+        run: |
+          ctest --preset windows-test --output-on-failure
+
+      - name: Mark vcpkg cache save start (Windows)
+        if: success() && steps.vcpkg_cache_restore.outputs.cache-hit != 'true'
+        shell: pwsh
+        run: |
+          "VCPKG_CACHE_SAVE_START=$(Get-Date -AsUTC -Format o)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Save vcpkg artifacts cache (Windows)
+        if: success() && steps.vcpkg_cache_restore.outputs.cache-hit != 'true'
+        id: vcpkg_cache_save
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            .cache/vcpkg/archives
+            .cache/vcpkg/downloads
+            build-windows/vcpkg_installed
+          key: ${{ steps.vcpkg_cache_restore.outputs.cache-primary-key }}
+
+      - name: Summarize vcpkg cache save (Windows)
+        if: always()
+        shell: pwsh
+        run: |
+          $saveOutcome = '${{ steps.vcpkg_cache_save.outcome }}'
+          if ([string]::IsNullOrWhiteSpace($saveOutcome)) { $saveOutcome = 'unknown' }
+          if ('${{ steps.vcpkg_cache_restore.outputs.cache-hit }}' -eq 'true') {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value '- save_skipped: true (exact cache hit)'
+            return
+          }
+          if ([string]::IsNullOrWhiteSpace($env:VCPKG_CACHE_SAVE_START)) {
+            Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- save_status: {0}" -f $saveOutcome)
+            return
+          }
+          $start = [DateTime]::Parse($env:VCPKG_CACHE_SAVE_START)
+          $elapsed = [Math]::Round(((Get-Date).ToUniversalTime() - $start).TotalSeconds, 2)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- save_status: {0}" -f $saveOutcome)
+          Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value ("- save_elapsed_sec: {0}" -f $elapsed)
 
   linux-docker-stack:
     runs-on: ubuntu-latest
@@ -371,7 +437,16 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/app" \
             -w /app \
             knights-base:latest \
-            bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF && cmake --build --preset linux-asan --target server_app --parallel"
+            bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF && cmake --build --preset linux-asan --target server_app protocol_fuzz_harness --parallel"
+
+      - name: ASan Protocol Fuzz Harness
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/app" \
+            -w /app \
+            -e FUZZ_ITERATIONS=200000 \
+            knights-base:latest \
+            bash -lc "./build-linux/tests/protocol_fuzz_harness"
 
       - name: Start Stack (Detached)
         shell: pwsh
@@ -463,6 +538,10 @@ jobs:
       - name: Smoke Test (Admin Control-Plane E2E)
         run: |
           python3 tests/python/verify_admin_control_plane_e2e.py
+
+      - name: Soak + Performance Regression Gate
+        run: |
+          PERF_P95_MAX_MS=300 PERF_P99_MAX_MS=700 PERF_MIN_THROUGHPUT_RPS=10 python3 tests/python/verify_soak_perf_gate.py
 
       - name: Verify Plugin Metrics
         run: |

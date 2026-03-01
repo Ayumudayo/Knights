@@ -5,8 +5,10 @@
 #include "server/core/config/options.hpp"
 #include "server/core/protocol/protocol_flags.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
+#include "server/core/protocol/version.hpp"
 #include "server/core/memory/memory_pool.hpp"
 #include "server/core/runtime_metrics.hpp"
+#include "server/core/trace/context.hpp"
 
 #include <cstring>
 #include <algorithm>
@@ -48,6 +50,7 @@ std::string Session::remote_ip() const {
         auto ep = socket_.remote_endpoint();
         return ep.address().to_string();
     } catch (...) {
+        runtime_metrics::record_exception_ignored();
         return std::string();
     }
 }
@@ -73,10 +76,12 @@ void Session::stop() {
             try {
                 socket_.shutdown(asio::ip::tcp::socket::shutdown_both);
             } catch (...) {
+                runtime_metrics::record_exception_ignored();
             }
             try {
                 socket_.close();
             } catch (...) {
+                runtime_metrics::record_exception_ignored();
             }
         }
         (void)read_timer_.cancel();
@@ -91,9 +96,32 @@ void Session::stop() {
             try {
                 on_close_(self);
             } catch (...) {
+                runtime_metrics::record_exception_recoverable();
             }
         }
     });
+}
+
+bool Session::post_serialized(std::function<void()> fn) {
+    if (!fn) {
+        return false;
+    }
+
+    std::shared_ptr<Session> self;
+    try {
+        self = shared_from_this();
+    } catch (...) {
+        runtime_metrics::record_exception_ignored();
+        return false;
+    }
+
+    asio::post(strand_, [self, fn = std::move(fn)]() mutable {
+        if (self->stopped_.load(std::memory_order_acquire)) {
+            return;
+        }
+        fn();
+    });
+    return true;
 }
 
 void Session::async_send(BufferManager::PooledBuffer data, size_t packet_size) {
@@ -193,11 +221,38 @@ void Session::do_read_body(std::size_t body_len) {
         // payload가 비어 있으면 빈 span을 그대로 전달한다.
         runtime_metrics::record_packet_payload(0);
         runtime_metrics::record_packet_ok();
+
+        const std::uint64_t trace_seed = (static_cast<std::uint64_t>(session_id_) << 32)
+                                       ^ (static_cast<std::uint64_t>(header_.seq) << 8)
+                                       ^ static_cast<std::uint64_t>(header_.msg_id);
+        const bool sampled = trace::should_sample(trace_seed);
+        trace::ScopedContext trace_scope(
+            sampled ? trace::make_trace_id() : std::string{},
+            sampled ? trace::make_correlation_id(session_id_, header_.msg_id, header_.seq) : std::string{},
+            sampled
+        );
+
+        if (trace_scope.active()) {
+            log::debug("span_start component=session span=ingress");
+            log::debug("span_start component=dispatcher span=dispatch");
+        }
+
         auto start = std::chrono::steady_clock::now();
         bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>{});
         runtime_metrics::record_dispatch_opcode(header_.msg_id);
         auto elapsed = std::chrono::steady_clock::now() - start;
         runtime_metrics::record_dispatch_attempt(handled, elapsed);
+
+        if (trace_scope.active()) {
+            const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+            log::debug(
+                "span_end component=dispatcher span=dispatch duration_us="
+                + std::to_string(elapsed_us)
+                + " handled=" + (handled ? std::string("true") : std::string("false"))
+            );
+            log::debug("span_end component=session span=ingress");
+        }
+
         if (!handled) {
             send_error(server::core::protocol::errc::UNKNOWN_MSG_ID, "unknown msg");
         }
@@ -235,11 +290,38 @@ void Session::do_read_body(std::size_t body_len) {
             arm_read_timeout();
             runtime_metrics::record_packet_payload(header_.length);
             runtime_metrics::record_packet_ok();
+
+            const std::uint64_t trace_seed = (static_cast<std::uint64_t>(session_id_) << 32)
+                                           ^ (static_cast<std::uint64_t>(header_.seq) << 8)
+                                           ^ static_cast<std::uint64_t>(header_.msg_id);
+            const bool sampled = trace::should_sample(trace_seed);
+            trace::ScopedContext trace_scope(
+                sampled ? trace::make_trace_id() : std::string{},
+                sampled ? trace::make_correlation_id(session_id_, header_.msg_id, header_.seq) : std::string{},
+                sampled
+            );
+
+            if (trace_scope.active()) {
+                log::debug("span_start component=session span=ingress");
+                log::debug("span_start component=dispatcher span=dispatch");
+            }
+
             auto start = std::chrono::steady_clock::now();
             bool handled = dispatcher_.dispatch(header_.msg_id, *this, std::span<const std::uint8_t>(reinterpret_cast<const std::uint8_t*>(read_buf_.get()), header_.length));
             runtime_metrics::record_dispatch_opcode(header_.msg_id);
             auto elapsed = std::chrono::steady_clock::now() - start;
             runtime_metrics::record_dispatch_attempt(handled, elapsed);
+
+            if (trace_scope.active()) {
+                const auto elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+                log::debug(
+                    "span_end component=dispatcher span=dispatch duration_us="
+                    + std::to_string(elapsed_us)
+                    + " handled=" + (handled ? std::string("true") : std::string("false"))
+                );
+                log::debug("span_end component=session span=ingress");
+            }
+
             if (!handled) {
                 send_error(server::core::protocol::errc::UNKNOWN_MSG_ID, "unknown msg");
             }
@@ -283,8 +365,8 @@ void Session::send_hello() {
     // epoch_high32(4바이트): 64비트 Timestamp 구성을 위한 상위 32비트 (Epoch)
     std::vector<std::uint8_t> payload_vec;
     payload_vec.resize(12);
-    server::core::protocol::write_be16(1, payload_vec.data()); // proto_major
-    server::core::protocol::write_be16(1, payload_vec.data() + 2); // proto_minor
+    server::core::protocol::write_be16(server::core::protocol::kProtocolVersionMajor, payload_vec.data()); // proto_major
+    server::core::protocol::write_be16(server::core::protocol::kProtocolVersionMinor, payload_vec.data() + 2); // proto_minor
     
     std::uint16_t caps = static_cast<std::uint16_t>(server::core::protocol::CAP_COMPRESS_SUPP | server::core::protocol::CAP_SENDER_SID);
     server::core::protocol::write_be16(caps, payload_vec.data() + 4);

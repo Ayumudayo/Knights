@@ -1,5 +1,17 @@
 cmake_minimum_required(VERSION 3.20)
 
+add_executable(protocol_fuzz_harness
+    core/protocol_fuzz_harness.cpp
+)
+target_include_directories(protocol_fuzz_harness PRIVATE
+    ${CMAKE_SOURCE_DIR}/core/include
+)
+target_link_libraries(protocol_fuzz_harness PRIVATE
+    server_core
+)
+add_test(NAME ProtocolFuzzHarness COMMAND protocol_fuzz_harness)
+set_tests_properties(ProtocolFuzzHarness PROPERTIES LABELS "fuzz")
+
 if (BUILD_GTEST_TESTS)
     find_package(GTest CONFIG REQUIRED)
 
@@ -69,9 +81,19 @@ if (BUILD_GTEST_TESTS)
         core/test_core_metrics.cpp
         core/test_core_paths.cpp
         core/test_core_net.cpp
+        core/test_gateway_resilience_controls.cpp
+        core/test_trace_context.cpp
         core/test_udp_bind_abuse_guard.cpp
         core/test_udp_sequenced_metrics.cpp
+        core/test_rudp_ack_window.cpp
+        core/test_rudp_retransmit.cpp
+        core/test_rudp_handshake.cpp
+        core/test_rudp_flow_control.cpp
+        core/test_rudp_fallback.cpp
+        core/test_rudp_engine.cpp
+        core/test_rudp_rollout_policy.cpp
         core/test_security_compression.cpp
+        core/test_admin_command_auth.cpp
     )
     target_include_directories(core_general_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include

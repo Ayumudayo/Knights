@@ -25,6 +25,7 @@
 #include "server/app/metrics_server.hpp"
 
 #include "server/core/net/dispatcher.hpp"
+#include "server/core/security/admin_command_auth.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/service_registry.hpp"
 #include "server/core/app/app_host.hpp"
@@ -45,6 +46,7 @@ namespace asio = boost::asio;
 namespace core = server::core;
 namespace corelog = server::core::log;
 namespace services = server::core::util::services;
+namespace admin_auth = server::core::security::admin_command_auth;
 
 namespace server::app {
 
@@ -58,6 +60,21 @@ namespace server::app {
 std::atomic<std::uint64_t> g_subscribe_total{0};
 std::atomic<std::uint64_t> g_self_echo_drop_total{0};
 std::atomic<long long>     g_subscribe_last_lag_ms{0};
+std::atomic<std::uint64_t> g_admin_command_verify_ok_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_fail_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_replay_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_signature_mismatch_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_expired_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_future_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_missing_field_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_invalid_issued_at_total{0};
+std::atomic<std::uint64_t> g_admin_command_verify_secret_not_configured_total{0};
+std::atomic<std::uint64_t> g_shutdown_drain_completed_total{0};
+std::atomic<std::uint64_t> g_shutdown_drain_timeout_total{0};
+std::atomic<std::uint64_t> g_shutdown_drain_forced_close_total{0};
+std::atomic<std::uint64_t> g_shutdown_drain_remaining_connections{0};
+std::atomic<long long> g_shutdown_drain_elapsed_ms{0};
+std::atomic<long long> g_shutdown_drain_timeout_ms{0};
 
 namespace {
 
@@ -165,6 +182,15 @@ int run_server(int argc, char** argv) {
             app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
             return 1;
         }
+
+        g_shutdown_drain_completed_total.store(0, std::memory_order_relaxed);
+        g_shutdown_drain_timeout_total.store(0, std::memory_order_relaxed);
+        g_shutdown_drain_forced_close_total.store(0, std::memory_order_relaxed);
+        g_shutdown_drain_remaining_connections.store(0, std::memory_order_relaxed);
+        g_shutdown_drain_elapsed_ms.store(0, std::memory_order_relaxed);
+        g_shutdown_drain_timeout_ms.store(
+            static_cast<long long>(config.shutdown_drain_timeout_ms),
+            std::memory_order_relaxed);
 
         // Readiness: DB is required; Redis is required when configured.
         app_host.declare_dependency("db");
@@ -314,9 +340,11 @@ int run_server(int argc, char** argv) {
                         }
                         app_host.set_dependency_ok("redis", ok);
                     } catch (const std::exception& ex) {
-                        corelog::error(std::string("Periodic Redis health check exception: ") + ex.what());
+                        core::runtime_metrics::record_exception_recoverable();
+                        corelog::error(std::string("component=server_bootstrap error_code=REDIS_HEALTH_CHECK periodic Redis health check exception: ") + ex.what());
                     } catch (...) {
-                        corelog::error("Periodic Redis health check unknown exception");
+                        core::runtime_metrics::record_exception_ignored();
+                        corelog::error("component=server_bootstrap error_code=REDIS_HEALTH_CHECK periodic Redis health check unknown exception");
                     }
                 });
             }, std::chrono::seconds(60));
@@ -345,7 +373,8 @@ int run_server(int argc, char** argv) {
                     corelog::warn("Failed to register server instance in registry");
                 }
             } catch (const std::exception& ex) {
-                corelog::warn(std::string("Failed to initialise server registry backend: ") + ex.what());
+                core::runtime_metrics::record_exception_recoverable();
+                corelog::warn(std::string("component=server_bootstrap error_code=REGISTRY_INIT_FAILED failed to initialise server registry backend: ") + ex.what());
             }
 
             // 레지스트리 하트비트 스케줄링
@@ -395,7 +424,8 @@ int run_server(int argc, char** argv) {
         for (unsigned int i = 0; i < num_io_threads; ++i) {
             io_threads.emplace_back([&io]() { 
                 try { io.run(); } catch (const std::exception& e) {
-                    corelog::error(std::string("I/O thread exception: ") + e.what());
+                    core::runtime_metrics::record_exception_recoverable();
+                    corelog::error(std::string("component=server_bootstrap error_code=IO_THREAD_EXCEPTION I/O thread exception: ") + e.what());
                 }
             });
         }
@@ -414,6 +444,17 @@ int run_server(int argc, char** argv) {
             if (!registry_backend->upsert(registry_record)) {
                 corelog::warn("Server registry ready-state upsert failed");
             }
+        }
+
+        admin_auth::VerifyOptions admin_verify_options;
+        admin_verify_options.ttl_ms = config.admin_command_ttl_ms;
+        admin_verify_options.future_skew_ms = config.admin_command_future_skew_ms;
+        auto admin_command_verifier = std::make_shared<admin_auth::Verifier>(
+            config.admin_command_signing_secret,
+            admin_verify_options);
+
+        if (config.use_redis_pubsub && config.admin_command_signing_secret.empty()) {
+            corelog::warn("ADMIN_COMMAND_SIGNING_SECRET is empty; admin fanout commands will be rejected");
         }
 
         // 10. Redis Pub/Sub 구독 (분산 채팅용)
@@ -447,7 +488,8 @@ int run_server(int argc, char** argv) {
                                      gwid,
                                      refresh_prefix,
                                      room_prefix,
-                                     exact_channels](const std::string& channel, const std::string& message) {
+                                     exact_channels,
+                                     admin_command_verifier](const std::string& channel, const std::string& message) {
                 // 1. Self-Echo 방지
                 if (message.rfind("gw=", 0) == 0) {
                     auto nl = message.find('\n');
@@ -502,6 +544,56 @@ int run_server(int argc, char** argv) {
                     }
 
                     const std::string payload = message.substr(nl + 1);
+                    std::unordered_map<std::string, std::string> admin_fields;
+                    if (*exact_match != ExactFanoutChannel::kWhisper) {
+                        admin_fields = parse_kv_lines(payload);
+                        const admin_auth::VerifyResult verify_result = admin_command_verifier->verify(admin_fields);
+                        if (verify_result != admin_auth::VerifyResult::kOk) {
+                            g_admin_command_verify_fail_total.fetch_add(1, std::memory_order_relaxed);
+
+                            switch (verify_result) {
+                            case admin_auth::VerifyResult::kReplay:
+                                g_admin_command_verify_replay_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kSignatureMismatch:
+                                g_admin_command_verify_signature_mismatch_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kExpired:
+                                g_admin_command_verify_expired_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kFuture:
+                                g_admin_command_verify_future_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kMissingField:
+                                g_admin_command_verify_missing_field_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kInvalidIssuedAt:
+                                g_admin_command_verify_invalid_issued_at_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kSecretNotConfigured:
+                                g_admin_command_verify_secret_not_configured_total.fetch_add(1, std::memory_order_relaxed);
+                                break;
+                            case admin_auth::VerifyResult::kOk:
+                                break;
+                            }
+
+                            const auto request_id_it = admin_fields.find("request_id");
+                            const auto actor_it = admin_fields.find("actor");
+                            const std::string request_id = request_id_it == admin_fields.end() ? std::string("unknown")
+                                                                                                 : request_id_it->second;
+                            const std::string actor = actor_it == admin_fields.end() ? std::string("unknown")
+                                                                                       : actor_it->second;
+                            corelog::warn(
+                                "admin command rejected channel=" + channel
+                                + " reason=" + admin_auth::to_string(verify_result)
+                                + " request_id=" + request_id
+                                + " actor=" + actor);
+                            return;
+                        }
+
+                        g_admin_command_verify_ok_total.fetch_add(1, std::memory_order_relaxed);
+                    }
+
                     switch (*exact_match) {
                     case ExactFanoutChannel::kWhisper: {
                         std::vector<std::uint8_t> body(payload.begin(), payload.end());
@@ -510,7 +602,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminDisconnect: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         auto it = fields.find("client_ids");
                         if (it == fields.end() || it->second.empty()) {
@@ -532,7 +624,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminAnnounce: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         const auto text_it = fields.find("text");
                         if (text_it == fields.end() || text_it->second.empty()) {
@@ -544,7 +636,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminSettings: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         const auto key_it = fields.find("key");
                         const auto value_it = fields.find("value");
@@ -557,7 +649,7 @@ int run_server(int argc, char** argv) {
                         return;
                     }
                     case ExactFanoutChannel::kAdminModeration: {
-                        const auto fields = parse_kv_lines(payload);
+                        const auto& fields = admin_fields;
 
                         const auto op_it = fields.find("op");
                         const auto users_it = fields.find("client_ids");
@@ -575,6 +667,10 @@ int run_server(int argc, char** argv) {
                             try {
                                 duration_sec = static_cast<std::uint32_t>(std::stoul(duration_it->second));
                             } catch (...) {
+                                core::runtime_metrics::record_exception_ignored();
+                                corelog::warn(
+                                    "component=server_bootstrap error_code=INVALID_DURATION admin moderation duration parse failed duration_sec="
+                                    + duration_it->second);
                                 duration_sec = 0;
                             }
                         }
@@ -607,6 +703,39 @@ int run_server(int argc, char** argv) {
         // 12. 종료 시그널 대기
         app_host.add_shutdown_step("stop workers", [&]() { workers.Stop(); });
         app_host.add_shutdown_step("stop io_context", [&]() { io.stop(); });
+        app_host.add_shutdown_step("drain active sessions", [&]() {
+            const std::uint64_t timeout_ms = config.shutdown_drain_timeout_ms;
+            const std::uint64_t poll_ms = std::max<std::uint64_t>(1, config.shutdown_drain_poll_ms);
+
+            g_shutdown_drain_timeout_ms.store(static_cast<long long>(timeout_ms), std::memory_order_relaxed);
+
+            const auto started_at = std::chrono::steady_clock::now();
+            for (;;) {
+                const std::uint64_t remaining = core_internal::connection_count(state);
+                g_shutdown_drain_remaining_connections.store(remaining, std::memory_order_relaxed);
+
+                const auto now = std::chrono::steady_clock::now();
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - started_at).count();
+                g_shutdown_drain_elapsed_ms.store(elapsed, std::memory_order_relaxed);
+
+                if (remaining == 0) {
+                    g_shutdown_drain_completed_total.fetch_add(1, std::memory_order_relaxed);
+                    corelog::info("Shutdown drain completed within timeout");
+                    break;
+                }
+
+                if (elapsed >= static_cast<long long>(timeout_ms)) {
+                    g_shutdown_drain_timeout_total.fetch_add(1, std::memory_order_relaxed);
+                    g_shutdown_drain_forced_close_total.fetch_add(remaining, std::memory_order_relaxed);
+                    corelog::warn(
+                        "Shutdown drain timeout reached; forcing close of remaining connections="
+                        + std::to_string(remaining));
+                    break;
+                }
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(poll_ms));
+            }
+        });
         app_host.add_shutdown_step("stop acceptor", [&]() { acceptor->stop(); });
         app_host.add_shutdown_step("stop db worker pool", [&]() {
             core_internal::stop_db_worker_pool(db_workers);
@@ -615,6 +744,7 @@ int run_server(int argc, char** argv) {
             try {
                 if (scheduler_timer) scheduler_timer->cancel();
             } catch (...) {
+                core::runtime_metrics::record_exception_ignored();
             }
         });
         app_host.add_shutdown_step("shutdown scheduler", [&]() { scheduler.shutdown(); });
@@ -622,11 +752,11 @@ int run_server(int argc, char** argv) {
             if (metrics_server) metrics_server->stop();
         });
         app_host.add_shutdown_step("stop redis pubsub", [&]() {
-            try { if (redis) redis->stop_psubscribe(); } catch (...) {}
+            try { if (redis) redis->stop_psubscribe(); } catch (...) { core::runtime_metrics::record_exception_ignored(); }
         });
         app_host.add_shutdown_step("deregister instance", [&]() {
             if (registry_registered && registry_backend) {
-                try { registry_backend->remove(registry_record.instance_id); } catch (...) {}
+                try { registry_backend->remove(registry_record.instance_id); } catch (...) { core::runtime_metrics::record_exception_ignored(); }
                 registry_registered = false;
             }
         });
@@ -642,10 +772,10 @@ int run_server(int argc, char** argv) {
 
         // 정리 작업
         if (registry_registered && registry_backend) {
-            try { registry_backend->remove(registry_record.instance_id); } catch (...) {}
+            try { registry_backend->remove(registry_record.instance_id); } catch (...) { core::runtime_metrics::record_exception_ignored(); }
         }
         if (metrics_server) metrics_server->stop();
-        try { scheduler_timer->cancel(); } catch (...) {}
+        try { scheduler_timer->cancel(); } catch (...) { core::runtime_metrics::record_exception_ignored(); }
         scheduler.shutdown();
         core_internal::stop_db_worker_pool(db_workers);
         services::clear();
@@ -653,7 +783,8 @@ int run_server(int argc, char** argv) {
         return 0;
 
     } catch (const std::exception& ex) {
-        corelog::error(std::string("server_app exception: ") + ex.what());
+        core::runtime_metrics::record_exception_fatal();
+        corelog::error(std::string("component=server_bootstrap error_code=SERVER_FATAL server_app exception: ") + ex.what());
         app_host.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
         services::clear();
         return 1;

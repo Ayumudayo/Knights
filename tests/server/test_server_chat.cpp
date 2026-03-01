@@ -10,6 +10,8 @@
 #include <server/core/net/connection_runtime_state.hpp>
 #include <server/core/protocol/protocol_errors.hpp>
 #include <server/core/protocol/packet.hpp>
+#include <server/core/protocol/version.hpp>
+#include <server/core/runtime_metrics.hpp>
 #include <server/protocol/game_opcodes.hpp>
 #include "wire.pb.h"
 #include <boost/asio.hpp>
@@ -359,6 +361,25 @@ protected:
         return true;
     }
 
+    std::optional<std::uint16_t> WaitForErrorCode(int timeout_ms = 300) {
+        auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+        while (std::chrono::steady_clock::now() < deadline) {
+            std::uint16_t msg_id = 0;
+            std::vector<std::uint8_t> payload;
+            if (!WaitForPacket(msg_id, payload, 60)) {
+                continue;
+            }
+            if (msg_id != core_proto::MSG_ERR) {
+                continue;
+            }
+            if (payload.size() < 2) {
+                return std::nullopt;
+            }
+            return static_cast<std::uint16_t>((static_cast<std::uint16_t>(payload[0]) << 8) | payload[1]);
+        }
+        return std::nullopt;
+    }
+
     bool WaitForBroadcastText(const std::string& expected_substring, int timeout_ms = 500) {
         auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
         while (std::chrono::steady_clock::now() < deadline) {
@@ -397,6 +418,64 @@ TEST_F(ChatServiceTest, Login) {
     
     // 검증: Redis에 로비 유저 추가되었는지 (Spy 확인)
     EXPECT_TRUE(redis_->sadd_called) << "User should be added to Redis set";
+}
+
+TEST_F(ChatServiceTest, LoginRejectsMismatchedProtocolMajor) {
+    std::vector<std::uint8_t> payload;
+    write_lp_utf8(payload, "test_user");
+    write_lp_utf8(payload, "test_token");
+
+    const auto version_offset = payload.size();
+    payload.resize(version_offset + 4);
+    core_proto::write_be16(static_cast<std::uint16_t>(core_proto::kProtocolVersionMajor + 1), payload.data() + version_offset);
+    core_proto::write_be16(core_proto::kProtocolVersionMinor, payload.data() + version_offset + 2);
+
+    chat_service_->on_login(*session_, payload);
+    FlushSessionIO();
+
+    const auto error_code = WaitForErrorCode();
+    ASSERT_TRUE(error_code.has_value());
+    EXPECT_EQ(*error_code, core_proto::errc::UNSUPPORTED_VERSION);
+}
+
+TEST_F(ChatServiceTest, LoginRejectsHigherProtocolMinor) {
+    std::vector<std::uint8_t> payload;
+    write_lp_utf8(payload, "test_user");
+    write_lp_utf8(payload, "test_token");
+
+    const auto version_offset = payload.size();
+    payload.resize(version_offset + 4);
+    core_proto::write_be16(core_proto::kProtocolVersionMajor, payload.data() + version_offset);
+    core_proto::write_be16(static_cast<std::uint16_t>(core_proto::kProtocolVersionMinor + 1), payload.data() + version_offset + 2);
+
+    chat_service_->on_login(*session_, payload);
+    FlushSessionIO();
+
+    const auto error_code = WaitForErrorCode();
+    ASSERT_TRUE(error_code.has_value());
+    EXPECT_EQ(*error_code, core_proto::errc::UNSUPPORTED_VERSION);
+}
+
+TEST_F(ChatServiceTest, LoginAcceptsLowerProtocolMinor) {
+    std::vector<std::uint8_t> payload;
+    write_lp_utf8(payload, "test_user");
+    write_lp_utf8(payload, "test_token");
+
+    const auto version_offset = payload.size();
+    payload.resize(version_offset + 4);
+    core_proto::write_be16(core_proto::kProtocolVersionMajor, payload.data() + version_offset);
+    core_proto::write_be16(0, payload.data() + version_offset + 2);
+
+    chat_service_->on_login(*session_, payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    // lower minor version은 버전 협상에서 허용되어야 하며,
+    // UNSUPPORTED_VERSION으로 거절되면 안 된다.
+    const auto error_code = WaitForErrorCode();
+    if (error_code.has_value()) {
+        EXPECT_NE(*error_code, core_proto::errc::UNSUPPORTED_VERSION);
+    }
 }
 
 TEST_F(ChatServiceTest, DispatcherBlocksProtectedOpcodeBeforeLogin) {
@@ -764,6 +843,40 @@ TEST_F(ChatServiceTest, RoomOwnerCanRemoveOwnRoom) {
 
     SendChat("owner_room", "/room remove");
     EXPECT_TRUE(WaitForBroadcastText("room removed: owner_room"));
+}
+
+TEST_F(ChatServiceTest, RuntimeSettingRejectsOutOfRangeWithoutCountingSuccess) {
+    const auto before = server::core::runtime_metrics::snapshot();
+
+    chat_service_->admin_apply_runtime_setting("recent_history_limit", "12");
+    ProcessJobs();
+    FlushSessionIO();
+
+    chat_service_->admin_apply_runtime_setting("room_recent_maxlen", "8");
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto after = server::core::runtime_metrics::snapshot();
+    EXPECT_EQ(after.runtime_setting_reload_attempt_total, before.runtime_setting_reload_attempt_total + 2);
+    EXPECT_EQ(after.runtime_setting_reload_success_total, before.runtime_setting_reload_success_total + 1);
+    EXPECT_EQ(after.runtime_setting_reload_failure_total, before.runtime_setting_reload_failure_total + 1);
+}
+
+TEST_F(ChatServiceTest, RuntimeSettingRejectsUnsupportedKeyAndInvalidValue) {
+    const auto before = server::core::runtime_metrics::snapshot();
+
+    chat_service_->admin_apply_runtime_setting("unknown_runtime_key", "11");
+    ProcessJobs();
+    FlushSessionIO();
+
+    chat_service_->admin_apply_runtime_setting("chat_spam_threshold", "NaN");
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto after = server::core::runtime_metrics::snapshot();
+    EXPECT_EQ(after.runtime_setting_reload_attempt_total, before.runtime_setting_reload_attempt_total + 2);
+    EXPECT_EQ(after.runtime_setting_reload_success_total, before.runtime_setting_reload_success_total);
+    EXPECT_EQ(after.runtime_setting_reload_failure_total, before.runtime_setting_reload_failure_total + 2);
 }
 
 // 세션 종료 테스트

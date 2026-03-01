@@ -9,6 +9,36 @@
 
 namespace server::core::runtime_metrics {
 
+/** @brief dispatch processing_place 계열 메트릭 배열 길이입니다. */
+inline constexpr std::size_t kDispatchProcessingPlaceCount = 3;
+/** @brief RUDP fallback reason 라벨 개수입니다. */
+inline constexpr std::size_t kRudpFallbackReasonCount = 6;
+
+/** @brief RUDP RTT 히스토그램 버킷 상한(ms)입니다. */
+inline constexpr std::array<std::uint64_t, 11> kRudpRttBucketUpperBoundsMs = {
+    1,
+    2,
+    5,
+    10,
+    20,
+    50,
+    100,
+    200,
+    500,
+    1000,
+    2000,
+};
+
+/** @brief RUDP fallback 원인 분류입니다. */
+enum class RudpFallbackReason : std::uint8_t {
+    kHandshakeTimeout = 0,
+    kIdleTimeout,
+    kProtocolError,
+    kInflightLimit,
+    kDisabled,
+    kOther,
+};
+
 /**
  * @brief 디스패치 지연시간 히스토그램 버킷 상한(ns) 목록입니다.
  *
@@ -61,6 +91,12 @@ struct Snapshot {
     std::uint64_t dispatch_latency_last_ns{0};
     std::uint64_t dispatch_latency_max_ns{0};
     std::array<std::uint64_t, kDispatchLatencyBucketUpperBoundsNs.size()> dispatch_latency_bucket_counts{};
+    std::array<std::uint64_t, kDispatchProcessingPlaceCount> dispatch_processing_place_calls_total{};
+    std::array<std::uint64_t, kDispatchProcessingPlaceCount> dispatch_processing_place_reject_total{};
+    std::array<std::uint64_t, kDispatchProcessingPlaceCount> dispatch_processing_place_exception_total{};
+    std::uint64_t exception_recoverable_total{0};
+    std::uint64_t exception_fatal_total{0};
+    std::uint64_t exception_ignored_total{0};
     std::uint64_t job_queue_depth{0};
     std::uint64_t job_queue_depth_peak{0};
     std::uint64_t job_queue_capacity{0};
@@ -80,6 +116,35 @@ struct Snapshot {
     std::uint64_t memory_pool_capacity{0};
     std::uint64_t memory_pool_in_use{0};
     std::uint64_t memory_pool_in_use_peak{0};
+    std::uint64_t log_async_queue_depth{0};
+    std::uint64_t log_async_queue_capacity{0};
+    std::uint64_t log_async_queue_drop_total{0};
+    std::uint64_t log_async_flush_total{0};
+    std::uint64_t log_async_flush_latency_sum_ns{0};
+    std::uint64_t log_async_flush_latency_max_ns{0};
+    std::uint64_t log_masked_fields_total{0};
+    std::uint64_t http_active_connections{0};
+    std::uint64_t http_connection_limit_reject_total{0};
+    std::uint64_t http_auth_reject_total{0};
+    std::uint64_t http_header_timeout_total{0};
+    std::uint64_t http_body_timeout_total{0};
+    std::uint64_t http_header_oversize_total{0};
+    std::uint64_t http_body_oversize_total{0};
+    std::uint64_t http_bad_request_total{0};
+    std::uint64_t runtime_setting_reload_attempt_total{0};
+    std::uint64_t runtime_setting_reload_success_total{0};
+    std::uint64_t runtime_setting_reload_failure_total{0};
+    std::uint64_t runtime_setting_reload_latency_sum_ns{0};
+    std::uint64_t runtime_setting_reload_latency_max_ns{0};
+    std::uint64_t rudp_handshake_ok_total{0};
+    std::uint64_t rudp_handshake_fail_total{0};
+    std::uint64_t rudp_retransmit_total{0};
+    std::uint64_t rudp_inflight_packets{0};
+    std::uint64_t rudp_rtt_ms_sum{0};
+    std::uint64_t rudp_rtt_ms_count{0};
+    std::uint64_t rudp_rtt_ms_max{0};
+    std::array<std::uint64_t, kRudpRttBucketUpperBoundsMs.size()> rudp_rtt_ms_bucket_counts{};
+    std::array<std::uint64_t, kRudpFallbackReasonCount> rudp_fallback_total{};
     std::vector<std::pair<std::uint16_t, std::uint64_t>> opcode_counts;
 };
 
@@ -103,6 +168,19 @@ void record_dispatch_attempt(bool handler_found, std::chrono::nanoseconds elapse
 
 /** @brief 디스패치 중 예외 발생 건수를 기록합니다. */
 void record_dispatch_exception();
+
+/** @brief processing_place별 디스패치 시도 건수를 기록합니다. */
+void record_dispatch_processing_place_call(std::size_t place_index);
+/** @brief processing_place별 디스패치 거절 건수를 기록합니다. */
+void record_dispatch_processing_place_reject(std::size_t place_index);
+/** @brief processing_place별 디스패치 예외 건수를 기록합니다. */
+void record_dispatch_processing_place_exception(std::size_t place_index);
+/** @brief 복구 가능한 경계 예외를 기록합니다. */
+void record_exception_recoverable();
+/** @brief 치명 경계 예외를 기록합니다. */
+void record_exception_fatal();
+/** @brief 무시 가능한 경계 예외를 기록합니다. */
+void record_exception_ignored();
 /** @brief 읽기 타임아웃 종료 건수를 기록합니다. */
 void record_session_timeout();
 /** @brief 쓰기 타임아웃 종료 건수를 기록합니다. */
@@ -176,6 +254,54 @@ void register_memory_pool_capacity(std::size_t capacity);
 void record_memory_pool_acquire();
 /** @brief 메모리 풀 사용량 감소를 기록합니다. */
 void record_memory_pool_release();
+
+/** @brief 비동기 로그 큐 현재 깊이를 기록합니다. */
+void record_log_async_queue_depth(std::size_t depth);
+/** @brief 비동기 로그 큐 용량을 등록합니다. */
+void register_log_async_queue_capacity(std::size_t capacity);
+/** @brief 비동기 로그 큐 드롭 건수를 기록합니다. */
+void record_log_async_queue_drop();
+/** @brief 비동기 로그 flush 지연을 기록합니다. */
+void record_log_async_flush_latency(std::chrono::nanoseconds elapsed);
+/** @brief 로그 마스킹 필드 증가분을 기록합니다. */
+void record_log_masked_fields(std::uint64_t count = 1);
+
+/** @brief HTTP active connection 현재값을 기록합니다. */
+void set_http_active_connections(std::size_t active);
+/** @brief HTTP conn-limit 거절 건수를 기록합니다. */
+void record_http_connection_limit_reject();
+/** @brief HTTP auth 거절 건수를 기록합니다. */
+void record_http_auth_reject();
+/** @brief HTTP header read timeout 건수를 기록합니다. */
+void record_http_header_timeout();
+/** @brief HTTP body read timeout 건수를 기록합니다. */
+void record_http_body_timeout();
+/** @brief HTTP header oversize 거절 건수를 기록합니다. */
+void record_http_header_oversize();
+/** @brief HTTP body oversize 거절 건수를 기록합니다. */
+void record_http_body_oversize();
+/** @brief HTTP bad request 거절 건수를 기록합니다. */
+void record_http_bad_request();
+
+/** @brief 런타임 설정 리로드 시도 건수를 기록합니다. */
+void record_runtime_setting_reload_attempt();
+/** @brief 런타임 설정 리로드 성공 건수를 기록합니다. */
+void record_runtime_setting_reload_success();
+/** @brief 런타임 설정 리로드 실패 건수를 기록합니다. */
+void record_runtime_setting_reload_failure();
+/** @brief 런타임 설정 리로드 지연을 기록합니다. */
+void record_runtime_setting_reload_latency(std::chrono::nanoseconds elapsed);
+
+/** @brief RUDP handshake 결과를 기록합니다. */
+void record_rudp_handshake_result(bool ok);
+/** @brief RUDP 재전송 건수를 누적합니다. */
+void record_rudp_retransmit(std::uint64_t count = 1);
+/** @brief 현재 RUDP inflight 패킷 수를 기록합니다. */
+void set_rudp_inflight_packets(std::size_t packets);
+/** @brief RUDP RTT 샘플(ms)을 기록합니다. */
+void record_rudp_rtt_ms(std::uint32_t rtt_ms);
+/** @brief RUDP fallback 원인을 기록합니다. */
+void record_rudp_fallback(RudpFallbackReason reason);
 
 /**
  * @brief 현재 런타임 카운터 스냅샷을 반환합니다.

@@ -4,6 +4,8 @@ Prometheus + Grafana configuration (used by the `observability` compose profile)
 
 ## Prometheus
 - Config: `docker/observability/prometheus/prometheus.yml`
+- Alerts: `docker/observability/prometheus/alerts.yml`
+- Alert rule tests: `docker/observability/prometheus/alerts.tests.yml`
 - Jobs: `chat_server`, `gateway`, `write_behind`, `admin_app`, `haproxy`, `redis`, `postgres`
 
 ## Grafana
@@ -22,6 +24,7 @@ Prometheus + Grafana configuration (used by the `observability` compose profile)
 ## Quick Checks
 ```powershell
 pwsh scripts/check_observability.ps1
+pwsh scripts/check_prometheus_rules.ps1
 ```
 
 ## Workflow: Add a Metric

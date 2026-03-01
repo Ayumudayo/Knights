@@ -122,6 +122,13 @@ services:
       CHAT_HOOK_PLUGINS_DIR: "/app/plugins"
       CHAT_HOOK_CACHE_DIR: "/tmp/chat_hook_cache"
       CHAT_HOOK_RELOAD_INTERVAL_MS: "500"
+      ADMIN_COMMAND_SIGNING_SECRET: "${ADMIN_COMMAND_SIGNING_SECRET:-dev-admin-command-secret}"
+      ADMIN_COMMAND_TTL_MS: "${ADMIN_COMMAND_TTL_MS:-60000}"
+      ADMIN_COMMAND_FUTURE_SKEW_MS: "${ADMIN_COMMAND_FUTURE_SKEW_MS:-5000}"
+      SERVER_DRAIN_TIMEOUT_MS: "${SERVER_DRAIN_TIMEOUT_MS:-15000}"
+      SERVER_DRAIN_POLL_MS: "${SERVER_DRAIN_POLL_MS:-100}"
+      KNIGHTS_TRACING_ENABLED: "${KNIGHTS_TRACING_ENABLED:-0}"
+      KNIGHTS_TRACING_SAMPLE_PERCENT: "${KNIGHTS_TRACING_SAMPLE_PERCENT:-100}"
     depends_on:
       redis:
         condition: service_healthy
@@ -158,6 +165,13 @@ services:
       CHAT_HOOK_PLUGINS_DIR: "/app/plugins"
       CHAT_HOOK_CACHE_DIR: "/tmp/chat_hook_cache"
       CHAT_HOOK_RELOAD_INTERVAL_MS: "500"
+      ADMIN_COMMAND_SIGNING_SECRET: "${ADMIN_COMMAND_SIGNING_SECRET:-dev-admin-command-secret}"
+      ADMIN_COMMAND_TTL_MS: "${ADMIN_COMMAND_TTL_MS:-60000}"
+      ADMIN_COMMAND_FUTURE_SKEW_MS: "${ADMIN_COMMAND_FUTURE_SKEW_MS:-5000}"
+      SERVER_DRAIN_TIMEOUT_MS: "${SERVER_DRAIN_TIMEOUT_MS:-15000}"
+      SERVER_DRAIN_POLL_MS: "${SERVER_DRAIN_POLL_MS:-100}"
+      KNIGHTS_TRACING_ENABLED: "${KNIGHTS_TRACING_ENABLED:-0}"
+      KNIGHTS_TRACING_SAMPLE_PERCENT: "${KNIGHTS_TRACING_SAMPLE_PERCENT:-100}"
     depends_on:
       redis:
         condition: service_healthy
@@ -181,6 +195,8 @@ services:
       WB_GROUP: "wb_group"
       WB_CONSUMER: "worker-1"
       METRICS_PORT: "9090"
+      KNIGHTS_TRACING_ENABLED: "${KNIGHTS_TRACING_ENABLED:-0}"
+      KNIGHTS_TRACING_SAMPLE_PERCENT: "${KNIGHTS_TRACING_SAMPLE_PERCENT:-100}"
     depends_on:
       redis:
         condition: service_healthy
@@ -207,6 +223,7 @@ services:
       ADMIN_POLL_INTERVAL_MS: "1000"
       GRAFANA_BASE_URL: "http://127.0.0.1:${GRAFANA_HOST_PORT:-33000}"
       PROMETHEUS_BASE_URL: "http://127.0.0.1:${PROMETHEUS_HOST_PORT:-39090}"
+      ADMIN_COMMAND_SIGNING_SECRET: "${ADMIN_COMMAND_SIGNING_SECRET:-dev-admin-command-secret}"
     depends_on:
       redis:
         condition: service_healthy

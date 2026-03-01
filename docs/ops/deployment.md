@@ -89,6 +89,17 @@ helm rollback gateway <REV>
 ```
 롤백 후에도 `/metrics` 와 runbook 체크리스트를 반드시 수행한다.
 
+### 3.5 TLS 1.3/mTLS 적용 체크리스트
+1. Edge LB(HAProxy/NLB)에서 기본 listener를 TLS 1.3으로 고정한다.
+2. 레거시 예외 트래픽은 분리 포트(TLS 1.2 only)로 격리하고, SNI allowlist를 적용한다.
+3. LB->gateway/backend 내부 hop은 mTLS(`verify required`)를 강제한다.
+4. 인증서는 자동 갱신 파이프라인(예: cert-manager/ACME 또는 사내 PKI)으로 관리하고, 30/14/7일 임계치 경보를 운영한다.
+
+plaintext 링크 금지 검증(배포 점검):
+- LB 설정에서 backend server 항목이 `ssl verify required`로 선언되었는지 확인
+- 런타임 캡처(`tcpdump`/service mesh telemetry)에서 내부 포트 트래픽이 TLS handshake(`ClientHello`)를 포함하는지 확인
+- Prometheus에서 인증서 만료 경보 규칙(`TLSCertificateExpiringIn30Days/14Days/7Days`)이 로드되어 있는지 확인
+
 ## 4. 배포 전략 요약
 | 상황 | 전략 |
 | --- | --- |

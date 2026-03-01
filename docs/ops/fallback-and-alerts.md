@@ -21,6 +21,12 @@
 | `sum(rate(gateway_udp_loss_estimated_total[5m])) / clamp_min(sum(rate(gateway_udp_forward_total[5m])), 1)` | > 0.05 (10m) | "UDP estimated loss high" |
 | `sum(rate(gateway_udp_replay_drop_total[5m]))` | > 2/s (10m) | "UDP replay/reorder drops high" |
 | `max_over_time(gateway_udp_jitter_ms_last[10m])` | > 150ms (10m) | "UDP jitter high" |
+| `sum(rate(core_runtime_rudp_handshake_total{result="fail"}[5m])) / clamp_min(sum(rate(core_runtime_rudp_handshake_total[5m])), 1)` | > 0.20 + handshake > 0.1/s (10m) | "RUDP handshake failure ratio elevated" |
+| `sum(rate(core_runtime_rudp_retransmit_total[5m])) / clamp_min(sum(rate(gateway_rudp_inner_forward_total[5m])), 1)` | > 0.15 + forward > 1/s (10m) | "RUDP retransmit ratio high" |
+| `sum(rate(gateway_rudp_fallback_total[5m]))` | > 0.1/s (10m) | "RUDP fallback spike" |
+| `(probe_ssl_earliest_cert_expiry - time()) <= 30d and > 14d` | 4h 지속 | "TLS cert expires in <= 30 days" |
+| `(probe_ssl_earliest_cert_expiry - time()) <= 14d and > 7d` | 1h 지속 | "TLS cert expires in <= 14 days" |
+| `(probe_ssl_earliest_cert_expiry - time()) <= 7d` | 5m 지속 | "TLS cert expires in <= 7 days" |
 
 AlertManager → Slack → On-call 순으로 전달하고, runbook 절차에 따라 대응한다.
 
@@ -39,6 +45,12 @@ AlertManager → Slack → On-call 순으로 전달하고, runbook 절차에 따
 1. HAProxy 로그/상태 페이지에서 backend 다운 여부 확인
 2. Gateway pods 에서 `kubectl logs` 로 오류 확인
 3. HAProxy 백엔드/헬스체크 설정이 최신인지 확인
+
+### 3.4 RUDP canary 이상 대응
+1. `RudpHandshakeFailureSpike` 발생 시 `GATEWAY_RUDP_CANARY_PERCENT=0`으로 즉시 축소
+2. `RudpRetransmitRatioHigh`가 지속되면 네트워크 경로와 `GATEWAY_RUDP_OPCODE_ALLOWLIST`를 점검/축소
+3. `RudpFallbackSpike` 발생 시 `GATEWAY_RUDP_ENABLE=0`으로 신규 세션 RUDP를 즉시 차단
+4. `python tests/python/verify_pong.py`로 TCP smoke를 수행하고 핵심 KPI 복귀를 확인
 
 ## 4. 로그 규칙
 - 모든 fallback/알림 관련 조치는 `metric=*` 형식과 `action=fallback-{type}` 태그를 포함한 INFO 로그로 남긴다.

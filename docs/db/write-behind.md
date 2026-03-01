@@ -27,7 +27,7 @@
 - 타입 예시:
   - `session_login`, `session_logout`, `presence_heartbeat`, `room_join`, `room_leave`, `message_ack`, `typing_start/stop`
 - 공통 필드:
-  - `event_id`(Redis XADD ID), `type`, `ts_ms`(epoch ms), `user_id?`, `session_id`, `room_id?`, `gateway_id?`
+  - `event_id`(Redis XADD ID), `type`, `ts_ms`(epoch ms), `user_id?`, `session_id`, `room_id?`, `gateway_id?`, `trace_id?`, `correlation_id?`
   - `payload`는 원본 Stream field들을 그대로 포함한 `jsonb`로 적재한다(값은 문자열).
   - 세션 식별자(session_id)는 서버 측에서 세션별 UUID v4를 생성하여 사용한다(내부 숫자 세션 식별자와 분리됨)
 - 멱등성 키: `event_id`(Redis XADD ID)를 RDB에 unique로 저장하고 `ON CONFLICT DO NOTHING`으로 중복 삽입을 무해화한다.
@@ -50,6 +50,11 @@
 - 서버 재시작: 미커밋 이벤트는 Streams에 남아 재처리 대상이 됨
 - Redis 장애: 폴백으로 동기 기록(write-through) 전환 또는 기능 축소(설정 플래그)
 
+### 종료/Drain 정책
+- `server_app`: shutdown 시 readiness를 내리고 acceptor를 먼저 중지해 신규 연결을 차단한다. 이후 기존 연결을 drain 하며 `SERVER_DRAIN_TIMEOUT_MS` 내에 정리되지 않으면 남은 연결은 강제 종료 경로로 전환한다.
+- `wb_worker`: shutdown 시 신규 `XREADGROUP` 수집을 중단하고, 버퍼에 이미 적재된 배치는 마지막 flush로 소진한다. DB 비가용 구간에서는 `WB_DB_RECONNECT_BASE_MS`~`WB_DB_RECONNECT_MAX_MS` 지수 백오프를 유지한다.
+- 운영 검증: server는 `chat_shutdown_drain_*`, worker는 `wb_pending`, `wb_flush_*`, `wb_db_reconnect_backoff_ms_last`를 함께 확인한다.
+
 ## 데이터 모델(예)
 - `session_events`(append-only) — 이벤트소싱/감사 목적
   - `id bigserial`, `event_id text unique`, `type text`, `ts timestamptz`, `user_id uuid`, `session_id uuid`, `room_id uuid`, `payload jsonb`
@@ -68,6 +73,7 @@
 - wb_worker
   - `WB_GROUP`, `WB_CONSUMER`
   - `WB_BATCH_MAX_EVENTS`, `WB_BATCH_MAX_BYTES`, `WB_BATCH_DELAY_MS`
+  - `WB_RETRY_MAX`, `WB_RETRY_BACKOFF_MS`(flush 재시도 예산/백오프)
   - `WB_DLQ_STREAM=session_events_dlq`(옵션)
   - `WB_DLQ_ON_ERROR=1`(에러 시 DLQ로 포워드; 0이면 비활성)
   - `WB_ACK_ON_ERROR=1`(에러 시에도 ACK; 0이면 PEL에 남겨 재시도 유도)
@@ -76,6 +82,7 @@
 - 공통
   - `DB_URI`, `REDIS_URI`
   - `METRICS_PORT`(설정 시 `/metrics` 노출; server_app / wb_worker 공용)
+  - `KNIGHTS_TRACING_ENABLED`, `KNIGHTS_TRACING_SAMPLE_PERCENT`(설정 시 stream->DB 경로 상관키 추적)
 
 ## 스트림(Streams) 운영 키/그룹/필드 정리
 - 생산 키: `session_events`(=`REDIS_STREAM_KEY`)
@@ -83,7 +90,7 @@
 - 그룹: `wb_group`(예시, 설정 키 `WB_GROUP`로 주입)
 - 컨슈머: 워커 인스턴스 식별자(예: `host-1:pid`), 설정 키 `WB_CONSUMER`
 - 필드 집합(권장 최소):
-  - `type`(예: `session_login` 등), `ts_ms`, `user_id`, `session_id`, `room_id?`, `gateway_id?`
+  - `type`(예: `session_login` 등), `ts_ms`, `user_id`, `session_id`, `room_id?`, `gateway_id?`, `trace_id?`, `correlation_id?`
   - 멱등 보강 시: `idempotency_key` 포함 고려
 - 기타 운영 키:
   - `WRITE_BEHIND_ENABLED`: 기능 토글
@@ -122,6 +129,7 @@
 - 배치 파라미터 적용: `WB_BATCH_MAX_EVENTS`, `WB_BATCH_MAX_BYTES`, `WB_BATCH_DELAY_MS`
 - 멱등성: `event_id`(Streams ID) 고유 제약으로 중복 삽입 무해
 - 배치 커밋: 1 배치 = 1 트랜잭션 + 엔트리별 savepoint(subtransaction)로 부분 실패 격리
+- flush 재시도 예산: `WB_RETRY_MAX`/`WB_RETRY_BACKOFF_MS` 범위 내에서 즉시 재시도 후, 예산 소진 시 PEL reclaim 경로로 이관
 - ACK: commit 성공 후 ACK(At-least-once). 처리 실패는 DLQ 포워드(옵션) 후 ACK 정책으로 정리한다.
 - PEL reclaim: `WB_RECLAIM_*`가 활성화되면 주기적으로 `XAUTOCLAIM`으로 pending을 회수한다.
 - 메트릭: `METRICS_PORT`를 설정하면 `/metrics`에 다음을 노출한다.
@@ -129,6 +137,7 @@
   - reclaim: `wb_reclaim_*`
   - ack: `wb_ack_*`
   - db/backoff/drop: `wb_db_unavailable_total`, `wb_db_reconnect_backoff_ms_last`, `wb_error_drop_total`
+ - tracing: stream field의 `trace_id`/`correlation_id`가 존재하면 wb_worker DB insert span 로그에 동일 상관키를 연결한다.
 
 ## 모니터링
 - 레이턴시 p50/p95, 배치 크기, 커밋율, 실패율, 재시도/펜딩 길이, DLQ 길이

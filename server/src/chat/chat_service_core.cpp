@@ -3,6 +3,8 @@
 #include "server/config/runtime_settings.hpp"
 #include "server/core/protocol/packet.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
+#include "server/core/runtime_metrics.hpp"
+#include "server/core/trace/context.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/service_registry.hpp"
 #include "server/core/concurrent/task_scheduler.hpp"
@@ -447,6 +449,14 @@ void ChatService::emit_write_behind_event(const std::string& type,
     if (!gateway_id_.empty()) {
         fields.emplace_back("gateway_id", gateway_id_);
     }
+
+    if (const auto trace_id = server::core::trace::current_trace_id(); !trace_id.empty()) {
+        fields.emplace_back("trace_id", trace_id);
+    }
+    if (const auto correlation_id = server::core::trace::current_correlation_id(); !correlation_id.empty()) {
+        fields.emplace_back("correlation_id", correlation_id);
+    }
+
     for (auto& kv : extra_fields) {
         if (!kv.first.empty() && !kv.second.empty()) {
             fields.emplace_back(std::move(kv));
@@ -455,7 +465,17 @@ void ChatService::emit_write_behind_event(const std::string& type,
     // XADD 명령을 사용하여 스트림에 추가합니다.
     // PUBLISH(Pub/Sub)와 달리 스트림은 데이터가 영구적으로 저장되며(설정에 따라),
     // 컨슈머 그룹을 통해 안정적인 처리가 가능합니다. (At-least-once Delivery)
-    if (!redis_->xadd(write_behind_.stream_key, fields, nullptr, write_behind_.maxlen, write_behind_.approximate)) {
+    if (server::core::trace::current_sampled()) {
+        corelog::debug("span_start component=server span=redis_xadd");
+    }
+
+    const bool xadd_ok = redis_->xadd(write_behind_.stream_key, fields, nullptr, write_behind_.maxlen, write_behind_.approximate);
+
+    if (server::core::trace::current_sampled()) {
+        corelog::debug(std::string("span_end component=server span=redis_xadd success=") + (xadd_ok ? "true" : "false"));
+    }
+
+    if (!xadd_ok) {
         corelog::warn(std::string("write-behind XADD failed: type=") + type);
     }
 }
@@ -1279,7 +1299,10 @@ void ChatService::admin_apply_runtime_setting(const std::string& key, const std:
         return;
     }
 
-    if (!job_queue_.TryPush([this, key, value]() {
+    const auto request_started_at = std::chrono::steady_clock::now();
+    server::core::runtime_metrics::record_runtime_setting_reload_attempt();
+
+    if (!job_queue_.TryPush([this, key, value, request_started_at]() {
         auto trim_ascii_local = [](std::string_view input) {
             std::size_t begin = 0;
             while (begin < input.size() && std::isspace(static_cast<unsigned char>(input[begin])) != 0) {
@@ -1312,21 +1335,39 @@ void ChatService::admin_apply_runtime_setting(const std::string& key, const std:
                 }
                 return static_cast<std::uint32_t>(parsed);
             } catch (...) {
+                server::core::runtime_metrics::record_exception_ignored();
                 return std::nullopt;
             }
+        };
+
+        const auto finalize_failure = [&](const std::string& reason, std::string_view key_name) {
+            server::core::runtime_metrics::record_runtime_setting_reload_failure();
+            server::core::runtime_metrics::record_runtime_setting_reload_latency(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - request_started_at));
+            corelog::warn("admin setting rejected: key=" + std::string(key_name) + " reason=" + reason);
+        };
+
+        const auto finalize_success = [&](std::string_view key_name, std::uint32_t applied_value) {
+            server::core::runtime_metrics::record_runtime_setting_reload_success();
+            server::core::runtime_metrics::record_runtime_setting_reload_latency(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now() - request_started_at));
+            corelog::info(
+                "admin setting applied: key=" + std::string(key_name) + " value=" + std::to_string(applied_value));
         };
 
         const std::string normalized_key = to_lower_ascii_local(trim_ascii_local(key));
         const std::string normalized_value = trim_ascii_local(value);
         const auto parsed = parse_u32(normalized_value);
         if (!parsed) {
-            corelog::warn("admin setting rejected: key=" + normalized_key + " reason=invalid_value");
+            finalize_failure("invalid_value", normalized_key);
             return;
         }
 
         const auto* setting_rule = server::config::find_runtime_setting_rule(normalized_key);
         if (setting_rule == nullptr) {
-            corelog::warn("admin setting rejected: key=" + normalized_key + " reason=unsupported_key");
+            finalize_failure("unsupported_key", normalized_key);
             return;
         }
 
@@ -1336,7 +1377,7 @@ void ChatService::admin_apply_runtime_setting(const std::string& key, const std:
         }
 
         if (*parsed < min_allowed || *parsed > setting_rule->max_value) {
-            corelog::warn("admin setting rejected: key=" + std::string(setting_rule->key_name) + " reason=out_of_range");
+            finalize_failure("out_of_range", setting_rule->key_name);
             return;
         }
 
@@ -1353,11 +1394,29 @@ void ChatService::admin_apply_runtime_setting(const std::string& key, const std:
         case server::config::RuntimeSettingKey::kRoomRecentMaxlen:
             history_.max_list_len = static_cast<std::size_t>(*parsed);
             break;
+        case server::config::RuntimeSettingKey::kChatSpamThreshold:
+            spam_message_threshold_ = static_cast<std::size_t>(*parsed);
+            break;
+        case server::config::RuntimeSettingKey::kChatSpamWindowSec:
+            spam_window_sec_ = *parsed;
+            break;
+        case server::config::RuntimeSettingKey::kChatSpamMuteSec:
+            spam_mute_sec_ = *parsed;
+            break;
+        case server::config::RuntimeSettingKey::kChatSpamBanSec:
+            spam_ban_sec_ = *parsed;
+            break;
+        case server::config::RuntimeSettingKey::kChatSpamBanViolations:
+            spam_ban_violation_threshold_ = *parsed;
+            break;
         }
 
-        corelog::info("admin setting applied: key=" + std::string(setting_rule->key_name) +
-                      " value=" + std::to_string(*parsed));
+        finalize_success(setting_rule->key_name, *parsed);
     })) {
+        server::core::runtime_metrics::record_runtime_setting_reload_failure();
+        server::core::runtime_metrics::record_runtime_setting_reload_latency(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now() - request_started_at));
         corelog::warn("admin setting dropped: job queue full");
     }
 }

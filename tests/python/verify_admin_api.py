@@ -7,8 +7,8 @@ import urllib.request
 BASE_URL = "http://127.0.0.1:39200"
 
 
-def http_request(path: str, method: str = "GET"):
-    req = urllib.request.Request(f"{BASE_URL}{path}", method=method)
+def http_request(path: str, method: str = "GET", headers=None, data: bytes | None = None):
+    req = urllib.request.Request(f"{BASE_URL}{path}", method=method, headers=headers or {}, data=data)
     with urllib.request.urlopen(req, timeout=5) as response:
         return response.status, response.getheader("Content-Type", ""), response.read()
 
@@ -51,6 +51,26 @@ def request_json(path: str, method: str = "GET"):
     if body:
         payload = json.loads(body.decode("utf-8", errors="replace"))
     return status, content_type, payload
+
+
+def request_json_body(path: str, method: str, body_obj, content_type: str = "application/json"):
+    payload_bytes = body_obj if isinstance(body_obj, (bytes, bytearray)) else json.dumps(body_obj).encode("utf-8")
+    payload_bytes = bytes(payload_bytes)
+    headers = {
+        "Content-Type": content_type,
+        "Content-Length": str(len(payload_bytes)),
+    }
+    try:
+        status, content_type_response, body = http_request(path, method=method, headers=headers, data=payload_bytes)
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        content_type_response = exc.headers.get("Content-Type", "")
+        body = exc.read()
+
+    payload = None
+    if body:
+        payload = json.loads(body.decode("utf-8", errors="replace"))
+    return status, content_type_response, payload
 
 
 def wait_for_instances(timeout_sec: float = 30.0):
@@ -169,6 +189,50 @@ def main() -> int:
                 raise RuntimeError(f"{path} expected 200, got {status}")
             if (payload or {}).get("data", {}).get("accepted") is not True:
                 raise RuntimeError(f"{path} missing accepted=true")
+
+        status, _, payload = request_json_body(
+            "/api/v1/users/disconnect",
+            method="POST",
+            body_obj={
+                "client_ids": ["admin_api_probe", "admin_api_probe_2"],
+                "reason": "api-json-body-check",
+            })
+        if status != 200:
+            raise RuntimeError(f"POST /api/v1/users/disconnect(json) expected 200, got {status}")
+        if (payload or {}).get("data", {}).get("submitted_count") != 2:
+            raise RuntimeError("disconnect json body submitted_count mismatch")
+
+        status, _, payload = request_json_body(
+            "/api/v1/settings",
+            method="PATCH",
+            body_obj={
+                "key": "chat_spam_threshold",
+                "value": 7,
+            })
+        if status != 200:
+            raise RuntimeError(f"PATCH /api/v1/settings(json) expected 200, got {status}")
+        if (payload or {}).get("data", {}).get("key") != "chat_spam_threshold":
+            raise RuntimeError("settings json body key mismatch")
+
+        status, _, payload = request_json_body(
+            "/api/v1/settings",
+            method="PATCH",
+            body_obj=b"{",
+            content_type="application/json")
+        if status != 400:
+            raise RuntimeError(f"PATCH /api/v1/settings malformed json expected 400, got {status}")
+        if (payload or {}).get("error", {}).get("code") != "BAD_REQUEST":
+            raise RuntimeError("malformed json expected BAD_REQUEST")
+
+        status, _, payload = request_json_body(
+            "/api/v1/settings",
+            method="PATCH",
+            body_obj="key=chat_spam_threshold&value=7",
+            content_type="text/plain")
+        if status != 415:
+            raise RuntimeError(f"PATCH /api/v1/settings unsupported content type expected 415, got {status}")
+        if (payload or {}).get("error", {}).get("code") != "UNSUPPORTED_CONTENT_TYPE":
+            raise RuntimeError("unsupported content type expected UNSUPPORTED_CONTENT_TYPE")
 
         users_payload = load_json("/api/v1/users?limit=10")
         users_data = users_payload.get("data", {})

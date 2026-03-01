@@ -67,5 +67,6 @@ verify_*.py
 docs/
 Sapphire/
 external/
+external-refs/
 *.md
 !README.md

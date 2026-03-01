@@ -17,6 +17,14 @@ tools/wb_worker/
 6. flush는 1 배치 = 1 트랜잭션이며, 엔트리 단위 실패는 savepoint(subtransaction)로 격리한다.
 7. commit 성공 후 Redis에 ACK 한다. (At-least-once; 중복은 `ON CONFLICT DO NOTHING`으로 무해화)
 8. 개별 엔트리 처리 실패 시 DLQ로 이동(옵션) 후 ACK 정책(`WB_ACK_ON_ERROR`)에 따라 PEL 적체를 방지한다.
+9. stream entry에 `trace_id`/`correlation_id`가 포함되면 DB insert span 로그에도 같은 상관키를 연결한다.
+
+## 종료(Drain) 정책
+
+- `wb_worker`는 SIGINT/SIGTERM 수신 시 `stop_requested`를 확인해 메인 루프를 빠져나간다.
+- 종료 시점에는 신규 `XREADGROUP` 수집을 중단하고, 이미 버퍼에 적재된 이벤트는 마지막 flush 주기(`WB_BATCH_DELAY_MS`) 내에서 먼저 소진한다.
+- DB 장애가 지속되면 `WB_DB_RECONNECT_BASE_MS`~`WB_DB_RECONNECT_MAX_MS` 지수 백오프 정책을 유지하며 readiness는 `false` 상태를 유지한다.
+- 운영에서 drain 지연/적체는 `wb_pending`, `wb_flush_total`, `wb_db_reconnect_backoff_ms_last`로 확인한다.
 
 ## 환경 변수
 
@@ -64,6 +72,14 @@ tools/wb_worker/
 | `WB_DB_RECONNECT_BASE_MS` | DB 재연결 지수 백오프 시작값(ms) | `500` |
 | `WB_DB_RECONNECT_MAX_MS` | DB 재연결 지수 백오프 상한(ms) | `30000` |
 
+### Flush 재시도 예산
+| 이름 | 설명 | 기본값 |
+| --- | --- | --- |
+| `WB_RETRY_MAX` | flush 트랜잭션 즉시 재시도 최대 횟수 | `5` |
+| `WB_RETRY_BACKOFF_MS` | flush 재시도 선형 백오프 시작값(ms) | `250` |
+| `KNIGHTS_TRACING_ENABLED` | stream->DB tracing context 활성화 | `0` |
+| `KNIGHTS_TRACING_SAMPLE_PERCENT` | tracing 샘플링 비율(0~100) | `100` |
+
 `WB_RECLAIM_MIN_IDLE_MS`가 너무 작으면 아직 처리 중인 메시지를 회수해서 중복 처리가 발생할 수 있다.
 
 ### 메트릭
@@ -75,6 +91,7 @@ tools/wb_worker/
 - backlog/reclaim: `wb_pending`, `wb_reclaim_*`
 - flush/ack: `wb_flush_*`, `wb_ack_*`
 - db/backoff/drop: `wb_db_unavailable_total`, `wb_db_reconnect_backoff_ms_last`, `wb_error_drop_total`
+- retry budget: `wb_retry_max`, `wb_retry_backoff_ms`, `wb_flush_retry_attempt_total`, `wb_flush_retry_exhausted_total`, `wb_flush_retry_delay_ms_last`
 
 `.env`는 개발 편의용 예시 파일이며, 애플리케이션이 자동으로 로드하지 않는다.
 로컬에서는 쉘/스크립트에서 `.env`를 로드한 뒤 실행하거나, OS 환경 변수로 직접 주입해야 한다.

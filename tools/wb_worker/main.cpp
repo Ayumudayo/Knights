@@ -15,8 +15,10 @@
 
 #include "server/storage/redis/client.hpp"
 #include "server/core/util/log.hpp"
+#include "server/core/trace/context.hpp"
 #include "server/core/app/app_host.hpp"
 #include "server/core/metrics/build_info.hpp"
+#include "server/core/metrics/metrics.hpp"
 #include <pqxx/pqxx>
 #include <nlohmann/json.hpp>
 
@@ -53,6 +55,8 @@ struct WorkerConfig {
 
     long long db_reconnect_base_ms = 500;
     long long db_reconnect_max_ms = 30000;
+    std::uint32_t retry_max = 5;
+    long long retry_backoff_ms = 250;
 
     static WorkerConfig Load() {
         WorkerConfig cfg;
@@ -80,6 +84,15 @@ struct WorkerConfig {
         }
         if (cfg.db_reconnect_max_ms < cfg.db_reconnect_base_ms) {
             cfg.db_reconnect_max_ms = cfg.db_reconnect_base_ms;
+        }
+
+        if (const char* v = std::getenv("WB_RETRY_MAX")) {
+            auto n = std::strtoul(v, nullptr, 10);
+            if (n <= 100) cfg.retry_max = static_cast<std::uint32_t>(n);
+        }
+        if (const char* v = std::getenv("WB_RETRY_BACKOFF_MS")) {
+            auto n = std::strtoul(v, nullptr, 10);
+            if (n >= 10 && n <= 10000) cfg.retry_backoff_ms = static_cast<long long>(n);
         }
 
         if (const char* v = std::getenv("WB_BATCH_MAX_EVENTS")) {
@@ -477,60 +490,84 @@ private:
         std::size_t fail = 0;
         std::size_t dlqed = 0;
 
-        std::vector<std::string> ack_ids;
-        ack_ids.reserve(buf.size());
-
         bool committed = false;
-        try {
-            if (!db_ || !db_->is_open() || !EnsureDbPrepared()) {
-                throw std::runtime_error("DB not ready");
+        for (std::uint32_t attempt = 0; attempt <= config_.retry_max && !committed; ++attempt) {
+            if (attempt > 0) {
+                wb_flush_retry_attempt_total_.fetch_add(1, std::memory_order_relaxed);
+
+                const auto delay_ms = std::min<std::uint64_t>(
+                    static_cast<std::uint64_t>(config_.retry_backoff_ms) * attempt,
+                    30000ull
+                );
+                wb_flush_retry_delay_ms_last_.store(delay_ms, std::memory_order_relaxed);
+                std::this_thread::sleep_for(std::chrono::milliseconds(delay_ms));
             }
 
-            pqxx::work tx(*db_);
+            std::vector<std::string> ack_ids;
+            ack_ids.reserve(buf.size());
+            std::size_t attempt_fail = 0;
+            std::size_t attempt_dlqed = 0;
 
-            for (const auto& e : buf) {
-                try {
-                    pqxx::subtransaction sub(tx, "wb_entry");
-                    ProcessEntry(sub, e);
-                    sub.commit();
-                    ack_ids.emplace_back(e.id);
-                } catch (const pqxx::broken_connection&) {
-                    throw;
-                } catch (const std::exception& ex) {
-                    ++fail;
-                    bool acked = false;
+            try {
+                if (!db_ || !db_->is_open() || !EnsureDbPrepared()) {
+                    throw std::runtime_error("DB not ready");
+                }
 
-                    // 영구적 오류는 DLQ로 이동한다.
-                    if (config_.dlq_on_error && !config_.dlq_stream.empty()) {
-                        if (SendToDlq(e, ex.what())) {
-                            (void)Ack(e.id);
-                            acked = true;
-                            ++dlqed;
+                pqxx::work tx(*db_);
+
+                for (const auto& e : buf) {
+                    try {
+                        pqxx::subtransaction sub(tx, "wb_entry");
+                        ProcessEntry(sub, e);
+                        sub.commit();
+                        ack_ids.emplace_back(e.id);
+                    } catch (const pqxx::broken_connection&) {
+                        throw;
+                    } catch (const std::exception& ex) {
+                        ++attempt_fail;
+                        bool acked = false;
+
+                        // 영구적 오류는 DLQ로 이동한다.
+                        if (config_.dlq_on_error && !config_.dlq_stream.empty()) {
+                            if (SendToDlq(e, ex.what())) {
+                                (void)Ack(e.id);
+                                acked = true;
+                                ++attempt_dlqed;
+                            }
                         }
-                    }
 
-                    if (!acked && config_.ack_on_error) {
-                        if (Ack(e.id)) {
-                            wb_error_drop_total_.fetch_add(1, std::memory_order_relaxed);
+                        if (!acked && config_.ack_on_error) {
+                            if (Ack(e.id)) {
+                                wb_error_drop_total_.fetch_add(1, std::memory_order_relaxed);
+                            }
                         }
                     }
                 }
+
+                tx.commit();
+                committed = true;
+
+                ok += ack_ids.size();
+                fail += attempt_fail;
+                dlqed += attempt_dlqed;
+
+                for (const auto& id : ack_ids) {
+                    (void)Ack(id);
+                }
+            } catch (const pqxx::broken_connection&) {
+                fail += attempt_fail;
+                dlqed += attempt_dlqed;
+                std::cerr << "DB connection broken during flush. retrying..." << std::endl;
+                db_.reset();
+                db_prepared_ = false;
+            } catch (const std::exception& ex) {
+                fail += attempt_fail;
+                dlqed += attempt_dlqed;
+                server::core::log::error(std::string("WB flush DB error: ") + ex.what());
             }
 
-            tx.commit();
-            committed = true;
-        } catch (const pqxx::broken_connection&) {
-            std::cerr << "DB connection broken during flush. Will retry later." << std::endl;
-            db_.reset();
-            db_prepared_ = false;
-        } catch (const std::exception& ex) {
-            server::core::log::error(std::string("WB flush DB error: ") + ex.what());
-        }
-
-        if (committed) {
-            ok = ack_ids.size();
-            for (const auto& id : ack_ids) {
-                (void)Ack(id);
+            if (!committed && attempt == config_.retry_max) {
+                wb_flush_retry_exhausted_total_.fetch_add(1, std::memory_order_relaxed);
             }
         }
 
@@ -572,6 +609,8 @@ private:
         std::optional<std::string> user_id;
         std::optional<std::string> session_id;
         std::optional<std::string> room_id;
+        std::string trace_id;
+        std::string correlation_id;
 
         // JSON Payload 생성 (nlohmann/json 사용)
         json j = json::object();
@@ -581,6 +620,8 @@ private:
             else if (f.first == "user_id") user_id = f.second;
             else if (f.first == "session_id") session_id = f.second;
             else if (f.first == "room_id") room_id = f.second;
+            else if (f.first == "trace_id") trace_id = f.second;
+            else if (f.first == "correlation_id") correlation_id = f.second;
 
             j[f.first] = f.second;
         }
@@ -599,10 +640,19 @@ private:
         long long ts_v = 0;
         try { ts_v = std::stoll(ts_ms); } catch (...) { ts_v = 0; }
 
+        server::core::trace::ScopedContext trace_scope(trace_id, correlation_id, !trace_id.empty());
+        if (trace_scope.active()) {
+            server::core::log::debug("span_start component=wb_worker span=db_insert");
+        }
+
         // DB Insert
         const std::string payload = j.dump();
         tx.exec_prepared("wb_insert_session_event",
                          e.id, type, ts_v, uid_v, sid_v, rid_v, payload);
+
+        if (trace_scope.active()) {
+            server::core::log::debug("span_end component=wb_worker span=db_insert success=true");
+        }
     }
 
     bool SendToDlq(const server::storage::redis::IRedisClient::StreamEntry& e, const char* error_msg) {
@@ -640,6 +690,9 @@ private:
     std::atomic<std::uint64_t> wb_db_unavailable_total_{0};
     std::atomic<std::uint64_t> wb_error_drop_total_{0};
     std::atomic<std::uint64_t> wb_db_reconnect_backoff_ms_last_{0};
+    std::atomic<std::uint64_t> wb_flush_retry_attempt_total_{0};
+    std::atomic<std::uint64_t> wb_flush_retry_exhausted_total_{0};
+    std::atomic<std::uint64_t> wb_flush_retry_delay_ms_last_{0};
 
     std::atomic<std::uint64_t> wb_ack_total_{0};
     std::atomic<std::uint64_t> wb_ack_fail_total_{0};
@@ -662,6 +715,8 @@ private:
 
         // Build metadata (git hash/describe + build time)
         server::core::metrics::append_build_info(stream);
+        server::core::metrics::append_runtime_core_metrics(stream);
+        server::core::metrics::append_prometheus_metrics(stream);
 
         stream << "# TYPE wb_batch_max_events gauge\n";
         stream << "wb_batch_max_events " << config_.batch_max_events << "\n";
@@ -674,6 +729,10 @@ private:
         stream << "wb_db_reconnect_base_ms " << config_.db_reconnect_base_ms << "\n";
         stream << "# TYPE wb_db_reconnect_max_ms gauge\n";
         stream << "wb_db_reconnect_max_ms " << config_.db_reconnect_max_ms << "\n";
+        stream << "# TYPE wb_retry_max gauge\n";
+        stream << "wb_retry_max " << config_.retry_max << "\n";
+        stream << "# TYPE wb_retry_backoff_ms gauge\n";
+        stream << "wb_retry_backoff_ms " << config_.retry_backoff_ms << "\n";
 
         stream << "# TYPE wb_reclaim_enabled gauge\n";
         stream << "wb_reclaim_enabled " << (config_.reclaim_enabled ? 1 : 0) << "\n";
@@ -701,6 +760,18 @@ private:
         stream << "# TYPE wb_db_reconnect_backoff_ms_last gauge\n";
         stream << "wb_db_reconnect_backoff_ms_last "
                << wb_db_reconnect_backoff_ms_last_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_flush_retry_delay_ms_last gauge\n";
+        stream << "wb_flush_retry_delay_ms_last "
+               << wb_flush_retry_delay_ms_last_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_flush_retry_attempt_total counter\n";
+        stream << "wb_flush_retry_attempt_total "
+               << wb_flush_retry_attempt_total_.load(std::memory_order_relaxed) << "\n";
+
+        stream << "# TYPE wb_flush_retry_exhausted_total counter\n";
+        stream << "wb_flush_retry_exhausted_total "
+               << wb_flush_retry_exhausted_total_.load(std::memory_order_relaxed) << "\n";
 
         stream << "# TYPE wb_error_drop_total counter\n";
         stream << "wb_error_drop_total " << wb_error_drop_total_.load(std::memory_order_relaxed) << "\n";
