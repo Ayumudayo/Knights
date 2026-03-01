@@ -108,6 +108,18 @@ Windows vcpkg cache restore step 소요(과거 step 기준, 6회):
    - 다시 multi-job로 나눌 경우, 반드시 산출물 전달(artifact) 전략 동반.
    - 산출물 공유 없는 분리는 금지.
 
+### Phase B 구현 상태 (2026-03-01)
+
+- vcpkg prewarm 워크플로우 추가: `.github/workflows/vcpkg-prewarm.yml`
+  - 트리거: `workflow_dispatch`, `schedule`
+  - 목적: Windows vcpkg cache key를 주기적으로 warm-up
+  - 특징: CI와 동일한 key 전략 + restore/save telemetry 출력
+
+- Windows sccache PoC 워크플로우 추가: `.github/workflows/windows-sccache-poc.yml`
+  - 트리거: `workflow_dispatch`
+  - 목적: Ninja + `CMAKE_*_COMPILER_LAUNCHER=sccache` 경로의 실효성 검증
+  - 특징: single/double build 비교, `sccache --show-stats` 수집
+
 ### Phase C (장기, 대체 패키지 전략)
 
 1. **vcpkg 대체 가능성 조사**
