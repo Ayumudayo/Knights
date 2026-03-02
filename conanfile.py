@@ -32,7 +32,6 @@ class KnightsConan(ConanFile):
             self.requires("opengl/system")
             return
 
-        self.requires("ftxui/[>=5 <7]")
         self.requires("libpqxx/[>=7 <8]")
         self.requires("redis-plus-plus/[>=1.3 <2]")
         self.requires("gtest/[>=1.14 <2]")
