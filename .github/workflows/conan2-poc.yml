@@ -6,10 +6,10 @@ on:
       config:
         description: Build configuration
         required: false
-        default: Debug
+        default: Release
         type: choice
         options:
-          - Debug
+          - Release
           - RelWithDebInfo
       target:
         description: Optional CMake target
@@ -79,7 +79,7 @@ jobs:
         shell: pwsh
         run: |
           $config = '${{ github.event.inputs.config }}'
-          if ([string]::IsNullOrWhiteSpace($config)) { $config = 'Debug' }
+          if ([string]::IsNullOrWhiteSpace($config)) { $config = 'Release' }
           $target = '${{ github.event.inputs.target }}'
 
           $args = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', 'scripts/build.ps1', '-Config', $config)
@@ -93,7 +93,7 @@ jobs:
         shell: pwsh
         run: |
           $config = '${{ github.event.inputs.config }}'
-          if ([string]::IsNullOrWhiteSpace($config)) { $config = 'Debug' }
+          if ([string]::IsNullOrWhiteSpace($config)) { $config = 'Release' }
           ctest --test-dir build-windows --build-config $config --output-on-failure
 
       - name: Save Conan cache (Windows)

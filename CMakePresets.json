@@ -322,7 +322,7 @@
     {
       "name": "windows-test",
       "configurePreset": "windows",
-      "configuration": "Debug",
+      "configuration": "Release",
       "output": {
         "outputOnFailure": true
       }
@@ -337,7 +337,7 @@
     {
       "name": "windows-conan-test",
       "configurePreset": "windows-conan",
-      "configuration": "Debug",
+      "configuration": "Release",
       "output": {
         "outputOnFailure": true
       }
