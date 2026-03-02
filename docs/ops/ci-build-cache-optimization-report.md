@@ -21,7 +21,7 @@
 
 ### Cache policy
 
-- Cache location: `${{ runner.temp }}/conan2`
+- Cache location: `${{ github.workspace }}-conan2`
 - Key inputs:
   - `conan.lock`
   - `conanfile.py`
