@@ -50,10 +50,13 @@ scripts/smoke_wb.ps1 -Config Debug -BuildDir build-windows
   - Linux: `linux-asan`(ASan/UBSan) 빌드로 컴파일/링크 검증
   - Opcodes: `python tools/gen_opcode_docs.py --check`로 스펙/문서 최신 상태 강제
 
-## 7. Push 전 로컬 CI(Act) 게이트
-- 큰 변경(빌드/의존성/워크플로우/다중 모듈 변경)은 push 전에 로컬 CI를 먼저 통과한다.
-- 표준 실행 절차는 `docs/ops/local-ci-with-act.md`를 따른다.
-- 로컬 `act` 게이트 범위는 Windows 잡으로 제한한다.
-  - 기본: `windows-fast-tests`
-  - `core/include/server/core/**` 변경 시: `core-api-consumer-windows` 추가
-- Linux 잡(`core-api-consumer-linux`, `linux-docker-stack`)은 `act` 대신 Docker stack 로컬 검증 + 원격 GitHub CI 결과를 기준으로 판단한다.
+## 7. Push 전 로컬 검증 게이트
+- 큰 변경(빌드/의존성/워크플로우/다중 모듈 변경)은 push 전에 로컬 검증을 먼저 통과한다.
+- 권장 기본 게이트:
+  - `pwsh scripts/build.ps1 -Config Release`
+  - `ctest --preset windows-test --output-on-failure`
+- `core/include/server/core/**` 변경 시 추가 게이트:
+  - `python tools/check_core_api_contracts.py --check-boundary`
+  - `python tools/check_core_api_contracts.py --check-boundary-fixtures`
+  - `python tools/check_core_api_contracts.py --check-stable-governance-fixtures`
+- Linux 경로는 Docker stack 로컬 검증 + 원격 GitHub CI 결과를 기준으로 판단한다.

@@ -25,6 +25,8 @@ add_library(server_core
     src/security/cipher.cpp
     src/security/admin_command_auth.cpp
     src/compression/compressor.cpp
+    src/plugin/shared_library.cpp
+    src/scripting/script_watcher.cpp
 )
 add_library(server_core::server_core ALIAS server_core)
 

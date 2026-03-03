@@ -20,8 +20,13 @@
 #include <vector>
 #include <array>
 #include <optional>
+#include <filesystem>
 #include <cstdlib>
 #include <iostream>
+
+#ifndef TEST_CHAT_HOOK_V2_ONLY_PATH
+#define TEST_CHAT_HOOK_V2_ONLY_PATH ""
+#endif
 
 using namespace server::app::chat;
 using namespace server::core;
@@ -51,6 +56,73 @@ inline void write_lp_utf8(std::vector<std::uint8_t>& out, std::string_view str) 
         std::memcpy(out.data() + offset + 2, str.data(), len);
     }
 }
+
+class ScopedEnvVar {
+public:
+    ScopedEnvVar(std::string key, const char* value)
+        : key_(std::move(key)) {
+        if (const char* old = std::getenv(key_.c_str()); old != nullptr) {
+            had_old_ = true;
+            old_value_ = old;
+        }
+        set(value);
+    }
+
+    ~ScopedEnvVar() {
+#if defined(_WIN32)
+        if (had_old_) {
+            _putenv_s(key_.c_str(), old_value_.c_str());
+        } else {
+            _putenv_s(key_.c_str(), "");
+        }
+#else
+        if (had_old_) {
+            setenv(key_.c_str(), old_value_.c_str(), 1);
+        } else {
+            unsetenv(key_.c_str());
+        }
+#endif
+    }
+
+private:
+    void set(const char* value) const {
+#if defined(_WIN32)
+        _putenv_s(key_.c_str(), value ? value : "");
+#else
+        if (value) {
+            setenv(key_.c_str(), value, 1);
+        } else {
+            unsetenv(key_.c_str());
+        }
+#endif
+    }
+
+    std::string key_;
+    bool had_old_{false};
+    std::string old_value_;
+};
+
+class ScopedTempDir {
+public:
+    explicit ScopedTempDir(std::string_view prefix) {
+        const auto nonce = std::to_string(std::chrono::steady_clock::now().time_since_epoch().count());
+        path_ = std::filesystem::temp_directory_path() / (std::string(prefix) + "_" + nonce);
+        std::error_code ec;
+        (void)std::filesystem::create_directories(path_, ec);
+    }
+
+    ~ScopedTempDir() {
+        std::error_code ec;
+        std::filesystem::remove_all(path_, ec);
+    }
+
+    const std::filesystem::path& path() const {
+        return path_;
+    }
+
+private:
+    std::filesystem::path path_;
+};
 
 // --- Mocks ---
 // MockConnectionPool moved to bottom
@@ -877,6 +949,102 @@ TEST_F(ChatServiceTest, RuntimeSettingRejectsUnsupportedKeyAndInvalidValue) {
     EXPECT_EQ(after.runtime_setting_reload_attempt_total, before.runtime_setting_reload_attempt_total + 2);
     EXPECT_EQ(after.runtime_setting_reload_success_total, before.runtime_setting_reload_success_total);
     EXPECT_EQ(after.runtime_setting_reload_failure_total, before.runtime_setting_reload_failure_total + 2);
+}
+
+TEST_F(ChatServiceTest, LoginDeniedByV2HookPluginReturnsForbidden) {
+    if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
+        GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
+    }
+
+    ScopedEnvVar env_single("CHAT_HOOK_PLUGIN_PATH", TEST_CHAT_HOOK_V2_ONLY_PATH);
+    ScopedEnvVar env_paths("CHAT_HOOK_PLUGIN_PATHS", "");
+    ScopedEnvVar env_dir("CHAT_HOOK_PLUGINS_DIR", "");
+    ScopedTempDir cache_temp("knights_chat_service_hook_cache");
+    const auto cache_path = cache_temp.path().string();
+    const auto lock_path = (cache_temp.path() / "chat_hook.lock").string();
+    ScopedEnvVar env_lock("CHAT_HOOK_LOCK_PATH", lock_path.c_str());
+    ScopedEnvVar env_cache("CHAT_HOOK_CACHE_DIR", cache_path.c_str());
+    chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
+
+    std::vector<std::uint8_t> payload;
+    write_lp_utf8(payload, "deny_login");
+    write_lp_utf8(payload, "test_token");
+
+    chat_service_->on_login(*session_, payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto error_code = WaitForErrorCode();
+    ASSERT_TRUE(error_code.has_value());
+    EXPECT_EQ(*error_code, core_proto::errc::FORBIDDEN);
+    chat_service_.reset();
+}
+
+TEST_F(ChatServiceTest, JoinDeniedByV2HookPluginReturnsForbidden) {
+    if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
+        GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
+    }
+
+    ScopedEnvVar env_single("CHAT_HOOK_PLUGIN_PATH", TEST_CHAT_HOOK_V2_ONLY_PATH);
+    ScopedEnvVar env_paths("CHAT_HOOK_PLUGIN_PATHS", "");
+    ScopedEnvVar env_dir("CHAT_HOOK_PLUGINS_DIR", "");
+    ScopedTempDir cache_temp("knights_chat_service_hook_cache");
+    const auto cache_path = cache_temp.path().string();
+    const auto lock_path = (cache_temp.path() / "chat_hook.lock").string();
+    ScopedEnvVar env_lock("CHAT_HOOK_LOCK_PATH", lock_path.c_str());
+    ScopedEnvVar env_cache("CHAT_HOOK_CACHE_DIR", cache_path.c_str());
+    chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
+
+    LoginAs("allow_user");
+
+    std::vector<std::uint8_t> join_payload;
+    write_lp_utf8(join_payload, "forbidden_room");
+    write_lp_utf8(join_payload, "");
+
+    chat_service_->on_join(*session_, join_payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto error_code = WaitForErrorCode();
+    ASSERT_TRUE(error_code.has_value());
+    EXPECT_EQ(*error_code, core_proto::errc::FORBIDDEN);
+    chat_service_.reset();
+}
+
+TEST_F(ChatServiceTest, LeaveDeniedByV2HookPluginReturnsForbidden) {
+    if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
+        GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
+    }
+
+    ScopedEnvVar env_single("CHAT_HOOK_PLUGIN_PATH", TEST_CHAT_HOOK_V2_ONLY_PATH);
+    ScopedEnvVar env_paths("CHAT_HOOK_PLUGIN_PATHS", "");
+    ScopedEnvVar env_dir("CHAT_HOOK_PLUGINS_DIR", "");
+    ScopedTempDir cache_temp("knights_chat_service_hook_cache");
+    const auto cache_path = cache_temp.path().string();
+    const auto lock_path = (cache_temp.path() / "chat_hook.lock").string();
+    ScopedEnvVar env_lock("CHAT_HOOK_LOCK_PATH", lock_path.c_str());
+    ScopedEnvVar env_cache("CHAT_HOOK_CACHE_DIR", cache_path.c_str());
+    chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
+
+    LoginAs("allow_user");
+
+    std::vector<std::uint8_t> join_payload;
+    write_lp_utf8(join_payload, "locked_leave");
+    write_lp_utf8(join_payload, "");
+    chat_service_->on_join(*session_, join_payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    std::vector<std::uint8_t> leave_payload;
+    write_lp_utf8(leave_payload, "locked_leave");
+    chat_service_->on_leave(*session_, leave_payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto error_code = WaitForErrorCode();
+    ASSERT_TRUE(error_code.has_value());
+    EXPECT_EQ(*error_code, core_proto::errc::FORBIDDEN);
+    chat_service_.reset();
 }
 
 // 세션 종료 테스트

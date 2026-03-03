@@ -80,6 +80,50 @@ bool has_room_password_hash_prefix(std::string_view value) {
     return value.rfind(kRoomPasswordHashPrefix, 0) == 0;
 }
 
+std::string json_escape(std::string_view value) {
+    std::string out;
+    out.reserve(value.size() + 8);
+    for (const unsigned char ch : value) {
+        switch (ch) {
+        case '\\':
+            out += "\\\\";
+            break;
+        case '"':
+            out += "\\\"";
+            break;
+        case '\n':
+            out += "\\n";
+            break;
+        case '\r':
+            out += "\\r";
+            break;
+        case '\t':
+            out += "\\t";
+            break;
+        default:
+            out.push_back(static_cast<char>(ch));
+            break;
+        }
+    }
+    return out;
+}
+
+std::string json_array_of_strings(const std::vector<std::string>& values) {
+    std::string out = "[";
+    bool first = true;
+    for (const auto& value : values) {
+        if (!first) {
+            out += ',';
+        }
+        first = false;
+        out += '"';
+        out += json_escape(value);
+        out += '"';
+    }
+    out += ']';
+    return out;
+}
+
 } // namespace
 
 // ChatService 생성자: 주요 의존성을 주입받고 환경 변수로부터 설정을 로드합니다.
@@ -1194,6 +1238,115 @@ bool ChatService::maybe_handle_chat_hook_plugin(Session& s,
     return out.stop_default;
 }
 
+bool ChatService::maybe_handle_login_hook(Session& s, const std::string& user) {
+    if (!hook_plugin_) {
+        return false;
+    }
+
+    const auto out = hook_plugin_->chain.on_login(s.session_id(), user);
+    for (const auto& notice : out.notices) {
+        if (!notice.empty()) {
+            send_system_notice(s, notice);
+        }
+    }
+
+    if (!out.stop_default) {
+        return false;
+    }
+
+    const std::string reason = out.deny_reason.empty() ? "login denied by plugin" : out.deny_reason;
+    s.send_error(proto::errc::FORBIDDEN, reason);
+    return true;
+}
+
+bool ChatService::maybe_handle_join_hook(Session& s, const std::string& user, const std::string& room) {
+    if (!hook_plugin_) {
+        return false;
+    }
+
+    const auto out = hook_plugin_->chain.on_join(s.session_id(), user, room);
+    for (const auto& notice : out.notices) {
+        if (!notice.empty()) {
+            send_system_notice(s, notice);
+        }
+    }
+
+    if (!out.stop_default) {
+        return false;
+    }
+
+    const std::string reason = out.deny_reason.empty() ? "join denied by plugin" : out.deny_reason;
+    s.send_error(proto::errc::FORBIDDEN, reason);
+    return true;
+}
+
+bool ChatService::maybe_handle_leave_hook(Session& s, const std::string& user, const std::string& room) {
+    if (!hook_plugin_) {
+        return false;
+    }
+
+    const auto out = hook_plugin_->chain.on_leave(s.session_id(), user, room);
+    for (const auto& notice : out.notices) {
+        if (!notice.empty()) {
+            send_system_notice(s, notice);
+        }
+    }
+
+    if (!out.stop_default) {
+        return false;
+    }
+
+    const std::string reason = out.deny_reason.empty() ? "leave denied by plugin" : out.deny_reason;
+    s.send_error(proto::errc::FORBIDDEN, reason);
+    return true;
+}
+
+void ChatService::notify_session_event_hook(std::uint32_t session_id,
+                                            SessionEventKindV2 kind,
+                                            const std::string& user,
+                                            const std::string& reason) {
+    if (!hook_plugin_) {
+        return;
+    }
+
+    const auto out = hook_plugin_->chain.on_session_event(session_id, kind, user, reason);
+    for (const auto& notice : out.notices) {
+        if (!notice.empty()) {
+            corelog::info("chat_hook session_event notice: " + notice);
+        }
+    }
+    if (out.stop_default) {
+        corelog::warn("chat_hook session_event requested stop_default; ignored for cleanup safety");
+    }
+}
+
+bool ChatService::maybe_handle_admin_command_hook(std::string_view command,
+                                                  std::string_view issuer,
+                                                  std::string_view payload_json,
+                                                  std::string& deny_reason) {
+    deny_reason.clear();
+    if (!hook_plugin_) {
+        return false;
+    }
+
+    const auto out = hook_plugin_->chain.on_admin_command(command, issuer, payload_json);
+    for (const auto& notice : out.notices) {
+        if (!notice.empty()) {
+            corelog::info("chat_hook admin notice: " + notice);
+        }
+    }
+    if (!out.response_json.empty()) {
+        corelog::info("chat_hook admin response_json: " + out.response_json);
+    }
+
+    if (!out.stop_default) {
+        return false;
+    }
+
+    deny_reason = out.deny_reason.empty() ? "admin command denied by plugin" : out.deny_reason;
+    return true;
+}
+
 void ChatService::admin_disconnect_users(const std::vector<std::string>& users, const std::string& reason) {
     if (users.empty()) {
         return;
@@ -1208,6 +1361,17 @@ void ChatService::admin_disconnect_users(const std::vector<std::string>& users, 
     }
     if (targets.empty()) {
         return;
+    }
+
+    {
+        std::string deny_reason;
+        const std::string payload_json =
+            std::string("{\"users\":") + json_array_of_strings(targets) +
+            ",\"reason\":\"" + json_escape(reason) + "\"}";
+        if (maybe_handle_admin_command_hook("disconnect_users", "control-plane", payload_json, deny_reason)) {
+            corelog::warn("admin disconnect denied by plugin: " + deny_reason);
+            return;
+        }
     }
 
     const std::string notice = reason;
@@ -1259,6 +1423,16 @@ void ChatService::admin_broadcast_notice(const std::string& text) {
         return;
     }
 
+    {
+        std::string deny_reason;
+        const std::string payload_json =
+            std::string("{\"text\":\"") + json_escape(text) + "\"}";
+        if (maybe_handle_admin_command_hook("broadcast_notice", "control-plane", payload_json, deny_reason)) {
+            corelog::warn("admin broadcast denied by plugin: " + deny_reason);
+            return;
+        }
+    }
+
     const std::string notice = text;
     if (!job_queue_.TryPush([this, notice]() {
         std::vector<std::shared_ptr<Session>> sessions;
@@ -1297,6 +1471,17 @@ void ChatService::admin_broadcast_notice(const std::string& text) {
 void ChatService::admin_apply_runtime_setting(const std::string& key, const std::string& value) {
     if (key.empty() || value.empty()) {
         return;
+    }
+
+    {
+        std::string deny_reason;
+        const std::string payload_json =
+            std::string("{\"key\":\"") + json_escape(key) +
+            "\",\"value\":\"" + json_escape(value) + "\"}";
+        if (maybe_handle_admin_command_hook("apply_runtime_setting", "control-plane", payload_json, deny_reason)) {
+            corelog::warn("admin runtime setting denied by plugin: " + deny_reason);
+            return;
+        }
     }
 
     const auto request_started_at = std::chrono::steady_clock::now();
@@ -1459,6 +1644,19 @@ void ChatService::admin_apply_user_moderation(const std::string& op,
     }
     if (targets.empty()) {
         return;
+    }
+
+    {
+        std::string deny_reason;
+        const std::string payload_json =
+            std::string("{\"op\":\"") + json_escape(op) +
+            "\",\"users\":" + json_array_of_strings(targets) +
+            ",\"duration_sec\":" + std::to_string(duration_sec) +
+            ",\"reason\":\"" + json_escape(reason) + "\"}";
+        if (maybe_handle_admin_command_hook("apply_user_moderation", "control-plane", payload_json, deny_reason)) {
+            corelog::warn("admin moderation denied by plugin: " + deny_reason);
+            return;
+        }
     }
 
     std::string normalized_op = to_lower_ascii_local(trim_ascii_local(op));

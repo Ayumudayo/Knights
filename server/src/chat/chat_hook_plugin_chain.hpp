@@ -1,16 +1,13 @@
 #pragma once
 
-#include "chat_hook_plugin_manager.hpp"
+#include "server/chat/chat_hook_plugin_abi.hpp"
+#include "server/core/plugin/plugin_chain_host.hpp"
 
-#include <atomic>
 #include <cstdint>
 #include <filesystem>
-#include <memory>
-#include <mutex>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace server::app::chat {
@@ -41,11 +38,37 @@ public:
         std::vector<std::string> notices;
     };
 
+    /** @brief 로그인/입장/퇴장/세션 이벤트 게이트 훅 실행 결과입니다. */
+    struct GateOutcome {
+        bool stop_default{false};
+        std::vector<std::string> notices;
+        std::string deny_reason;
+    };
+
+    /** @brief 관리자 명령 훅 실행 결과입니다. */
+    struct AdminOutcome {
+        bool stop_default{false};
+        std::vector<std::string> notices;
+        std::string response_json;
+        std::string deny_reason;
+    };
+
+    /** @brief 단일 플러그인 메트릭 스냅샷입니다. */
+    struct PluginMetricsSnapshot {
+        std::filesystem::path plugin_path;
+        bool loaded{false};
+        std::string name;
+        std::string version;
+        std::uint64_t reload_attempt_total{0};
+        std::uint64_t reload_success_total{0};
+        std::uint64_t reload_failure_total{0};
+    };
+
     /** @brief 체인 상태 메트릭 스냅샷입니다. */
     struct MetricsSnapshot {
         bool configured{false};
         std::string mode; // none|dir|paths|single
-        std::vector<ChatHookPluginManager::MetricsSnapshot> plugins;
+        std::vector<PluginMetricsSnapshot> plugins;
     };
 
     /**
@@ -73,22 +96,66 @@ public:
                          std::string& text) const;
 
     /**
+     * @brief 체인 순서대로 `on_login`을 적용합니다.
+     * @param session_id 세션 ID
+     * @param user 사용자 이름
+     * @return 기본 경로 중단 여부와 notice/deny 정보
+     */
+    GateOutcome on_login(std::uint32_t session_id, std::string_view user) const;
+
+    /**
+     * @brief 체인 순서대로 `on_join`을 적용합니다.
+     * @param session_id 세션 ID
+     * @param user 사용자 이름
+     * @param room 대상 방 이름
+     * @return 기본 경로 중단 여부와 notice/deny 정보
+     */
+    GateOutcome on_join(std::uint32_t session_id, std::string_view user, std::string_view room) const;
+
+    /**
+     * @brief 체인 순서대로 `on_leave`를 적용합니다.
+     * @param session_id 세션 ID
+     * @param user 사용자 이름
+     * @param room 현재 방 이름
+     * @return 기본 경로 중단 여부와 notice/deny 정보
+     */
+    GateOutcome on_leave(std::uint32_t session_id, std::string_view user, std::string_view room) const;
+
+    /**
+     * @brief 체인 순서대로 `on_session_event`를 적용합니다.
+     * @param session_id 세션 ID
+     * @param kind 세션 이벤트 종류(open/close)
+     * @param user 사용자 이름
+     * @param reason 이벤트 사유
+     * @return 기본 경로 중단 여부와 notice/deny 정보
+     */
+    GateOutcome on_session_event(std::uint32_t session_id,
+                                 SessionEventKindV2 kind,
+                                 std::string_view user,
+                                 std::string_view reason) const;
+
+    /**
+     * @brief 체인 순서대로 `on_admin_command`를 적용합니다.
+     * @param command 관리자 명령 이름
+     * @param issuer 명령 발행자
+     * @param payload_json 명령 페이로드(JSON 문자열)
+     * @return 기본 경로 중단 여부와 notice/response/deny 정보
+     */
+    AdminOutcome on_admin_command(std::string_view command,
+                                  std::string_view issuer,
+                                  std::string_view payload_json) const;
+
+    /**
      * @brief 현재 체인 상태 스냅샷을 반환합니다.
      * @return 체인 메트릭 스냅샷
      */
     MetricsSnapshot metrics_snapshot() const;
 
 private:
-    using PluginList = std::vector<std::shared_ptr<ChatHookPluginManager>>;
+    using Host = server::core::plugin::PluginHost<ChatHookApiV2>;
+    using HostChain = server::core::plugin::PluginChainHost<ChatHookApiV2>;
 
-    static std::string normalize_key(const std::filesystem::path& p);
-    static std::string module_extension();
-    bool get_desired_paths(std::vector<std::filesystem::path>& out) const;
-
-    Config cfg_;
-    mutable std::mutex mu_;
-    std::unordered_map<std::string, std::shared_ptr<ChatHookPluginManager>> by_key_;
-    std::atomic<std::shared_ptr<const PluginList>> ordered_{};
+    HostChain host_;
 };
 
 } // namespace server::app::chat

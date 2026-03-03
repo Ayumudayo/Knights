@@ -1,6 +1,5 @@
 #include "server/chat/chat_hook_plugin_abi.hpp"
 
-#include <algorithm>
 #include <cctype>
 #include <cstdint>
 #include <cstdio>
@@ -151,6 +150,26 @@ static const ChatHookApiV1 g_api{
     nullptr,
     &on_chat_send,
 };
+
+#if defined(CHAT_HOOK_SAMPLE_V2)
+static const ChatHookApiV2 g_api_v2{
+    CHAT_HOOK_ABI_VERSION_V2,
+    kName,
+    kVersion,
+    nullptr,
+    nullptr,
+    reinterpret_cast<HookDecisionV2 (CHAT_HOOK_CALL*)(void*, const ChatHookChatSendV2*, ChatHookChatSendOutV2*)>(&on_chat_send),
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+    nullptr,
+};
+
+CHAT_HOOK_PLUGIN_EXPORT const ChatHookApiV2* CHAT_HOOK_CALL chat_hook_api_v2() {
+    return &g_api_v2;
+}
+#endif
 
 CHAT_HOOK_PLUGIN_EXPORT const ChatHookApiV1* CHAT_HOOK_CALL chat_hook_api_v1() {
     return &g_api;

@@ -19,6 +19,7 @@
 #include "server/core/net/session.hpp"
 #include "server/core/protocol/system_opcodes.hpp"
 #include "server/protocol/game_opcodes.hpp"
+#include "server/chat/chat_hook_plugin_abi.hpp"
 #include "wire.pb.h"
 
 namespace server::core { class JobQueue; }
@@ -402,6 +403,18 @@ private:
                                        const std::string& room,
                                        const std::string& sender,
                                        std::string& text);
+
+    bool maybe_handle_login_hook(Session& s, const std::string& user);
+    bool maybe_handle_join_hook(Session& s, const std::string& user, const std::string& room);
+    bool maybe_handle_leave_hook(Session& s, const std::string& user, const std::string& room);
+    void notify_session_event_hook(std::uint32_t session_id,
+                                   SessionEventKindV2 kind,
+                                   const std::string& user,
+                                   const std::string& reason);
+    bool maybe_handle_admin_command_hook(std::string_view command,
+                                         std::string_view issuer,
+                                         std::string_view payload_json,
+                                         std::string& deny_reason);
 
     friend struct ChatServiceHistoryTester;
 

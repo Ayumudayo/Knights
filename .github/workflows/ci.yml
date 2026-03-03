@@ -589,57 +589,19 @@ jobs:
 
       - name: Verify Plugin Metrics
         run: |
-          python3 - <<'PY'
-          import urllib.request
-
-          def fetch(url):
-              with urllib.request.urlopen(url, timeout=5) as r:
-                  return r.read().decode('utf-8', errors='replace')
-
-          urls = [
-              'http://127.0.0.1:39091/metrics',
-              'http://127.0.0.1:39092/metrics',
-          ]
-          for url in urls:
-              txt = fetch(url)
-              if 'chat_hook_plugins_enabled' not in txt:
-                  raise SystemExit(f'missing chat_hook_plugins_enabled in {url}')
-              if 'chat_hook_plugin_info' not in txt:
-                  raise SystemExit(f'missing chat_hook_plugin_info in {url}')
-          print('plugin metrics present')
-          PY
+          python3 tests/python/verify_plugin_hot_reload.py --check-only
 
       - name: Hot Reload Plugin (v2) And Verify Metrics
         run: |
-          export MSYS2_ARG_CONV_EXCL='*'
-          docker exec knights-stack-server-1-1 sh -lc "set -e; touch /app/plugins/10_chat_hook_sample_LOCK; cp /app/plugins/staging/10_chat_hook_sample_v2.so /app/plugins/10_chat_hook_sample.so; rm -f /app/plugins/10_chat_hook_sample_LOCK"
-          docker exec knights-stack-server-2-1 sh -lc "set -e; touch /app/plugins/10_chat_hook_sample_LOCK; cp /app/plugins/staging/10_chat_hook_sample_v2.so /app/plugins/10_chat_hook_sample.so; rm -f /app/plugins/10_chat_hook_sample_LOCK"
+          python3 tests/python/verify_plugin_hot_reload.py
 
-          python3 - <<'PY'
-          import time, urllib.request
+      - name: Verify v2 Loader With v1 Fallback Plugin
+        run: |
+          python3 tests/python/verify_plugin_v2_fallback.py
 
-          def fetch(url):
-              with urllib.request.urlopen(url, timeout=5) as r:
-                  return r.read().decode('utf-8', errors='replace')
-
-          urls = ['http://127.0.0.1:39091/metrics', 'http://127.0.0.1:39092/metrics']
-          deadline = time.time() + 30
-          while time.time() < deadline:
-              ok = True
-              for url in urls:
-                  txt = fetch(url)
-                  if 'file="10_chat_hook_sample.so"' not in txt:
-                      ok = False
-                      break
-                  if 'version="v2"' not in txt:
-                      ok = False
-                      break
-              if ok:
-                  print('hot reload reflected in metrics')
-                  raise SystemExit(0)
-              time.sleep(0.5)
-          raise SystemExit('hot reload did not reflect in metrics within timeout')
-          PY
+      - name: Rollback Plugin (v1) And Verify Metrics
+        run: |
+          python3 tests/python/verify_plugin_rollback.py
 
       - name: Dump Stack Logs (On Failure)
         if: failure()
