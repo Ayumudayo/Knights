@@ -4,6 +4,7 @@
 #include "server/core/protocol/packet.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/runtime_metrics.hpp"
+#include "server/core/scripting/lua_runtime.hpp"
 #include "server/core/trace/context.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/util/service_registry.hpp"
@@ -140,6 +141,7 @@ ChatService::ChatService(boost::asio::io_context& io,
     if (!redis_) {
         redis_ = services::get<server::storage::redis::IRedisClient>();
     }
+    lua_runtime_ = services::get<server::core::scripting::LuaRuntime>();
 
     // 게이트웨이 ID 설정 (분산 환경 식별용)
     if (const char* gw = std::getenv("GATEWAY_ID"); gw && *gw) {
@@ -1221,6 +1223,26 @@ void ChatService::send_system_notice(Session& s, const std::string& text) {
     s.async_send(game_proto::MSG_CHAT_BROADCAST, body, 0);
 }
 
+void ChatService::invoke_lua_cold_hook(std::string_view hook_name) {
+    if (!lua_runtime_) {
+        return;
+    }
+
+    const auto call_result = lua_runtime_->call_all(std::string(hook_name));
+    if (!call_result.error.empty()) {
+        corelog::warn(
+            "lua cold hook call failed hook=" + std::string(hook_name)
+            + " reason=" + call_result.error);
+        return;
+    }
+
+    if (call_result.failed != 0) {
+        corelog::warn(
+            "lua cold hook call had failures hook=" + std::string(hook_name)
+            + " failed=" + std::to_string(call_result.failed));
+    }
+}
+
 bool ChatService::maybe_handle_chat_hook_plugin(Session& s,
                                                 const std::string& room,
                                                 const std::string& sender,
@@ -1240,6 +1262,7 @@ bool ChatService::maybe_handle_chat_hook_plugin(Session& s,
 
 bool ChatService::maybe_handle_login_hook(Session& s, const std::string& user) {
     if (!hook_plugin_) {
+        invoke_lua_cold_hook("on_login");
         return false;
     }
 
@@ -1251,6 +1274,7 @@ bool ChatService::maybe_handle_login_hook(Session& s, const std::string& user) {
     }
 
     if (!out.stop_default) {
+        invoke_lua_cold_hook("on_login");
         return false;
     }
 
@@ -1261,6 +1285,7 @@ bool ChatService::maybe_handle_login_hook(Session& s, const std::string& user) {
 
 bool ChatService::maybe_handle_join_hook(Session& s, const std::string& user, const std::string& room) {
     if (!hook_plugin_) {
+        invoke_lua_cold_hook("on_join");
         return false;
     }
 
@@ -1272,6 +1297,7 @@ bool ChatService::maybe_handle_join_hook(Session& s, const std::string& user, co
     }
 
     if (!out.stop_default) {
+        invoke_lua_cold_hook("on_join");
         return false;
     }
 
@@ -1282,6 +1308,7 @@ bool ChatService::maybe_handle_join_hook(Session& s, const std::string& user, co
 
 bool ChatService::maybe_handle_leave_hook(Session& s, const std::string& user, const std::string& room) {
     if (!hook_plugin_) {
+        invoke_lua_cold_hook("on_leave");
         return false;
     }
 
@@ -1293,6 +1320,7 @@ bool ChatService::maybe_handle_leave_hook(Session& s, const std::string& user, c
     }
 
     if (!out.stop_default) {
+        invoke_lua_cold_hook("on_leave");
         return false;
     }
 
@@ -1306,6 +1334,7 @@ void ChatService::notify_session_event_hook(std::uint32_t session_id,
                                             const std::string& user,
                                             const std::string& reason) {
     if (!hook_plugin_) {
+        invoke_lua_cold_hook("on_session_event");
         return;
     }
 
@@ -1318,6 +1347,8 @@ void ChatService::notify_session_event_hook(std::uint32_t session_id,
     if (out.stop_default) {
         corelog::warn("chat_hook session_event requested stop_default; ignored for cleanup safety");
     }
+
+    invoke_lua_cold_hook("on_session_event");
 }
 
 bool ChatService::maybe_handle_admin_command_hook(std::string_view command,
@@ -1326,6 +1357,7 @@ bool ChatService::maybe_handle_admin_command_hook(std::string_view command,
                                                   std::string& deny_reason) {
     deny_reason.clear();
     if (!hook_plugin_) {
+        invoke_lua_cold_hook("on_admin_command");
         return false;
     }
 
@@ -1340,6 +1372,7 @@ bool ChatService::maybe_handle_admin_command_hook(std::string_view command,
     }
 
     if (!out.stop_default) {
+        invoke_lua_cold_hook("on_admin_command");
         return false;
     }
 

@@ -46,6 +46,12 @@ public:
         std::string error;
     };
 
+    struct CallAllResult {
+        std::size_t attempted{0};
+        std::size_t failed{0};
+        std::string error;
+    };
+
     struct ScriptEntry {
         std::filesystem::path path;
         std::string env_name;
@@ -78,6 +84,8 @@ public:
     ReloadResult reload_scripts(const std::vector<ScriptEntry>& scripts);
 
     CallResult call(const std::string& env_name, const std::string& func_name);
+
+    CallAllResult call_all(const std::string& func_name);
 
     bool register_host_api(const std::string& table_name,
                            const std::string& func_name,

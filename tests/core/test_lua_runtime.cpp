@@ -131,6 +131,36 @@ TEST_F(LuaRuntimeTest, ReloadScriptsReplacesTrackedEnvironmentSet) {
 #endif
 }
 
+TEST_F(LuaRuntimeTest, CallAllTracksLoadedScriptCountInScaffoldMode) {
+    LuaRuntime runtime;
+
+    const auto first_script = temp_dir_ / "first.lua";
+    const auto second_script = temp_dir_ / "second.lua";
+    write_text(first_script, "return 1\n");
+    write_text(second_script, "return 2\n");
+
+    std::vector<LuaRuntime::ScriptEntry> scripts;
+    scripts.push_back(LuaRuntime::ScriptEntry{first_script, "env_first"});
+    scripts.push_back(LuaRuntime::ScriptEntry{second_script, "env_second"});
+
+    const auto reload = runtime.reload_scripts(scripts);
+    const auto before = runtime.metrics_snapshot();
+    const auto result = runtime.call_all("on_login");
+
+#if KNIGHTS_BUILD_LUA_SCRIPTING
+    EXPECT_TRUE(reload.error.empty());
+    EXPECT_EQ(result.attempted, 2u);
+    EXPECT_EQ(result.failed, 0u);
+    EXPECT_TRUE(result.error.empty());
+
+    const auto after = runtime.metrics_snapshot();
+    EXPECT_EQ(after.calls_total, before.calls_total + 2u);
+#else
+    EXPECT_FALSE(reload.error.empty());
+    EXPECT_FALSE(result.error.empty());
+#endif
+}
+
 TEST_F(LuaRuntimeTest, ResetClearsRuntimeState) {
     LuaRuntime runtime;
 

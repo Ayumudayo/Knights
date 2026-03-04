@@ -120,6 +120,24 @@ LuaRuntime::CallResult LuaRuntime::call(const std::string& env_name,
     return CallResult{true, false, {}};
 }
 
+LuaRuntime::CallAllResult LuaRuntime::call_all(const std::string& func_name) {
+    std::lock_guard<std::mutex> lock(mu_);
+
+    if (!enabled()) {
+        ++errors_total_;
+        return CallAllResult{0, loaded_scripts_.size(), make_disabled_error()};
+    }
+
+    if (func_name.empty()) {
+        ++errors_total_;
+        return CallAllResult{0, 0, "func_name is empty"};
+    }
+
+    const std::size_t attempted = loaded_scripts_.size();
+    calls_total_ += attempted;
+    return CallAllResult{attempted, 0, {}};
+}
+
 bool LuaRuntime::register_host_api(const std::string& table_name,
                                    const std::string& func_name,
                                    HostCallback callback) {
