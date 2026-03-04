@@ -1196,6 +1196,41 @@ TEST_F(ChatServiceTest, LuaColdHookDenyStopsJoinWhenNativePathPasses) {
 #endif
 }
 
+TEST_F(ChatServiceTest, LuaColdHookDenySkipsAdminRuntimeSettingReload) {
+#if !KNIGHTS_BUILD_LUA_SCRIPTING
+    GTEST_SKIP() << "Lua scripting build flag is disabled";
+#else
+    ScopedTempDir script_temp("knights_chat_lua_admin_deny");
+    const auto script_path = script_temp.path() / "policy.lua";
+    {
+        std::ofstream out(script_path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(out.good());
+        out << "return { hook = \"on_admin_command\", decision = \"deny\", reason = \"admin denied by lua scaffold\" }\n";
+        out.flush();
+        ASSERT_TRUE(out.good());
+    }
+
+    auto lua_runtime = std::make_shared<server::core::scripting::LuaRuntime>();
+    std::vector<server::core::scripting::LuaRuntime::ScriptEntry> scripts;
+    scripts.push_back(server::core::scripting::LuaRuntime::ScriptEntry{script_path, "policy"});
+    const auto reload_result = lua_runtime->reload_scripts(scripts);
+    ASSERT_TRUE(reload_result.error.empty());
+    ASSERT_EQ(reload_result.loaded, 1u);
+
+    services::set(lua_runtime);
+    chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
+
+    const auto before = server::core::runtime_metrics::snapshot().runtime_setting_reload_attempt_total;
+
+    chat_service_->admin_apply_runtime_setting("chat_spam_threshold", "7");
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto after = server::core::runtime_metrics::snapshot().runtime_setting_reload_attempt_total;
+    EXPECT_EQ(after, before);
+#endif
+}
+
 TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLogin) {
 #if !KNIGHTS_BUILD_LUA_SCRIPTING
     GTEST_SKIP() << "Lua scripting build flag is disabled";
