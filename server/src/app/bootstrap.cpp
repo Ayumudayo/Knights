@@ -39,6 +39,7 @@
 #include "server/core/scripting/lua_runtime.hpp"
 #include "server/core/scripting/script_watcher.hpp"
 #include "server/chat/chat_service.hpp"
+#include "server/scripting/chat_lua_bindings.hpp"
 // Protobuf (수신 payload ts_ms 파싱용)
 #include "wire.pb.h"
 // 캐시/팬아웃: Redis 클라이언트(스켈레톤)
@@ -255,7 +256,14 @@ int run_server(int argc, char** argv) {
 
             lua_runtime = std::make_shared<core::scripting::LuaRuntime>(std::move(lua_cfg));
             services::set(lua_runtime);
-            corelog::info("Lua runtime scaffold initialised and registered");
+            const auto binding_result = server::app::scripting::register_chat_lua_bindings(*lua_runtime);
+            corelog::info(
+                "Lua runtime scaffold initialised and registered"
+                " bindings_registered=" + std::to_string(binding_result.registered)
+                + "/" + std::to_string(binding_result.attempted));
+            if (binding_result.registered != binding_result.attempted) {
+                corelog::warn("Lua host API binding registration is partial");
+            }
         }
 #endif
 
@@ -319,7 +327,7 @@ int run_server(int argc, char** argv) {
             const auto poll_lua_scripts = [lua_runtime, lua_script_watcher, scripts_dir]() {
                 const bool poll_ok = lua_script_watcher->poll([
                     lua_runtime,
-                    &scripts_dir
+                    scripts_dir
                 ](const core::scripting::ScriptWatcher::ChangeEvent& event) {
                     if (event.kind == core::scripting::ScriptWatcher::ChangeKind::kRemoved) {
                         corelog::warn(
@@ -860,6 +868,11 @@ int run_server(int argc, char** argv) {
             }
         });
         app_host.add_shutdown_step("shutdown scheduler", [&]() { scheduler.shutdown(); });
+        app_host.add_shutdown_step("reset lua runtime", [&]() {
+            if (lua_runtime) {
+                lua_runtime->reset();
+            }
+        });
         app_host.add_shutdown_step("stop metrics server", [&]() {
             if (metrics_server) metrics_server->stop();
         });
