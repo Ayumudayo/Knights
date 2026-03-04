@@ -161,6 +161,12 @@ docker exec knights-stack-server-1-1 rm -f /app/plugins/10_chat_hook_sample_LOCK
 - 적용 경로: native 훅 체인 결과가 `kPass`일 때만 Lua cold hook 호출
 - native 훅이 `kBlock/kDeny`를 반환하면 Lua는 호출되지 않는다
 
+샘플 스크립트:
+
+- `server/scripts/on_login_welcome.lua`
+- `server/scripts/on_join_policy.lua`
+- `server/scripts/admin_commands.lua`
+
 ## 디렉터리 구조
 
 ```
