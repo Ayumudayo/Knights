@@ -159,6 +159,51 @@ std::string make_lua_env_name(const std::filesystem::path& scripts_dir,
     return env_name;
 }
 
+bool is_lua_script_file(const std::filesystem::path& path) {
+    if (!path.has_extension()) {
+        return false;
+    }
+
+    std::string ext = path.extension().string();
+#if defined(_WIN32)
+    std::transform(ext.begin(), ext.end(), ext.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+#endif
+    return ext == ".lua";
+}
+
+std::vector<std::filesystem::path> list_lua_scripts(const std::filesystem::path& scripts_dir) {
+    std::vector<std::filesystem::path> scripts;
+
+    std::error_code ec;
+    if (!std::filesystem::exists(scripts_dir, ec) || ec) {
+        return scripts;
+    }
+
+    std::filesystem::recursive_directory_iterator it(scripts_dir, ec);
+    if (ec) {
+        return scripts;
+    }
+
+    for (const auto& entry : it) {
+        std::error_code st_ec;
+        if (!entry.is_regular_file(st_ec) || st_ec) {
+            continue;
+        }
+
+        const auto path = entry.path();
+        if (is_lua_script_file(path)) {
+            scripts.push_back(path);
+        }
+    }
+
+    std::sort(scripts.begin(), scripts.end(), [](const std::filesystem::path& lhs, const std::filesystem::path& rhs) {
+        return lhs.lexically_normal().generic_string() < rhs.lexically_normal().generic_string();
+    });
+    return scripts;
+}
+
 } // namespace
 
 // 메인 서버 실행 함수
@@ -324,36 +369,60 @@ int run_server(int argc, char** argv) {
             const auto scripts_dir = watcher_cfg.scripts_dir;
             lua_script_watcher = std::make_shared<core::scripting::ScriptWatcher>(std::move(watcher_cfg));
 
-            const auto poll_lua_scripts = [lua_runtime, lua_script_watcher, scripts_dir]() {
-                const bool poll_ok = lua_script_watcher->poll([
-                    lua_runtime,
-                    scripts_dir
-                ](const core::scripting::ScriptWatcher::ChangeEvent& event) {
-                    if (event.kind == core::scripting::ScriptWatcher::ChangeKind::kRemoved) {
-                        corelog::warn(
-                            "Lua script removed path=" + event.path.string()
-                            + " (reload scaffold keeps existing environment until restart)");
-                        return;
-                    }
+            const auto reload_all_lua_scripts = [lua_runtime, scripts_dir]() {
+                lua_runtime->reset();
 
-                    const std::string env_name = make_lua_env_name(scripts_dir, event.path);
-                    const auto load_result = lua_runtime->load_script(event.path, env_name);
+                const auto binding_result = server::app::scripting::register_chat_lua_bindings(*lua_runtime);
+                if (binding_result.registered != binding_result.attempted) {
+                    corelog::warn(
+                        "Lua host API binding registration is partial during reload"
+                        " registered=" + std::to_string(binding_result.registered)
+                        + "/" + std::to_string(binding_result.attempted));
+                }
+
+                const auto scripts = list_lua_scripts(scripts_dir);
+                std::size_t loaded_count = 0;
+                std::size_t failed_count = 0;
+                for (const auto& script_path : scripts) {
+                    const std::string env_name = make_lua_env_name(scripts_dir, script_path);
+                    const auto load_result = lua_runtime->load_script(script_path, env_name);
                     if (!load_result.ok) {
+                        ++failed_count;
                         corelog::warn(
-                            "Lua script load failed path=" + event.path.string()
+                            "Lua script load failed path=" + script_path.string()
                             + " env=" + env_name
                             + " reason=" + load_result.error);
-                        return;
+                        continue;
                     }
+                    ++loaded_count;
+                }
 
-                    corelog::info(
-                        "Lua script loaded path=" + event.path.string()
-                        + " env=" + env_name);
+                corelog::info(
+                    "Lua script reload complete scripts_dir=" + scripts_dir.string()
+                    + " loaded=" + std::to_string(loaded_count)
+                    + " failed=" + std::to_string(failed_count));
+            };
+
+            reload_all_lua_scripts();
+            (void)lua_script_watcher->poll(core::scripting::ScriptWatcher::ChangeCallback{});
+
+            const auto poll_lua_scripts = [lua_script_watcher, reload_all_lua_scripts, scripts_dir]() {
+                std::size_t change_count = 0;
+                const bool poll_ok = lua_script_watcher->poll([&change_count](const core::scripting::ScriptWatcher::ChangeEvent&) {
+                    ++change_count;
                 });
 
                 if (!poll_ok) {
                     corelog::warn("Lua script watcher poll failed scripts_dir=" + scripts_dir.string());
+                    return;
                 }
+
+                if (change_count == 0) {
+                    return;
+                }
+
+                corelog::info("Lua script watcher detected changes count=" + std::to_string(change_count));
+                reload_all_lua_scripts();
             };
 
             poll_lua_scripts();
