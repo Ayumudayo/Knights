@@ -132,6 +132,7 @@ services:
       KNIGHTS_TRACING_ENABLED: "${KNIGHTS_TRACING_ENABLED:-0}"
       KNIGHTS_TRACING_SAMPLE_PERCENT: "${KNIGHTS_TRACING_SAMPLE_PERCENT:-100}"
     volumes:
+      - ./plugins:/app/plugins:ro
       - ./scripts:/app/scripts:ro
     depends_on:
       redis:
@@ -179,6 +180,7 @@ services:
       KNIGHTS_TRACING_ENABLED: "${KNIGHTS_TRACING_ENABLED:-0}"
       KNIGHTS_TRACING_SAMPLE_PERCENT: "${KNIGHTS_TRACING_SAMPLE_PERCENT:-100}"
     volumes:
+      - ./plugins:/app/plugins:ro
       - ./scripts:/app/scripts:ro
     depends_on:
       redis:
