@@ -143,6 +143,8 @@ if (BUILD_GTEST_TESTS)
         core/test_plugin_host.cpp
         core/test_plugin_chain_host.cpp
         core/test_script_watcher.cpp
+        core/test_lua_runtime.cpp
+        core/test_lua_sandbox.cpp
     )
     target_include_directories(core_plugin_runtime_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include

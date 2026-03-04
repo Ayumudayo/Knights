@@ -26,6 +26,8 @@ add_library(server_core
     src/security/admin_command_auth.cpp
     src/compression/compressor.cpp
     src/plugin/shared_library.cpp
+    src/scripting/lua_runtime.cpp
+    src/scripting/lua_sandbox.cpp
     src/scripting/script_watcher.cpp
 )
 add_library(server_core::server_core ALIAS server_core)
@@ -74,6 +76,12 @@ target_compile_definitions(server_core PUBLIC
     KNIGHTS_GIT_DESCRIBE="${KNIGHTS_GIT_DESCRIBE}"
     KNIGHTS_BUILD_TIME_UTC="${KNIGHTS_BUILD_TIME_UTC}"
 )
+
+if (BUILD_LUA_SCRIPTING)
+    target_compile_definitions(server_core PUBLIC KNIGHTS_BUILD_LUA_SCRIPTING=1)
+else()
+    target_compile_definitions(server_core PUBLIC KNIGHTS_BUILD_LUA_SCRIPTING=0)
+endif()
 
 find_package(OpenSSL REQUIRED)
 find_package(lz4 CONFIG QUIET)
