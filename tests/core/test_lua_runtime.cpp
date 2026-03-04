@@ -151,6 +151,7 @@ TEST_F(LuaRuntimeTest, CallAllTracksLoadedScriptCountInScaffoldMode) {
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.attempted, 2u);
     EXPECT_EQ(result.failed, 0u);
+    EXPECT_EQ(result.decision, LuaHookDecision::kPass);
     EXPECT_TRUE(result.error.empty());
 
     const auto after = runtime.metrics_snapshot();
@@ -158,6 +159,36 @@ TEST_F(LuaRuntimeTest, CallAllTracksLoadedScriptCountInScaffoldMode) {
 #else
     EXPECT_FALSE(reload.error.empty());
     EXPECT_FALSE(result.error.empty());
+#endif
+}
+
+TEST_F(LuaRuntimeTest, CallAllParsesScaffoldDecisionForMatchingHook) {
+    LuaRuntime runtime;
+
+    const auto script_path = temp_dir_ / "policy.lua";
+    write_text(script_path, "-- hook=on_login decision=deny reason=login denied by lua scaffold\nreturn 1\n");
+
+    std::vector<LuaRuntime::ScriptEntry> scripts;
+    scripts.push_back(LuaRuntime::ScriptEntry{script_path, "policy"});
+    const auto reload = runtime.reload_scripts(scripts);
+
+    const auto login_result = runtime.call_all("on_login");
+    const auto join_result = runtime.call_all("on_join");
+
+#if KNIGHTS_BUILD_LUA_SCRIPTING
+    EXPECT_TRUE(reload.error.empty());
+
+    EXPECT_EQ(login_result.decision, LuaHookDecision::kDeny);
+    EXPECT_EQ(login_result.reason, "login denied by lua scaffold");
+    EXPECT_TRUE(login_result.error.empty());
+
+    EXPECT_EQ(join_result.decision, LuaHookDecision::kPass);
+    EXPECT_TRUE(join_result.reason.empty());
+    EXPECT_TRUE(join_result.error.empty());
+#else
+    EXPECT_FALSE(reload.error.empty());
+    EXPECT_FALSE(login_result.error.empty());
+    EXPECT_FALSE(join_result.error.empty());
 #endif
 }
 

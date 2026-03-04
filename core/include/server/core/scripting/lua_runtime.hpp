@@ -18,6 +18,15 @@
 
 namespace server::core::scripting {
 
+enum class LuaHookDecision {
+    kPass,
+    kHandled,
+    kBlock,
+    kModify,
+    kAllow,
+    kDeny,
+};
+
 /**
  * @brief Build-toggle-safe Lua runtime scaffold for Stream B.
  */
@@ -49,6 +58,8 @@ public:
     struct CallAllResult {
         std::size_t attempted{0};
         std::size_t failed{0};
+        LuaHookDecision decision{LuaHookDecision::kPass};
+        std::string reason;
         std::string error;
     };
 
