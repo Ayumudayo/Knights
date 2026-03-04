@@ -91,6 +91,12 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
 | `CHAT_HOOK_CACHE_DIR` | 플러그인 캐시 디렉터리(원본을 cache-copy 후 로드) | `/tmp/chat_hook_cache` |
 | `CHAT_HOOK_LOCK_PATH` | (옵션) lock/sentinel 파일 경로(존재 시 reload 스킵, 단일 플러그인 모드에만 적용) | `<plugin_stem>_LOCK` |
 | `CHAT_HOOK_RELOAD_INTERVAL_MS` | reload 폴링 주기(ms) | `500` |
+| `LUA_ENABLED` | (실험) Lua 스크립팅 활성화 (`1`: 활성화, `0`: 비활성화) | `0` |
+| `LUA_SCRIPTS_DIR` | (실험) Lua 스크립트 디렉터리 | `/app/scripts` |
+| `LUA_RELOAD_INTERVAL_MS` | (실험) Lua 스크립트 리로드 폴링 주기(ms) | `1000` |
+| `LUA_INSTRUCTION_LIMIT` | (실험) Lua 호출 1회당 instruction 제한 | `100000` |
+| `LUA_MEMORY_LIMIT_BYTES` | (실험) Lua 런타임 메모리 상한(바이트) | `1048576` |
+| `LUA_AUTO_DISABLE_THRESHOLD` | (실험) 연속 오류 시 자동 비활성화 임계치 | `3` |
 | `LOG_BUFFER_CAPACITY` | 메모리 내 로그 버퍼 크기 | `256` |
 | `CHAT_JOB_QUEUE_MAX` | 서버 로직 작업 큐 최대 길이(트래픽 스파이크 시 백프레셔/메모리 보호) | `8192` |
 | `CHAT_DB_JOB_QUEUE_MAX` | DB 작업 큐 최대 길이(DB 지연 시 백프레셔/메모리 보호) | `4096` |
