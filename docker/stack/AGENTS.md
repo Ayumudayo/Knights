@@ -20,7 +20,7 @@ Client (host) -> `haproxy` (TCP) -> `gateway-*` -> `server-*`.
 
 ## Chat Hook Plugins (Experimental)
 - `server-*` defaults to `CHAT_HOOK_PLUGINS_DIR=/app/plugins` (see `docker/stack/docker-compose.yml`).
-- Sample plugins are packaged into the image under `/app/plugins/`.
+- Sample plugins are packaged into the image under `/app/plugins_builtin/` (fallback path).
 - Hot reload is done by swapping the `.so` in-place (optional lock/sentinel file to defer reload).
 
 ## Observability Profile

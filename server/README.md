@@ -131,23 +131,24 @@ Windows에서 빌드된 실행 파일은 `build-windows/server/Debug/server_app.
 - 엔트리포인트 탐색: `chat_hook_api_v2()` 우선, 미존재 시 `chat_hook_api_v1()` 자동 폴백
 - 멀티 플러그인: 파일명 순서(예: `10_*.so`, `20_*.so`)로 순차 적용; 텍스트 변경(`v1:kReplaceText`, `v2:kModify`) 결과는 다음 플러그인에 반영됨
 - deny 계열 결정(`kBlock`/`kDeny`)은 기본 경로를 중단하고 `MSG_ERR(FORBIDDEN)`로 전달됨
-- Docker 샘플 플러그인:
-  - `/app/plugins/10_chat_hook_sample.so`
-  - `/app/plugins/20_chat_hook_tag.so`
-  - `/app/plugins/staging/10_chat_hook_sample_v2.so` (swap 용)
-- Docker 스택 기본 설정: `docker/stack/docker-compose.yml`에서 `CHAT_HOOK_PLUGINS_DIR=/app/plugins`
+- Docker 샘플 플러그인(fallback 경로):
+  - `/app/plugins_builtin/10_chat_hook_sample.so`
+  - `/app/plugins_builtin/20_chat_hook_tag.so`
+  - `/app/plugins_builtin/staging/10_chat_hook_sample_v2.so` (swap 용)
+- Docker 스택 기본 설정: `docker/stack/docker-compose.yml`에서 `CHAT_HOOK_PLUGINS_DIR=/app/plugins`, `CHAT_HOOK_FALLBACK_PLUGINS_DIR=/app/plugins_builtin`
+- `/app/plugins`에 로드 가능한 모듈이 있으면 1차 디렉터리(`/app/plugins`)를 우선 사용하고, 비어 있으면 fallback(`/app/plugins_builtin`)을 사용한다.
 
 핫 리로드 예시:
 
 ```bash
 # 잠금 파일(lock/sentinel, 선택)
-docker exec knights-stack-server-1-1 touch /app/plugins/10_chat_hook_sample_LOCK
+docker exec knights-stack-server-1-1 touch /app/plugins_builtin/10_chat_hook_sample_LOCK
 
 # 바이너리 교체(swap)
-docker exec knights-stack-server-1-1 cp /app/plugins/staging/10_chat_hook_sample_v2.so /app/plugins/10_chat_hook_sample.so
+docker exec knights-stack-server-1-1 cp /app/plugins_builtin/staging/10_chat_hook_sample_v2.so /app/plugins_builtin/10_chat_hook_sample.so
 
 # 잠금 해제(unlock)
-docker exec knights-stack-server-1-1 rm -f /app/plugins/10_chat_hook_sample_LOCK
+docker exec knights-stack-server-1-1 rm -f /app/plugins_builtin/10_chat_hook_sample_LOCK
 ```
 
 ## Lua cold-hook scaffold (실험)
