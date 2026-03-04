@@ -19,10 +19,18 @@ SERVER_CONTAINERS = _env_list(
     "knights-stack-server-1-1,knights-stack-server-2-1",
 )
 
-ACTIVE_PLUGIN_PATH = os.getenv("PLUGIN_ACTIVE_PATH", "/app/plugins/10_chat_hook_sample.so")
-STAGING_V1_PATH = os.getenv("PLUGIN_STAGING_V1_PATH", "/app/plugins/staging/10_chat_hook_sample_v1.so")
-STAGING_V2_PATH = os.getenv("PLUGIN_STAGING_V2_PATH", "/app/plugins/staging/10_chat_hook_sample_v2.so")
-LOCK_PATH = os.getenv("PLUGIN_LOCK_PATH", "/app/plugins/10_chat_hook_sample_LOCK")
+ACTIVE_PLUGIN_PATH = os.getenv(
+    "PLUGIN_ACTIVE_PATH", "/app/plugins_builtin/10_chat_hook_sample.so"
+)
+STAGING_V1_PATH = os.getenv(
+    "PLUGIN_STAGING_V1_PATH", "/app/plugins_builtin/staging/10_chat_hook_sample_v1.so"
+)
+STAGING_V2_PATH = os.getenv(
+    "PLUGIN_STAGING_V2_PATH", "/app/plugins_builtin/staging/10_chat_hook_sample_v2.so"
+)
+LOCK_PATH = os.getenv(
+    "PLUGIN_LOCK_PATH", "/app/plugins_builtin/10_chat_hook_sample_LOCK"
+)
 
 TARGET_FILE_LABEL = 'file="10_chat_hook_sample.so"'
 WAIT_TIMEOUT_SEC = float(os.getenv("PLUGIN_WAIT_TIMEOUT_SEC", "30"))
@@ -40,16 +48,18 @@ def run_docker_exec(container: str, script: str) -> None:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         output = (exc.stdout or "") + ("\n" + exc.stderr if exc.stderr else "")
-        raise RuntimeError(f"docker exec failed for {container}: {output.strip()}") from exc
+        raise RuntimeError(
+            f"docker exec failed for {container}: {output.strip()}"
+        ) from exc
 
 
 def apply_swap(staging_path: str) -> None:
     swap_script = (
         "set -e; "
-        f"test -f \"{staging_path}\" || (echo \"missing staging plugin: {staging_path}\" >&2; exit 1); "
-        f"touch \"{LOCK_PATH}\"; "
-        f"cp \"{staging_path}\" \"{ACTIVE_PLUGIN_PATH}\"; "
-        f"rm -f \"{LOCK_PATH}\""
+        f'test -f "{staging_path}" || (echo "missing staging plugin: {staging_path}" >&2; exit 1); '
+        f'touch "{LOCK_PATH}"; '
+        f'cp "{staging_path}" "{ACTIVE_PLUGIN_PATH}"; '
+        f'rm -f "{LOCK_PATH}"'
     )
     for container in SERVER_CONTAINERS:
         run_docker_exec(container, swap_script)

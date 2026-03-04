@@ -603,6 +603,10 @@ jobs:
         run: |
           python3 tests/python/verify_plugin_rollback.py
 
+      - name: Hot Reload Lua Script And Verify Watcher
+        run: |
+          python3 tests/python/verify_script_hot_reload.py
+
       - name: Dump Stack Logs (On Failure)
         if: failure()
         run: |
