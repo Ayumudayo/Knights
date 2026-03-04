@@ -2,7 +2,6 @@
 #include "server/core/util/log.hpp"
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
 #include <string>
 #include <chrono>
 
@@ -127,7 +126,39 @@ bool ServerConfig::load(int argc, char** argv) {
         admin_command_future_skew_ms = parsed;
     }
 
-    // 6. 메트릭 설정
+    // 6. Lua 스크립팅 설정 (Stream B scaffold)
+    if (const char* val = std::getenv("LUA_ENABLED"); val && *val) {
+        lua_enabled = (std::strcmp(val, "0") != 0);
+    }
+    if (const char* val = std::getenv("LUA_SCRIPTS_DIR"); val && *val) {
+        lua_scripts_dir = val;
+    }
+    if (const char* val = std::getenv("LUA_RELOAD_INTERVAL_MS"); val && *val) {
+        auto parsed = std::strtoull(val, nullptr, 10);
+        if (parsed > 0 && parsed <= 600'000) {
+            lua_reload_interval_ms = parsed;
+        }
+    }
+    if (const char* val = std::getenv("LUA_INSTRUCTION_LIMIT"); val && *val) {
+        auto parsed = std::strtoull(val, nullptr, 10);
+        if (parsed > 0) {
+            lua_instruction_limit = parsed;
+        }
+    }
+    if (const char* val = std::getenv("LUA_MEMORY_LIMIT_BYTES"); val && *val) {
+        auto parsed = std::strtoull(val, nullptr, 10);
+        if (parsed > 0) {
+            lua_memory_limit_bytes = parsed;
+        }
+    }
+    if (const char* val = std::getenv("LUA_AUTO_DISABLE_THRESHOLD"); val && *val) {
+        auto parsed = std::strtoull(val, nullptr, 10);
+        if (parsed > 0) {
+            lua_auto_disable_threshold = parsed;
+        }
+    }
+
+    // 7. 메트릭 설정
     if (const char* val = std::getenv("METRICS_PORT"); val && *val) {
         unsigned long v = std::strtoul(val, nullptr, 10);
         if (v > 0 && v < 65536) metrics_port = static_cast<unsigned short>(v);

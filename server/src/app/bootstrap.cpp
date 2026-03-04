@@ -206,6 +206,23 @@ int run_server(int argc, char** argv) {
             corelog::info(std::string("Log buffer capacity set to ") + std::to_string(config.log_buffer_capacity));
         }
 
+        if (config.lua_enabled) {
+#if KNIGHTS_BUILD_LUA_SCRIPTING
+            corelog::info(
+                "Lua scripting enabled"
+                " scripts_dir=" + config.lua_scripts_dir
+                + " reload_interval_ms=" + std::to_string(config.lua_reload_interval_ms)
+                + " instruction_limit=" + std::to_string(config.lua_instruction_limit)
+                + " memory_limit_bytes=" + std::to_string(config.lua_memory_limit_bytes)
+                + " auto_disable_threshold=" + std::to_string(config.lua_auto_disable_threshold));
+            if (config.lua_scripts_dir.empty()) {
+                corelog::warn("LUA_ENABLED is set but LUA_SCRIPTS_DIR is empty; scripts will not be loaded until configured");
+            }
+#else
+            corelog::warn("LUA_ENABLED is set but this binary was built with BUILD_LUA_SCRIPTING=OFF; Lua path remains disabled");
+#endif
+        }
+
         // 3. 코어 컴포넌트 초기화
         asio::io_context io;
         core::JobQueue job_queue(config.job_queue_max);
