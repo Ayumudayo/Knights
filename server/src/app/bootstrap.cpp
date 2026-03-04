@@ -11,6 +11,7 @@
 #include <optional>
 #include <cctype>
 #include <unordered_map>
+#include <limits>
 
 #include <boost/asio.hpp>
 #include <clocale>
@@ -35,6 +36,7 @@
 #include "server/core/concurrent/task_scheduler.hpp"
 #include "server/core/memory/memory_pool.hpp"
 #include "server/core/runtime_metrics.hpp"
+#include "server/core/scripting/lua_runtime.hpp"
 #include "server/chat/chat_service.hpp"
 // Protobuf (수신 payload ts_ms 파싱용)
 #include "wire.pb.h"
@@ -159,6 +161,7 @@ int run_server(int argc, char** argv) {
     core::concurrent::TaskScheduler scheduler;
     std::shared_ptr<asio::steady_timer> scheduler_timer;
     std::shared_ptr<core::storage::DbWorkerPool> db_workers;
+    std::shared_ptr<core::scripting::LuaRuntime> lua_runtime;
     std::shared_ptr<server::state::RedisInstanceStateBackend> registry_backend;
     server::state::InstanceRecord registry_record{};
     bool registry_registered = false;
@@ -222,6 +225,21 @@ int run_server(int argc, char** argv) {
             corelog::warn("LUA_ENABLED is set but this binary was built with BUILD_LUA_SCRIPTING=OFF; Lua path remains disabled");
 #endif
         }
+
+#if KNIGHTS_BUILD_LUA_SCRIPTING
+        if (config.lua_enabled) {
+            core::scripting::LuaRuntime::Config lua_cfg{};
+            lua_cfg.instruction_limit = config.lua_instruction_limit;
+            const std::uint64_t max_size_t = static_cast<std::uint64_t>(std::numeric_limits<std::size_t>::max());
+            const std::uint64_t capped_memory_limit =
+                config.lua_memory_limit_bytes > max_size_t ? max_size_t : config.lua_memory_limit_bytes;
+            lua_cfg.memory_limit_bytes = static_cast<std::size_t>(capped_memory_limit);
+
+            lua_runtime = std::make_shared<core::scripting::LuaRuntime>(std::move(lua_cfg));
+            services::set(lua_runtime);
+            corelog::info("Lua runtime scaffold initialised and registered");
+        }
+#endif
 
         // 3. 코어 컴포넌트 초기화
         asio::io_context io;
