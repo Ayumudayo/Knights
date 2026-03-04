@@ -1231,6 +1231,60 @@ TEST_F(ChatServiceTest, LuaColdHookDenySkipsAdminRuntimeSettingReload) {
 #endif
 }
 
+TEST_F(ChatServiceTest, LuaColdHookCanDenyAfterNativePluginPassesLogin) {
+#if !KNIGHTS_BUILD_LUA_SCRIPTING
+    GTEST_SKIP() << "Lua scripting build flag is disabled";
+#else
+    if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
+        GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
+    }
+
+    ScopedTempDir script_temp("knights_chat_lua_after_native_pass");
+    const auto script_path = script_temp.path() / "policy.lua";
+    {
+        std::ofstream out(script_path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(out.good());
+        out << "return { hook = \"on_login\", decision = \"deny\", reason = \"login denied after native pass\" }\n";
+        out.flush();
+        ASSERT_TRUE(out.good());
+    }
+
+    auto lua_runtime = std::make_shared<server::core::scripting::LuaRuntime>();
+    std::vector<server::core::scripting::LuaRuntime::ScriptEntry> scripts;
+    scripts.push_back(server::core::scripting::LuaRuntime::ScriptEntry{script_path, "policy"});
+    const auto reload_result = lua_runtime->reload_scripts(scripts);
+    ASSERT_TRUE(reload_result.error.empty());
+    services::set(lua_runtime);
+
+    ScopedEnvVar env_single("CHAT_HOOK_PLUGIN_PATH", TEST_CHAT_HOOK_V2_ONLY_PATH);
+    ScopedEnvVar env_paths("CHAT_HOOK_PLUGIN_PATHS", "");
+    ScopedEnvVar env_dir("CHAT_HOOK_PLUGINS_DIR", "");
+    ScopedTempDir cache_temp("knights_chat_service_hook_cache_pass");
+    const auto cache_path = cache_temp.path().string();
+    const auto lock_path = (cache_temp.path() / "chat_hook.lock").string();
+    ScopedEnvVar env_lock("CHAT_HOOK_LOCK_PATH", lock_path.c_str());
+    ScopedEnvVar env_cache("CHAT_HOOK_CACHE_DIR", cache_path.c_str());
+    chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
+
+    const auto before = lua_runtime->metrics_snapshot();
+
+    std::vector<std::uint8_t> payload;
+    write_lp_utf8(payload, "allow_user");
+    write_lp_utf8(payload, "test_token");
+    chat_service_->on_login(*session_, payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto error = WaitForError();
+    ASSERT_TRUE(error.has_value());
+    EXPECT_EQ(error->code, core_proto::errc::FORBIDDEN);
+    EXPECT_EQ(error->message, "login denied after native pass");
+
+    const auto after = lua_runtime->metrics_snapshot();
+    EXPECT_EQ(after.calls_total, before.calls_total + 1u);
+#endif
+}
+
 TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLogin) {
 #if !KNIGHTS_BUILD_LUA_SCRIPTING
     GTEST_SKIP() << "Lua scripting build flag is disabled";
