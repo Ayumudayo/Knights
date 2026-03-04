@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "server/core/scripting/script_watcher.hpp"
+#include "server/core/scripting/lua_runtime.hpp"
 
 #include <chrono>
 #include <filesystem>
@@ -138,6 +139,61 @@ TEST_F(ScriptWatcherTest, RecursiveFlagControlsNestedFileDiscovery) {
     auto recursive_changes = poll_changes(recursive);
     ASSERT_EQ(recursive_changes.size(), 1u);
     EXPECT_TRUE(has_event(recursive_changes, "deep.lua", ScriptWatcher::ChangeKind::kAdded));
+}
+
+TEST_F(ScriptWatcherTest, FileModificationCanTriggerLuaRuntimeReloadFlow) {
+#if !KNIGHTS_BUILD_LUA_SCRIPTING
+    GTEST_SKIP() << "Lua scripting build flag is disabled";
+#else
+    const auto script_path = temp_dir_ / "policy.lua";
+    write_text(script_path,
+               "return { hook = \"on_login\", decision = \"pass\" }\n");
+
+    ScriptWatcher::Config cfg{};
+    cfg.scripts_dir = temp_dir_;
+    cfg.extensions = {".lua"};
+    ScriptWatcher watcher(cfg);
+
+    LuaRuntime runtime;
+    std::vector<LuaRuntime::ScriptEntry> scripts;
+    scripts.push_back(LuaRuntime::ScriptEntry{script_path, "policy"});
+    const auto initial_reload = runtime.reload_scripts(scripts);
+    ASSERT_TRUE(initial_reload.error.empty());
+    ASSERT_EQ(initial_reload.loaded, 1u);
+
+    const auto baseline = runtime.call_all("on_login");
+    EXPECT_TRUE(baseline.error.empty());
+    EXPECT_EQ(baseline.decision, LuaHookDecision::kPass);
+
+    (void)poll_changes(watcher);
+
+    rewrite_text_with_tick(script_path,
+                           "return { hook = \"on_login\", decision = \"deny\", reason = \"reloaded deny\" }\n");
+
+    std::vector<ScriptWatcher::ChangeEvent> changes;
+    bool reload_called = false;
+    bool reload_ok = false;
+    EXPECT_TRUE(watcher.poll([&](const ScriptWatcher::ChangeEvent& event) {
+        changes.push_back(event);
+        if (event.path.filename().string() != "policy.lua") {
+            return;
+        }
+
+        reload_called = true;
+        const auto reload_result = runtime.reload_scripts(scripts);
+        reload_ok = reload_result.error.empty() && reload_result.failed == 0u
+            && reload_result.loaded == 1u;
+    }));
+
+    EXPECT_TRUE(has_event(changes, "policy.lua", ScriptWatcher::ChangeKind::kModified));
+    EXPECT_TRUE(reload_called);
+    EXPECT_TRUE(reload_ok);
+
+    const auto after_reload = runtime.call_all("on_login");
+    EXPECT_TRUE(after_reload.error.empty());
+    EXPECT_EQ(after_reload.decision, LuaHookDecision::kDeny);
+    EXPECT_EQ(after_reload.reason, "reloaded deny");
+#endif
 }
 
 } // namespace
