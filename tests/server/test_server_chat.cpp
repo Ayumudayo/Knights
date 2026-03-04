@@ -1171,6 +1171,67 @@ TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLogin) {
 #endif
 }
 
+TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLeave) {
+#if !KNIGHTS_BUILD_LUA_SCRIPTING
+    GTEST_SKIP() << "Lua scripting build flag is disabled";
+#else
+    if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
+        GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
+    }
+
+    ScopedTempDir script_temp("knights_chat_lua_plugin_block_leave");
+    const auto script_path = script_temp.path() / "on_leave.lua";
+    {
+        std::ofstream out(script_path, std::ios::binary | std::ios::trunc);
+        ASSERT_TRUE(out.good());
+        out << "return 1\n";
+        out.flush();
+        ASSERT_TRUE(out.good());
+    }
+
+    auto lua_runtime = std::make_shared<server::core::scripting::LuaRuntime>();
+    std::vector<server::core::scripting::LuaRuntime::ScriptEntry> scripts;
+    scripts.push_back(server::core::scripting::LuaRuntime::ScriptEntry{script_path, "on_leave"});
+    const auto reload_result = lua_runtime->reload_scripts(scripts);
+    ASSERT_TRUE(reload_result.error.empty());
+    services::set(lua_runtime);
+
+    ScopedEnvVar env_single("CHAT_HOOK_PLUGIN_PATH", TEST_CHAT_HOOK_V2_ONLY_PATH);
+    ScopedEnvVar env_paths("CHAT_HOOK_PLUGIN_PATHS", "");
+    ScopedEnvVar env_dir("CHAT_HOOK_PLUGINS_DIR", "");
+    ScopedTempDir cache_temp("knights_chat_service_hook_cache_leave");
+    const auto cache_path = cache_temp.path().string();
+    const auto lock_path = (cache_temp.path() / "chat_hook.lock").string();
+    ScopedEnvVar env_lock("CHAT_HOOK_LOCK_PATH", lock_path.c_str());
+    ScopedEnvVar env_cache("CHAT_HOOK_CACHE_DIR", cache_path.c_str());
+    chat_service_ = std::make_unique<ChatService>(io_, job_queue_, db_pool_, redis_);
+
+    LoginAs("allow_user");
+
+    std::vector<std::uint8_t> join_payload;
+    write_lp_utf8(join_payload, "locked_leave");
+    write_lp_utf8(join_payload, "");
+    chat_service_->on_join(*session_, join_payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto before_leave = lua_runtime->metrics_snapshot();
+
+    std::vector<std::uint8_t> leave_payload;
+    write_lp_utf8(leave_payload, "locked_leave");
+    chat_service_->on_leave(*session_, leave_payload);
+    ProcessJobs();
+    FlushSessionIO();
+
+    const auto error_code = WaitForErrorCode();
+    ASSERT_TRUE(error_code.has_value());
+    EXPECT_EQ(*error_code, core_proto::errc::FORBIDDEN);
+
+    const auto after_leave = lua_runtime->metrics_snapshot();
+    EXPECT_EQ(after_leave.calls_total, before_leave.calls_total);
+#endif
+}
+
 // 세션 종료 테스트
 TEST_F(ChatServiceTest, SessionClose) {
     // 1. 로그인
