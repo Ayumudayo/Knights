@@ -167,7 +167,7 @@ TEST_F(LuaRuntimeTest, CallAllParsesReturnTableDecisionForMatchingHook) {
 
     const auto script_path = temp_dir_ / "policy.lua";
     write_text(script_path,
-               "return { hook = \"on_login\", decision = \"deny\", reason = \"login denied by lua scaffold\" }\n");
+               "return { hook = \"on_login\", decision = \"deny\", reason = \"login denied by lua scaffold\", notice = \"welcome notice\" }\n");
 
     std::vector<LuaRuntime::ScriptEntry> scripts;
     scripts.push_back(LuaRuntime::ScriptEntry{script_path, "policy"});
@@ -181,15 +181,48 @@ TEST_F(LuaRuntimeTest, CallAllParsesReturnTableDecisionForMatchingHook) {
 
     EXPECT_EQ(login_result.decision, LuaHookDecision::kDeny);
     EXPECT_EQ(login_result.reason, "login denied by lua scaffold");
+    ASSERT_EQ(login_result.notices.size(), 1u);
+    EXPECT_EQ(login_result.notices.front(), "welcome notice");
     EXPECT_TRUE(login_result.error.empty());
 
     EXPECT_EQ(join_result.decision, LuaHookDecision::kPass);
     EXPECT_TRUE(join_result.reason.empty());
+    EXPECT_TRUE(join_result.notices.empty());
     EXPECT_TRUE(join_result.error.empty());
 #else
     EXPECT_FALSE(reload.error.empty());
     EXPECT_FALSE(login_result.error.empty());
     EXPECT_FALSE(join_result.error.empty());
+#endif
+}
+
+TEST_F(LuaRuntimeTest, CallAllAggregatesNoticesAcrossScripts) {
+    LuaRuntime runtime;
+
+    const auto script_a = temp_dir_ / "a.lua";
+    const auto script_b = temp_dir_ / "b.lua";
+    write_text(script_a,
+               "return { hook = \"on_login\", decision = \"pass\", notice = \"notice from env_a\" }\n");
+    write_text(script_b,
+               "return { hook = \"on_login\", decision = \"pass\", notice = \"notice from env_b\" }\n");
+
+    std::vector<LuaRuntime::ScriptEntry> scripts;
+    scripts.push_back(LuaRuntime::ScriptEntry{script_b, "env_b"});
+    scripts.push_back(LuaRuntime::ScriptEntry{script_a, "env_a"});
+
+    const auto reload = runtime.reload_scripts(scripts);
+    const auto result = runtime.call_all("on_login");
+
+#if KNIGHTS_BUILD_LUA_SCRIPTING
+    EXPECT_TRUE(reload.error.empty());
+    EXPECT_EQ(result.decision, LuaHookDecision::kPass);
+    ASSERT_EQ(result.notices.size(), 2u);
+    EXPECT_EQ(result.notices[0], "notice from env_a");
+    EXPECT_EQ(result.notices[1], "notice from env_b");
+    EXPECT_TRUE(result.error.empty());
+#else
+    EXPECT_FALSE(reload.error.empty());
+    EXPECT_FALSE(result.error.empty());
 #endif
 }
 

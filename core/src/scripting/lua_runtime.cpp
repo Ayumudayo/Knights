@@ -220,6 +220,7 @@ struct ScriptDecisionResult {
     bool valid{true};
     LuaHookDecision decision{LuaHookDecision::kPass};
     std::string reason;
+    std::string notice;
     std::string error;
 };
 
@@ -256,6 +257,11 @@ ScriptDecisionResult parse_return_table_scaffold(std::string_view script_text,
     if (const auto reason_token = extract_quoted_value_after_key(script_text, "reason");
         reason_token.has_value()) {
         out.reason = *reason_token;
+    }
+
+    if (const auto notice_token = extract_quoted_value_after_key(script_text, "notice");
+        notice_token.has_value()) {
+        out.notice = *notice_token;
     }
 
     return out;
@@ -431,19 +437,21 @@ LuaRuntime::CallAllResult LuaRuntime::call_all(const std::string& func_name) {
             loaded_scripts_.size(),
             LuaHookDecision::kPass,
             {},
+            {},
             make_disabled_error(),
         };
     }
 
     if (func_name.empty()) {
         ++errors_total_;
-        return CallAllResult{0, 0, LuaHookDecision::kPass, {}, "func_name is empty"};
+        return CallAllResult{0, 0, LuaHookDecision::kPass, {}, {}, "func_name is empty"};
     }
 
     const std::size_t attempted = loaded_scripts_.size();
     std::size_t failed = 0;
     LuaHookDecision aggregated_decision = LuaHookDecision::kPass;
     std::string aggregated_reason;
+    std::vector<std::string> aggregated_notices;
     std::string first_error;
 
     std::vector<std::pair<std::string, std::filesystem::path>> ordered_scripts;
@@ -467,6 +475,10 @@ LuaRuntime::CallAllResult LuaRuntime::call_all(const std::string& func_name) {
             continue;
         }
 
+        if (!script_result.notice.empty()) {
+            aggregated_notices.push_back(script_result.notice);
+        }
+
         const int current_rank = hook_decision_rank(aggregated_decision);
         const int candidate_rank = hook_decision_rank(script_result.decision);
         if (candidate_rank > current_rank) {
@@ -476,7 +488,7 @@ LuaRuntime::CallAllResult LuaRuntime::call_all(const std::string& func_name) {
     }
 
     calls_total_ += attempted;
-    return CallAllResult{attempted, failed, aggregated_decision, aggregated_reason, first_error};
+    return CallAllResult{attempted, failed, aggregated_decision, aggregated_reason, aggregated_notices, first_error};
 }
 
 bool LuaRuntime::register_host_api(const std::string& table_name,

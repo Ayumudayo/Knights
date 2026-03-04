@@ -60,6 +60,7 @@ public:
         std::size_t failed{0};
         LuaHookDecision decision{LuaHookDecision::kPass};
         std::string reason;
+        std::vector<std::string> notices;
         std::string error;
     };
 
