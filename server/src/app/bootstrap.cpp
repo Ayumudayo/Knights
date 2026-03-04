@@ -225,6 +225,7 @@ int run_server(int argc, char** argv) {
     std::shared_ptr<asio::steady_timer> scheduler_timer;
     std::shared_ptr<core::storage::DbWorkerPool> db_workers;
     std::shared_ptr<core::scripting::LuaRuntime> lua_runtime;
+    std::shared_ptr<asio::strand<asio::io_context::executor_type>> lua_reload_strand;
     std::shared_ptr<core::scripting::ScriptWatcher> lua_script_watcher;
     std::shared_ptr<server::state::RedisInstanceStateBackend> registry_backend;
     server::state::InstanceRecord registry_record{};
@@ -314,6 +315,12 @@ int run_server(int argc, char** argv) {
 
         // 3. 코어 컴포넌트 초기화
         asio::io_context io;
+#if KNIGHTS_BUILD_LUA_SCRIPTING
+        if (lua_runtime) {
+            lua_reload_strand = std::make_shared<asio::strand<asio::io_context::executor_type>>(
+                asio::make_strand(io));
+        }
+#endif
         core::JobQueue job_queue(config.job_queue_max);
         auto* job_queue_ptr = &job_queue;
         core::ThreadManager workers(job_queue);
@@ -372,7 +379,8 @@ int run_server(int argc, char** argv) {
             const auto scripts_dir = watcher_cfg.scripts_dir;
             lua_script_watcher = std::make_shared<core::scripting::ScriptWatcher>(std::move(watcher_cfg));
 
-            const auto reload_all_lua_scripts = [lua_runtime, scripts_dir]() {
+            const auto reload_all_lua_scripts = std::make_shared<std::function<void()>>();
+            *reload_all_lua_scripts = [lua_runtime, scripts_dir]() {
                 const auto scripts = list_lua_scripts(scripts_dir);
                 std::vector<core::scripting::LuaRuntime::ScriptEntry> entries;
                 entries.reserve(scripts.size());
@@ -397,10 +405,23 @@ int run_server(int argc, char** argv) {
                     + " failed=" + std::to_string(reload_result.failed));
             };
 
-            reload_all_lua_scripts();
+            const auto schedule_lua_reload = [lua_reload_strand, reload_all_lua_scripts]() {
+                if (!lua_reload_strand) {
+                    (*reload_all_lua_scripts)();
+                    return;
+                }
+
+                asio::post(*lua_reload_strand, [reload_all_lua_scripts]() {
+                    (*reload_all_lua_scripts)();
+                });
+            };
+
+            (*reload_all_lua_scripts)();
             (void)lua_script_watcher->poll(core::scripting::ScriptWatcher::ChangeCallback{});
 
-            const auto poll_lua_scripts = [lua_script_watcher, reload_all_lua_scripts, scripts_dir]() {
+            const auto poll_lua_scripts = [lua_script_watcher,
+                                           schedule_lua_reload,
+                                           scripts_dir]() {
                 std::size_t change_count = 0;
                 const bool poll_ok = lua_script_watcher->poll([&change_count](const core::scripting::ScriptWatcher::ChangeEvent&) {
                     ++change_count;
@@ -416,7 +437,7 @@ int run_server(int argc, char** argv) {
                 }
 
                 corelog::info("Lua script watcher detected changes count=" + std::to_string(change_count));
-                reload_all_lua_scripts();
+                schedule_lua_reload();
             };
 
             poll_lua_scripts();
