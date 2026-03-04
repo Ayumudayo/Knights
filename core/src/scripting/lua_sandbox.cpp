@@ -52,6 +52,11 @@ Policy default_policy() {
         "utf8",
     };
     policy.forbidden_symbols = {
+        "os",
+        "io",
+        "debug",
+        "package",
+        "ffi",
         "dofile",
         "loadfile",
         "require",
