@@ -77,6 +77,8 @@ Lua cold-hook scaffold 참고:
 
 - 스크립트 상단 주석 directive로 훅 결정을 지정할 수 있다.
 - 예: `-- hook=on_login decision=deny reason=login denied by lua scaffold`
+- return table 예: `return { hook = "on_login", decision = "pass", notice = "welcome" }`
+- 현재 파싱 필드: `hook`, `decision`, `reason`, `notice`
 - decision 우선순위는 `block/deny > handled > modify > pass/allow`이다.
 
 ### 2.3 `gateway_app` 전용

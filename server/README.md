@@ -154,7 +154,9 @@ docker exec knights-stack-server-1-1 rm -f /app/plugins/10_chat_hook_sample_LOCK
 현재 Lua 런타임은 cold path에서 스캐폴드 모드로 동작하며, 스크립트 주석 directive를 통해 훅 결정을 시뮬레이션할 수 있다.
 
 - directive 형식(예): `-- hook=on_login decision=deny reason=login denied by lua scaffold`
+- return-table 형식(예): `return { hook = "on_login", decision = "pass", notice = "welcome" }`
 - 지원 decision: `pass`, `allow`, `modify`, `handled`, `block`, `deny`
+- 지원 필드: `hook`, `decision`, `reason`, `notice` (모두 optional, `decision`은 사용 시 유효 토큰 필요)
 - 우선순위: `block/deny > handled > modify > pass/allow`
 - 적용 경로: native 훅 체인 결과가 `kPass`일 때만 Lua cold hook 호출
 - native 훅이 `kBlock/kDeny`를 반환하면 Lua는 호출되지 않는다
