@@ -68,6 +68,17 @@
       "description": "Windows configuration using Visual Studio 2022"
     },
     {
+      "name": "windows-lua-off",
+      "inherits": "windows-base",
+      "displayName": "Windows Lua OFF (VS2022)",
+      "description": "Windows configuration with BUILD_LUA_SCRIPTING=OFF",
+      "binaryDir": "${sourceDir}/build-windows-lua-off",
+      "toolchainFile": "${sourceDir}/build-windows/conan/build/generators/conan_toolchain.cmake",
+      "cacheVariables": {
+        "BUILD_LUA_SCRIPTING": "OFF"
+      }
+    },
+    {
       "name": "windows-core-engine",
       "inherits": "windows-base",
       "displayName": "Windows Core Engine (VS2022)",
@@ -240,6 +251,12 @@
       "displayName": "Windows Release"
     },
     {
+      "name": "windows-lua-off-debug",
+      "configurePreset": "windows-lua-off",
+      "configuration": "Debug",
+      "displayName": "Windows Lua OFF Debug"
+    },
+    {
       "name": "windows-core-engine-debug",
       "configurePreset": "windows-core-engine",
       "configuration": "Debug",
@@ -323,6 +340,17 @@
       "name": "windows-test",
       "configurePreset": "windows",
       "configuration": "Release",
+      "execution": {
+        "jobs": 8
+      },
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "windows-lua-off-test",
+      "configurePreset": "windows-lua-off",
+      "configuration": "Debug",
       "execution": {
         "jobs": 8
       },

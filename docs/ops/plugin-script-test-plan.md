@@ -136,13 +136,19 @@ L2 Integration (`tests/python/` + docker stack):
 ```powershell
 # ON 경로
 pwsh scripts/build.ps1 -Config Debug -Target core_plugin_runtime_tests
-ctest --test-dir build-windows -C Debug -R "LuaRuntimeTest\.|ChatLuaBindingsTest" --output-on-failure
+ctest --test-dir build-windows -C Debug -R "LuaRuntimeTest|ChatLuaBindingsTest" --output-on-failure --no-tests=error
 
 # OFF 경로
-cmake -S . -B build-windows-lua-off -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE="build-windows/conan/build/generators/conan_toolchain.cmake" -DCMAKE_CONFIGURATION_TYPES=Debug -DBUILD_LUA_SCRIPTING=OFF
-cmake --build build-windows-lua-off --config Debug --target core_plugin_runtime_tests server_general_tests --parallel
-ctest --test-dir build-windows-lua-off -C Debug -R "LuaRuntimeTest\.|ChatLuaBindingsTest" --output-on-failure
+cmake --preset windows-lua-off
+Select-String -Path build-windows-lua-off/CMakeCache.txt -Pattern "^BUILD_LUA_SCRIPTING:BOOL=OFF$"
+cmake --build --preset windows-lua-off-debug --target core_plugin_runtime_tests server_general_tests
+ctest --preset windows-lua-off-test -R "LuaRuntimeTest|ChatLuaBindingsTest" --output-on-failure --no-tests=error
 ```
+
+검증 규칙:
+- ON/OFF 명령은 모두 Lua 관련 테스트가 실제로 매치/실행되어야 하며, 0개 매치 시 `--no-tests=error`로 실패 처리한다.
+- ON/OFF 모두 동일 테스트군(`LuaRuntimeTest`, `ChatLuaBindingsTest`)을 실행하되, 기대값은 `KNIGHTS_BUILD_LUA_SCRIPTING` 분기(assertion)로 달라진다.
+- OFF 경로는 `CMakeCache.txt`에서 `BUILD_LUA_SCRIPTING:BOOL=OFF`를 먼저 확인한 뒤 테스트를 실행한다.
 
 4) Doxygen/문서 게이트
 - `python tools/check_doxygen_coverage.py`
