@@ -598,29 +598,9 @@ jobs:
         run: |
           PERF_P95_MAX_MS=300 PERF_P99_MAX_MS=700 PERF_MIN_THROUGHPUT_RPS=10 python3 tests/python/verify_soak_perf_gate.py
 
-      - name: Verify Plugin Metrics
+      - name: Smoke Test (Plugin/Script via ctest label)
         run: |
-          python3 tests/python/verify_plugin_hot_reload.py --check-only
-
-      - name: Hot Reload Plugin (v2) And Verify Metrics
-        run: |
-          python3 tests/python/verify_plugin_hot_reload.py
-
-      - name: Verify v2 Loader With v1 Fallback Plugin
-        run: |
-          python3 tests/python/verify_plugin_v2_fallback.py
-
-      - name: Rollback Plugin (v1) And Verify Metrics
-        run: |
-          python3 tests/python/verify_plugin_rollback.py
-
-      - name: Hot Reload Lua Script And Verify Watcher
-        run: |
-          python3 tests/python/verify_script_hot_reload.py
-
-      - name: Smoke Test (Chat Hook Behavior)
-        run: |
-          python3 tests/python/verify_chat_hook_behavior.py
+          KNIGHTS_ENABLE_STACK_PYTHON_TESTS=1 ctest --test-dir build-linux -L "plugin-script" --output-on-failure
 
       - name: Dump Stack Logs (On Failure)
         if: failure()

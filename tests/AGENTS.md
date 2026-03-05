@@ -32,3 +32,12 @@ Note: `ctest` does not rebuild binaries. If a test executable fails to start wit
 - `tests/python/verify_admin_control_plane_e2e.py`
 
 Most Python tests expect the Docker stack (`docker/stack`) to be running.
+
+Plugin/script smoke tests can be run through ctest labels after configuring tests:
+
+```bash
+cmake --preset linux -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=ON
+KNIGHTS_ENABLE_STACK_PYTHON_TESTS=1 ctest --test-dir build-linux -L "plugin-script" --output-on-failure
+```
+
+Without `KNIGHTS_ENABLE_STACK_PYTHON_TESTS=1`, label-matched stack Python tests are skipped by design.

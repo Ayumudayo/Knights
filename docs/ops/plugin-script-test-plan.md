@@ -13,13 +13,11 @@
 ## 2. Baseline
 
 현재 자동 검증:
-- CI Docker E2E에서 플러그인 메트릭 확인 (`Verify Plugin Metrics`)
-- CI Docker E2E에서 v2 swap/hot-reload 반영 확인 (`Hot Reload Plugin (v2) And Verify Metrics`)
+- CI Docker stack 경로에서 ctest label(`plugin-script`) 기반 plugin/script smoke 실행
+- 개별 시나리오(`verify_plugin_hot_reload`, `verify_plugin_v2_fallback`, `verify_plugin_rollback`, `verify_script_hot_reload`, `verify_script_fallback_switch`, `verify_chat_hook_behavior`)를 하나의 게이트로 집계
 
 현재 공백:
-- `PluginHost`, `PluginChainHost`, `ScriptWatcher` 전용 단위 테스트 부재
-- v1/v2 혼합 체인/호환 폴백 자동 검증 부재
-- Lua runtime/sandbox/script hot-reload 자동 검증 부재
+- stack 의존 Python 테스트는 `KNIGHTS_ENABLE_STACK_PYTHON_TESTS=1` 환경이 있어야 실행됨
 
 ## 3. Test Layers
 
@@ -115,7 +113,7 @@ L2 Integration (`tests/python/` + docker stack):
 
 보강 대상:
 - `tests/CMakeLists.txt` (타깃 + `gtest_discover_tests`)
-- `.github/workflows/ci.yml` (plugin/script step 분리)
+- `.github/workflows/ci.yml` (plugin/script ctest label 게이트)
 
 ## 6. CI Plan
 

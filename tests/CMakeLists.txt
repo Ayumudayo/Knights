@@ -369,9 +369,61 @@ if (BUILD_CONTRACT_TESTS)
         NAME CoreApiStableGovernanceFixtures
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_core_api_contracts.py" --check-stable-governance-fixtures
       )
+
     else()
       message(WARNING "Python3 not found: CoreApiBoundaryFixtures test disabled")
     endif()
+endif()
+
+if (Python3_Interpreter_FOUND)
+    add_test(
+      NAME StackPythonVerifyPluginMetrics
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_plugin_hot_reload.py" --check-only
+    )
+    add_test(
+      NAME StackPythonHotReloadPluginV2
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_plugin_hot_reload.py"
+    )
+    add_test(
+      NAME StackPythonVerifyPluginV2Fallback
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_plugin_v2_fallback.py"
+    )
+    add_test(
+      NAME StackPythonRollbackPluginV1
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_plugin_rollback.py"
+    )
+    add_test(
+      NAME StackPythonHotReloadLuaScript
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_script_hot_reload.py"
+    )
+    add_test(
+      NAME StackPythonVerifyScriptFallbackSwitch
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_script_fallback_switch.py"
+    )
+    add_test(
+      NAME StackPythonChatHookBehavior
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_chat_hook_behavior.py"
+    )
+
+    set_tests_properties(
+      StackPythonVerifyPluginMetrics
+      StackPythonHotReloadPluginV2
+      StackPythonVerifyPluginV2Fallback
+      StackPythonRollbackPluginV1
+      StackPythonHotReloadLuaScript
+      StackPythonVerifyScriptFallbackSwitch
+      StackPythonChatHookBehavior
+      PROPERTIES
+        LABELS "python;stack;plugin-script"
+        SKIP_RETURN_CODE 77
+    )
 endif()
 
 if (NOT BUILD_GTEST_TESTS AND NOT BUILD_CONTRACT_TESTS)
