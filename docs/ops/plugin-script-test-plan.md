@@ -120,7 +120,7 @@ L2 Integration (`tests/python/` + docker stack):
 ## 6. CI Plan
 
 1) Fast Gate (PR 기본)
-- Windows: `ctest --preset windows-test` + 신규 core/server 단위 테스트 포함
+- Windows: `ctest --preset windows-test` + `windows-lua-off` 프리셋 기반 OFF 회귀(`LuaRuntimeTest|LuaSandboxTest|ChatLuaBindingsTest`) 포함
 - Linux: 계약/코드젠/문서 + 핵심 단위 테스트
 
 2) Integration Gate (PR/merge)

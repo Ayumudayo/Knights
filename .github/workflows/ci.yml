@@ -416,6 +416,13 @@ jobs:
         shell: pwsh
         run: |
           ctest --preset windows-test --parallel 8 --output-on-failure
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/setup_conan.ps1 -Config Debug -Feature windows-dev -BuildDir build-windows-lua-off
+          cmake --preset windows-lua-off
+          if (-not (Select-String -Path build-windows-lua-off/CMakeCache.txt -Pattern '^BUILD_LUA_SCRIPTING:BOOL=OFF$')) {
+            throw 'BUILD_LUA_SCRIPTING=OFF was not applied in build-windows-lua-off'
+          }
+          cmake --build --preset windows-lua-off-debug --target core_plugin_runtime_tests server_general_tests --parallel
+          ctest --preset windows-lua-off-test -R "LuaRuntimeTest|LuaSandboxTest|ChatLuaBindingsTest" --output-on-failure --no-tests=error
 
   linux-docker-stack:
     runs-on: ubuntu-latest
