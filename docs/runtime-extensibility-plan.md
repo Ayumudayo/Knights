@@ -9,8 +9,9 @@
 - Phase 6.5 CI 단순화:
   - plugin/script Python smoke를 개별 step 나열 대신 ctest label(`plugin-script`) 기반으로 집계했다.
   - stack 의존 Python 테스트는 `KNIGHTS_ENABLE_STACK_PYTHON_TESTS=1`일 때만 실행되고, 미설정 시 skip code(77)로 처리한다.
-  - Linux CI의 `BUILD_LUA_SCRIPTING=OFF` 검증은 `build-linux/CMakeCache.txt`에서 `BUILD_LUA_SCRIPTING:BOOL=OFF`를 먼저 확인하고, `ctest --no-tests=error`로 Lua 관련 테스트 매치 0건을 실패 처리하도록 강화했다.
-  - Windows fast-tests도 기존 unit-test step 내부에서 `windows-lua-off` 프리셋을 추가 실행해 `BUILD_LUA_SCRIPTING=OFF` cache 검증 + Lua 관련 테스트(`LuaRuntimeTest|LuaSandboxTest|ChatLuaBindingsTest`)를 동일하게 강제한다.
+  - `tools/check_lua_build_toggle.py`를 추가해 `BUILD_LUA_SCRIPTING` cache 토글과 Lua runtime source 선택(`lua_runtime.cpp` vs `lua_runtime_disabled.cpp`)을 자동 검증한다.
+  - Linux CI의 OFF 경로는 `--require-source-check`로 source 선택까지 강제하고, `ctest --no-tests=error`로 Lua 관련 테스트 매치 0건을 실패 처리한다.
+  - Windows fast-tests도 기존 unit-test step 내부에서 `windows-lua-off` 프리셋을 추가 실행해 동일 checker + Lua 관련 테스트(`LuaRuntimeTest|LuaSandboxTest|ChatLuaBindingsTest`)를 강제한다.
 - Phase 3 build-toggle 경로 보강:
   - `core/CMakeLists.txt`에서 `BUILD_LUA_SCRIPTING` 값에 따라 `lua_runtime.cpp`(ON) 또는 `lua_runtime_disabled.cpp`(OFF)를 선택하도록 분리했다.
   - OFF 빌드에서 `LuaRuntime` API 시그니처는 유지하고, disabled-mode 결과를 반환하는 경로를 고정했다.

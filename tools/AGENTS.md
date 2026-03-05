@@ -12,6 +12,7 @@ Aux binaries + code generation.
 - `tools/gen_opcodes.py`: generates opcode headers from JSON specs (grouping + `opcode_name()` helpers).
 - `tools/gen_opcode_docs.py`: validates opcode specs and generates `docs/protocol/opcodes.md` (system/game share the same 16-bit space).
 - `tools/gen_wire_codec.py`: generates `core/include/server/wire/codec.hpp` from `protocol/wire_map.json`.
+- `tools/check_lua_build_toggle.py`: verifies `BUILD_LUA_SCRIPTING` cache value and Lua runtime source selection (`lua_runtime.cpp` vs `lua_runtime_disabled.cpp`).
 - `tools/new_plugin.py`: scaffold generator for ChatHook ABI v2 plugin source + manifest.
 - `tools/new_script.py`: scaffold generator for Lua cold-hook script + manifest.
 - `tools/ext_inventory.py`: manifest inventory scanner/validator for plugin/script artifacts.
