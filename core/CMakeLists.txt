@@ -35,6 +35,7 @@ if (BUILD_LUA_SCRIPTING)
     target_sources(server_core PRIVATE
         src/scripting/lua_runtime.cpp
     )
+    knights_configure_luajit_submodule(KNIGHTS_LUAJIT_VENDOR_TARGET)
 else()
     target_sources(server_core PRIVATE
         src/scripting/lua_runtime_disabled.cpp
@@ -103,6 +104,10 @@ if (NOT TARGET lz4::lz4)
 endif()
 
 target_link_libraries(server_core PUBLIC OpenSSL::SSL OpenSSL::Crypto lz4::lz4)
+
+if (BUILD_LUA_SCRIPTING AND KNIGHTS_LUAJIT_VENDOR_TARGET)
+    target_link_libraries(server_core PRIVATE ${KNIGHTS_LUAJIT_VENDOR_TARGET})
+endif()
 
 target_include_directories(server_core PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

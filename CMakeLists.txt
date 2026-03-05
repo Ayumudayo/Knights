@@ -18,11 +18,22 @@ option(BUILD_WRITE_BEHIND_TOOLS "Build write-behind helper tools" ON)
 option(BUILD_LUA_SCRIPTING "Compile Lua scripting capability into binaries" ON)
 option(BUILD_ADMIN_APP "Build admin management app" ON)
 option(BUILD_MIGRATIONS_RUNNER "Build migrations runner tool" ON)
+set(KNIGHTS_LUAJIT_SUBMODULE_DIR "${CMAKE_SOURCE_DIR}/external/luajit" CACHE PATH
+    "Path to the upstream LuaJIT source submodule")
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(knights_luajit_submodule)
+
+if (BUILD_LUA_SCRIPTING)
+    if (NOT EXISTS "${KNIGHTS_LUAJIT_SUBMODULE_DIR}/src/lua.h")
+        message(FATAL_ERROR
+            "BUILD_LUA_SCRIPTING=ON requires upstream LuaJIT sources at: ${KNIGHTS_LUAJIT_SUBMODULE_DIR}. "
+            "Run: git submodule update --init --recursive external/luajit")
+    endif()
+endif()
 
 
 
