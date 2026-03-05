@@ -130,6 +130,7 @@ L2 Integration (`tests/python/` + docker stack):
 3) Matrix Gate
 - `BUILD_LUA_SCRIPTING=OFF` (기존 동작 불변)
 - `BUILD_LUA_SCRIPTING=ON` (Lua 경로 전용)
+- OFF 경로는 configure cache(`BUILD_LUA_SCRIPTING:BOOL=OFF`)를 확인하고, 테스트 매치 0건은 `--no-tests=error`로 실패 처리
 
 권장 실행 명령(Windows):
 

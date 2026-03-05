@@ -500,8 +500,9 @@ jobs:
             knights-base:latest \
             bash -lc "set -e; apt-get update && apt-get install -y ninja-build; \
             cmake --preset linux -DBUILD_LUA_SCRIPTING=OFF -DBUILD_CONTRACT_TESTS=OFF; \
+            grep -q '^BUILD_LUA_SCRIPTING:BOOL=OFF$' build-linux/CMakeCache.txt; \
             cmake --build --preset linux-debug --target core_plugin_runtime_tests --parallel; \
-            ./build-linux/tests/core_plugin_runtime_tests --gtest_filter='LuaRuntimeTest.*:LuaSandboxTest.*'"
+            ctest --test-dir build-linux -R 'LuaRuntimeTest|LuaSandboxTest' --output-on-failure --no-tests=error"
 
       - name: Start Stack (Detached)
         shell: pwsh
