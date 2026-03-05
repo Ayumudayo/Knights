@@ -382,6 +382,13 @@ if (Python3_Interpreter_FOUND)
               "${CMAKE_SOURCE_DIR}/tests/python/verify_plugin_hot_reload.py" --check-only
     )
     add_test(
+      NAME StackPythonVerifyRuntimeTogglesOn
+      COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
+              "${CMAKE_SOURCE_DIR}/tests/python/verify_runtime_toggle_metrics.py"
+              --expect-chat-hook-enabled 1
+              --expect-lua-enabled 1
+    )
+    add_test(
       NAME StackPythonHotReloadPluginV2
       COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/run_stack_test.py"
               "${CMAKE_SOURCE_DIR}/tests/python/verify_plugin_hot_reload.py"
@@ -414,6 +421,7 @@ if (Python3_Interpreter_FOUND)
 
     set_tests_properties(
       StackPythonVerifyPluginMetrics
+      StackPythonVerifyRuntimeTogglesOn
       StackPythonHotReloadPluginV2
       StackPythonVerifyPluginV2Fallback
       StackPythonRollbackPluginV1

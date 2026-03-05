@@ -506,14 +506,53 @@ jobs:
             cmake --build --preset linux-debug --target core_plugin_runtime_tests --parallel; \
             ctest --test-dir build-linux -R 'LuaRuntimeTest|LuaSandboxTest' --output-on-failure --no-tests=error"
 
-      - name: Start Stack (Detached)
+      - name: Start Stack Baseline (Runtime Off)
+        shell: pwsh
+        env:
+          DOCKER_BUILDKIT: "0"
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action up -Detached -Build
+
+      - name: Wait For HAProxy (Baseline)
+        run: |
+          python3 - <<'PY'
+          import socket, time
+          host, port = '127.0.0.1', 6000
+          deadline = time.time() + 60
+          last_err = None
+          while time.time() < deadline:
+              try:
+                  with socket.create_connection((host, port), timeout=1.0):
+                      print('HAProxy is ready (baseline)')
+                      raise SystemExit(0)
+              except Exception as e:
+                  last_err = e
+                  time.sleep(1)
+          raise SystemExit(f'HAProxy not ready (baseline): {last_err}')
+          PY
+
+      - name: Verify Runtime Toggles (Off Baseline)
+        run: |
+          python3 tests/python/verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 0 --expect-lua-enabled 0
+
+      - name: Smoke Test (Chat, Runtime Off Baseline)
+        run: |
+          python3 tests/python/verify_chat.py
+
+      - name: Stop Stack Baseline
+        if: always()
+        shell: pwsh
+        run: |
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action down
+
+      - name: Start Stack (Detached, Runtime On)
         shell: pwsh
         env:
           DOCKER_BUILDKIT: "0"
           CHAT_HOOK_ENABLED: "1"
           LUA_ENABLED: "1"
         run: |
-          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action up -Detached -Build
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/deploy_docker.ps1 -Action up -Detached
 
       - name: Wait For HAProxy
         run: |
@@ -574,6 +613,10 @@ jobs:
 
           print('health/ready endpoints OK')
           PY
+
+      - name: Verify Runtime Toggles (On)
+        run: |
+          python3 tests/python/verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 1 --expect-lua-enabled 1
 
       - name: Smoke Test (PONG)
         run: |

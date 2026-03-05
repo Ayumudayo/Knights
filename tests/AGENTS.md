@@ -30,6 +30,7 @@ Note: `ctest` does not rebuild binaries. If a test executable fails to start wit
 - `tests/python/verify_admin_api.py`
 - `tests/python/verify_admin_auth.py`
 - `tests/python/verify_admin_control_plane_e2e.py`
+- `tests/python/verify_runtime_toggle_metrics.py`
 - `tests/python/test_check_doxygen_coverage.py`
 - `tests/python/test_check_lua_build_toggle.py`
 

@@ -438,6 +438,7 @@ std::string render_metrics() {
         };
 
         stream << "# TYPE hook_auto_disable_total counter\n";
+        stream << "# TYPE chat_lua_hooks_enabled gauge\n";
         stream << "# TYPE chat_lua_hook_disabled gauge\n";
         stream << "# TYPE chat_lua_hook_consecutive_failures gauge\n";
         stream << "# TYPE chat_lua_hook_auto_disable_threshold gauge\n";
@@ -457,6 +458,7 @@ std::string render_metrics() {
 
         stream << "chat_lua_hook_auto_disable_threshold "
                << static_cast<long double>(lua_metrics.auto_disable_threshold) << "\n";
+        stream << "chat_lua_hooks_enabled " << (lua_metrics.enabled ? 1 : 0) << "\n";
         stream << "lua_loaded_scripts "
                << static_cast<long double>(lua_metrics.loaded_scripts) << "\n";
         stream << "lua_memory_used_bytes "

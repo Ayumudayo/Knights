@@ -121,7 +121,7 @@ L2 Integration (`tests/python/` + docker stack):
 
 1) Fast Gate (PR 기본)
 - Windows: `ctest --preset windows-test` + `tools/check_lua_build_toggle.py --expect on` + Lua 핵심 테스트군(`LuaRuntimeTest|LuaSandboxTest|ChatLuaBindingsTest`)
-- Linux: 계약/코드젠/문서 + 핵심 단위 테스트 + `BUILD_LUA_SCRIPTING=ON` checker 검증
+- Linux: 계약/코드젠/문서 + 핵심 단위 테스트 + `BUILD_LUA_SCRIPTING=ON` checker 검증 + stack baseline/runtime 토글 검증
 
 2) Integration Gate (PR/merge)
 - Docker stack + plugin hot-reload + metrics
@@ -132,6 +132,10 @@ L2 Integration (`tests/python/` + docker stack):
 - Runtime Gate: `CHAT_HOOK_ENABLED=0/1`, `LUA_ENABLED=0/1` 시나리오 회귀
 - `BUILD_LUA_SCRIPTING=OFF`는 커스텀 호환성 점검 경로로 유지(기본 CI 게이트 아님)
 
+현재 CI 반영:
+- baseline(OFF): stack를 기본 env(`CHAT_HOOK_ENABLED=0`, `LUA_ENABLED=0`)로 기동 후 `verify_runtime_toggle_metrics.py`로 두 토글이 비활성 상태인지 확인
+- smoke(ON): stack를 `CHAT_HOOK_ENABLED=1`, `LUA_ENABLED=1`로 기동 후 동일 스크립트로 활성 상태 확인
+
 권장 실행 명령(Windows):
 
 ```powershell
@@ -139,6 +143,10 @@ L2 Integration (`tests/python/` + docker stack):
 pwsh scripts/build.ps1 -Config Debug -Target core_plugin_runtime_tests
 python tools/check_lua_build_toggle.py --build-dir build-windows --expect on
 ctest --test-dir build-windows -C Debug -R "LuaRuntimeTest|LuaSandboxTest|ChatLuaBindingsTest" --output-on-failure --no-tests=error
+
+# runtime 토글 점검 (stack 필요)
+python tests/python/verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 0 --expect-lua-enabled 0
+python tests/python/verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 1 --expect-lua-enabled 1
 ```
 
 검증 규칙:
