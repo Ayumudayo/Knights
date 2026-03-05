@@ -26,11 +26,20 @@ add_library(server_core
     src/security/admin_command_auth.cpp
     src/compression/compressor.cpp
     src/plugin/shared_library.cpp
-    src/scripting/lua_runtime.cpp
     src/scripting/lua_sandbox.cpp
     src/scripting/script_watcher.cpp
 )
 add_library(server_core::server_core ALIAS server_core)
+
+if (BUILD_LUA_SCRIPTING)
+    target_sources(server_core PRIVATE
+        src/scripting/lua_runtime.cpp
+    )
+else()
+    target_sources(server_core PRIVATE
+        src/scripting/lua_runtime_disabled.cpp
+    )
+endif()
 
 # -----------------------------------------------------------------------------
 # Build metadata (git hash/describe + build time)
