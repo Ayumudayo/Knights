@@ -469,21 +469,32 @@ jobs:
         run: |
           docker image inspect knights-base:latest > /dev/null
 
-      - name: Build gateway_app with UDP ingress OFF
+      - name: Build gateway_app with UDP ingress OFF + Lua OFF source-selection regression
         run: |
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/app" \
             -w /app \
             knights-base:latest \
-            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; cmake --preset linux -DKNIGHTS_ENABLE_GATEWAY_UDP_INGRESS=OFF -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF; cmake --build --preset linux-debug --target gateway_app --parallel"
+            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; \
+            cmake --preset linux -DKNIGHTS_ENABLE_GATEWAY_UDP_INGRESS=OFF -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF; \
+            cmake --build --preset linux-debug --target gateway_app --parallel; \
+            cmake --preset linux-lua-off -DBUILD_CONTRACT_TESTS=OFF; \
+            python3 tools/check_lua_build_toggle.py --build-dir build-linux-lua-off --expect off --require-source-check; \
+            cmake --build --preset linux-lua-off-debug --target core_plugin_runtime_tests --parallel"
 
-      - name: ASan/UBSan Build (server_app)
+      - name: ASan/UBSan Build (server_app) + Lua ON core runtime gate
         run: |
           docker run --rm \
             -v "${GITHUB_WORKSPACE}:/app" \
             -w /app \
             knights-base:latest \
-            bash -lc "apt-get update && apt-get install -y ninja-build && cmake --preset linux-asan -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF && cmake --build --preset linux-asan --target server_app protocol_fuzz_harness --parallel"
+            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; \
+            cmake --preset linux-asan -DBUILD_GTEST_TESTS=OFF -DBUILD_CONTRACT_TESTS=OFF; \
+            cmake --build --preset linux-asan --target server_app protocol_fuzz_harness --parallel; \
+            cmake --preset linux -DBUILD_LUA_SCRIPTING=ON -DBUILD_CONTRACT_TESTS=OFF; \
+            python3 tools/check_lua_build_toggle.py --build-dir build-linux --expect on --require-source-check; \
+            cmake --build --preset linux-debug --target core_plugin_runtime_tests --parallel; \
+            ctest --test-dir build-linux -R 'LuaRuntimeTest|LuaSandboxTest' --output-on-failure --no-tests=error"
 
       - name: ASan Protocol Fuzz Harness
         run: |
@@ -493,29 +504,6 @@ jobs:
             -e FUZZ_ITERATIONS=200000 \
             knights-base:latest \
             bash -lc "./build-linux/tests/protocol_fuzz_harness"
-
-      - name: Verify BUILD_LUA_SCRIPTING=ON (Build + Core Lua Runtime Tests)
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:/app" \
-            -w /app \
-            knights-base:latest \
-            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; \
-            cmake --preset linux -DBUILD_LUA_SCRIPTING=ON -DBUILD_CONTRACT_TESTS=OFF; \
-            python3 tools/check_lua_build_toggle.py --build-dir build-linux --expect on --require-source-check; \
-            cmake --build --preset linux-debug --target core_plugin_runtime_tests --parallel; \
-            ctest --test-dir build-linux -R 'LuaRuntimeTest|LuaSandboxTest' --output-on-failure --no-tests=error"
-
-      - name: Verify BUILD_LUA_SCRIPTING=OFF (Source Selection Regression)
-        run: |
-          docker run --rm \
-            -v "${GITHUB_WORKSPACE}:/app" \
-            -w /app \
-            knights-base:latest \
-            bash -lc "set -e; apt-get update && apt-get install -y ninja-build; \
-            cmake --preset linux-lua-off -DBUILD_CONTRACT_TESTS=OFF; \
-            python3 tools/check_lua_build_toggle.py --build-dir build-linux-lua-off --expect off --require-source-check; \
-            cmake --build --preset linux-lua-off-debug --target core_plugin_runtime_tests --parallel"
 
       - name: Start Stack Baseline (Runtime Off)
         shell: pwsh
