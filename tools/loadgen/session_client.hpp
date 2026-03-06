@@ -37,24 +37,53 @@ struct SnapshotResult {
     std::string current_room;
 };
 
+enum class TransportKind {
+    kTcp,
+    kUdp,
+    kRudp,
+};
+
 class SessionClient {
 public:
-    explicit SessionClient(ClientOptions options);
-    ~SessionClient();
+    virtual ~SessionClient() = default;
 
     SessionClient(const SessionClient&) = delete;
     SessionClient& operator=(const SessionClient&) = delete;
+    SessionClient(SessionClient&&) = delete;
+    SessionClient& operator=(SessionClient&&) = delete;
 
-    bool connect(const std::string& host, unsigned short port);
-    bool login(const std::string& user, const std::string& token, LoginResult* result = nullptr);
-    bool join(const std::string& room, const std::string& password, SnapshotResult* result = nullptr);
-    bool send_chat_and_wait_echo(const std::string& room, const std::string& text);
-    bool send_ping_and_wait_pong();
-    void close();
+    virtual TransportKind transport_kind() const noexcept = 0;
+    virtual bool connect(const std::string& host, unsigned short port) = 0;
+    virtual bool login(const std::string& user, const std::string& token, LoginResult* result = nullptr) = 0;
+    virtual bool join(const std::string& room, const std::string& password, SnapshotResult* result = nullptr) = 0;
+    virtual bool send_chat_and_wait_echo(const std::string& room, const std::string& text) = 0;
+    virtual bool send_ping_and_wait_pong() = 0;
+    virtual void close() = 0;
 
-    bool is_connected() const noexcept { return connected_.load(); }
-    std::string last_error() const;
-    TransportStats transport_stats() const noexcept;
+    virtual bool is_connected() const noexcept = 0;
+    virtual std::string last_error() const = 0;
+    virtual TransportStats transport_stats() const noexcept = 0;
+
+protected:
+    SessionClient() = default;
+};
+
+class TcpSessionClient final : public SessionClient {
+public:
+    explicit TcpSessionClient(ClientOptions options);
+    ~TcpSessionClient() override;
+
+    TransportKind transport_kind() const noexcept override { return TransportKind::kTcp; }
+    bool connect(const std::string& host, unsigned short port) override;
+    bool login(const std::string& user, const std::string& token, LoginResult* result = nullptr) override;
+    bool join(const std::string& room, const std::string& password, SnapshotResult* result = nullptr) override;
+    bool send_chat_and_wait_echo(const std::string& room, const std::string& text) override;
+    bool send_ping_and_wait_pong() override;
+    void close() override;
+
+    bool is_connected() const noexcept override { return connected_.load(); }
+    std::string last_error() const override;
+    TransportStats transport_stats() const noexcept override;
 
 private:
     enum class EventType {
@@ -119,5 +148,7 @@ private:
     std::string current_user_;
     TransportStats transport_;
 };
+
+std::unique_ptr<SessionClient> make_session_client(TransportKind transport, ClientOptions options);
 
 }  // namespace loadgen

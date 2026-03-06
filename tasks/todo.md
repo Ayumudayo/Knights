@@ -20,7 +20,7 @@
   - 대상: workspace-local absolute path 흔적
   - 기준: 저장소 상대 경로 또는 일반 markdown 링크만 허용
 
-## 3) TCP Load Generator
+## 3) Load Generator (TCP Phase)
 
 - [x] TCP load generator 요구사항/범위를 문서로 고정한다.
   - 대상: 기존 `haproxy -> gateway_app -> server_app`
@@ -43,20 +43,20 @@
 
 ### Review
 
-- `pwsh scripts/build.ps1 -Config Release -Target tcp_loadgen`
-  - `tcp_loadgen.exe` Release 빌드 성공
+- `pwsh scripts/build.ps1 -Config Release -Target stack_loadgen`
+  - `stack_loadgen.exe` Release 빌드 성공
 - `pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build`
   - Docker stack + HAProxy frontend 기동 성공
 - `python tests/python/verify_chat.py`
   - PASS
 - `python tests/python/verify_pong.py`
   - PASS
-- `build-windows\\Release\\tcp_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json`
-  - `connected=24 authenticated=24 joined=24 success=155 errors=0 throughput_rps=8.60 p95_ms=14.11`
-- `build-windows\\Release\\tcp_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak.json --report build/loadgen/mixed_session_soak.json`
-  - `connected=24 authenticated=24 joined=12 success=84 errors=0 throughput_rps=4.60 p95_ms=14.51`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json`
+  - `loadgen_summary scenario=steady_chat transports=tcp sessions=24 connected=24 authenticated=24 joined=24 success=155 errors=0 throughput_rps=8.60 p95_ms=14.41`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak.json --report build/loadgen/mixed_session_soak.json`
+  - `loadgen_summary scenario=mixed_session_soak transports=tcp sessions=24 connected=24 authenticated=24 joined=12 success=85 errors=0 throughput_rps=4.67 p95_ms=12.66`
 - 참고
-  - fresh stack 기준 loadgen 구현/검증 완료
+  - fresh stack 기준 단일 loadgen binary + TCP transport 검증 완료
   - repeated same-stack run 회귀는 아래 Gateway Follow-up에서 별도로 마감
 
 ## 4) Gateway Follow-up
@@ -149,6 +149,49 @@
   - `python tests/python/verify_script_fallback_switch.py`
   - `python tests/python/verify_chat_hook_behavior.py`
   - 결과: 모두 통과
+
+## 6) Unified Load Generator
+
+- [ ] 장기 과제로 richer scenario language 검토 항목을 남긴다.
+  - 현재는 JSON schema 유지
+  - 분기 / 반복 / 장애 주입 / 복합 transport 제어가 커지면 별도 scenario language 평가
+- [x] 단일 loadgen binary 기준의 1차 통합 계획을 문서/체크리스트로 고정한다.
+  - 목적: transport별 별도 프로그램 추가 대신 공통 harness 유지
+  - 비범위: 이번 턴에 UDP/RUDP 구현까지 확장하지 않음
+- [x] 현재 TCP 전용 구현을 transport-aware 구조로 재편한다.
+  - 시나리오에 `transport` 필드를 도입
+  - TCP 구현은 adapter/driver 계층으로 내린다
+- [x] 실행 타깃과 문서를 단일 loadgen 기준으로 정리한다.
+  - build/run/readme/plan 문서
+  - 기존 `tcp_loadgen` 언급 정리
+- [x] 로컬 검증으로 회귀가 없는지 확인한다.
+  - Release build
+  - 기존 steady/mixed scenario 실행
+
+### Review
+
+- build / compatibility
+  - `pwsh scripts/build.ps1 -Config Release -Target stack_loadgen`
+  - `pwsh scripts/build.ps1 -Config Release -Target tcp_loadgen`
+  - 결과: 새 실행 파일 `stack_loadgen.exe` 빌드 성공, 기존 `tcp_loadgen` build target도 compatibility alias로 유지
+- unified harness refactor
+  - `SessionClient`를 interface로 올리고 `TcpSessionClient` 구현 + `make_session_client(...)` factory를 추가했다.
+  - 시나리오 `groups[]`에 `transport` 필드를 도입했고 현재 샘플은 모두 `tcp`를 명시한다.
+  - report/summary에 `transports=tcp`를 노출한다.
+- docs
+  - `docs/tests/loadgen-plan.md`
+  - `docs/tests.md`
+  - `tools/loadgen/README.md`
+  - 결과: 단일 `stack_loadgen` 기준으로 문서 정리 완료
+- runtime validation
+  - `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json`
+  - `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak.json --report build/loadgen/mixed_session_soak.json`
+  - 결과:
+    - `steady_chat`: `loadgen_summary scenario=steady_chat transports=tcp sessions=24 connected=24 authenticated=24 joined=24 success=155 errors=0 throughput_rps=8.60 p95_ms=14.41`
+    - `mixed_session_soak`: `loadgen_summary scenario=mixed_session_soak transports=tcp sessions=24 connected=24 authenticated=24 joined=12 success=85 errors=0 throughput_rps=4.67 p95_ms=12.66`
+- unsupported transport guardrail
+  - temporary scenario에서 `transport=udp`로 실행
+  - 결과: `loadgen error: transport 'udp' is not implemented yet`
 
 ## Quantitative Validation
 

@@ -36,6 +36,7 @@ enum class SessionMode {
 
 struct GroupConfig {
     std::string name;
+    TransportKind transport{TransportKind::kTcp};
     SessionMode mode{SessionMode::kLoginOnly};
     std::uint32_t count{0};
     double rate_per_sec{0.0};
@@ -72,6 +73,7 @@ struct RunSummary {
     std::string room;
     std::uint16_t port{0};
     std::uint32_t seed{0};
+    std::vector<std::string> transports;
     std::uint32_t sessions{0};
     std::uint32_t connected_sessions{0};
     std::uint32_t authenticated_sessions{0};
@@ -96,6 +98,7 @@ struct RunSummary {
 
 struct GroupAssignment {
     std::string name;
+    TransportKind transport{TransportKind::kTcp};
     SessionMode mode{SessionMode::kLoginOnly};
     double rate_per_sec{0.0};
     bool join_room{false};
@@ -281,6 +284,32 @@ std::string mode_name(SessionMode mode) {
     return "unknown";
 }
 
+TransportKind parse_transport(const std::string& raw) {
+    const auto transport = to_lower(raw);
+    if (transport == "tcp") {
+        return TransportKind::kTcp;
+    }
+    if (transport == "udp") {
+        return TransportKind::kUdp;
+    }
+    if (transport == "rudp") {
+        return TransportKind::kRudp;
+    }
+    throw std::runtime_error("unsupported transport: " + raw);
+}
+
+std::string transport_name(TransportKind transport) {
+    switch (transport) {
+    case TransportKind::kTcp:
+        return "tcp";
+    case TransportKind::kUdp:
+        return "udp";
+    case TransportKind::kRudp:
+        return "rudp";
+    }
+    return "unknown";
+}
+
 std::string make_chat_message(const ScenarioConfig& scenario,
                               std::uint32_t session_index,
                               std::uint64_t iteration) {
@@ -297,7 +326,7 @@ std::string make_chat_message(const ScenarioConfig& scenario,
 
 void print_usage() {
     std::cerr
-        << "Usage: tcp_loadgen --host <host> --port <port> --scenario <path> --report <path> "
+        << "Usage: stack_loadgen --host <host> --port <port> --scenario <path> --report <path> "
         << "[--seed <u32>] [--verbose]\n";
 }
 
@@ -377,11 +406,13 @@ ScenarioConfig load_scenario(const fs::path& path) {
     scenario.login_prefix = document.value("login_prefix", std::string("loadgen"));
     scenario.connect_timeout_ms = document.value("connect_timeout_ms", 5000u);
     scenario.read_timeout_ms = document.value("read_timeout_ms", 5000u);
+    const auto default_transport = parse_transport(document.value("transport", std::string("tcp")));
 
     if (document.contains("groups")) {
         for (const auto& group_json : document.at("groups")) {
             GroupConfig group;
             group.name = group_json.value("name", std::string());
+            group.transport = parse_transport(group_json.value("transport", transport_name(default_transport)));
             group.mode = parse_mode(group_json.at("mode").get<std::string>());
             group.count = group_json.at("count").get<std::uint32_t>();
             group.rate_per_sec = group_json.value("rate_per_sec", 0.0);
@@ -391,6 +422,7 @@ ScenarioConfig load_scenario(const fs::path& path) {
     } else {
         GroupConfig group;
         group.name = "default";
+        group.transport = default_transport;
         group.mode = SessionMode::kChat;
         group.count = scenario.sessions;
         group.rate_per_sec = document.value("message_rate_per_sec", 1.0);
@@ -431,6 +463,7 @@ std::vector<GroupAssignment> expand_assignments(const ScenarioConfig& scenario) 
         for (std::uint32_t i = 0; i < group.count; ++i) {
             assignments.push_back(GroupAssignment{
                 .name = group.name,
+                .transport = group.transport,
                 .mode = group.mode,
                 .rate_per_sec = group.rate_per_sec,
                 .join_room = group.join_room,
@@ -520,6 +553,7 @@ json to_json(const RunSummary& summary) {
         {"room", summary.room},
         {"port", summary.port},
         {"seed", summary.seed},
+        {"transports", summary.transports},
         {"sessions", summary.sessions},
         {"connected_sessions", summary.connected_sessions},
         {"authenticated_sessions", summary.authenticated_sessions},
@@ -587,16 +621,25 @@ RunSummary run_scenario(const ScenarioConfig& scenario, const CliOptions& cli) {
     const auto ramp_delay = scenario.sessions > 0
                                 ? std::chrono::milliseconds(scenario.ramp_up_ms / scenario.sessions)
                                 : std::chrono::milliseconds(0);
+    std::vector<std::string> transports;
+    transports.reserve(assignments.size());
+    for (const auto& assignment : assignments) {
+        transports.push_back(transport_name(assignment.transport));
+    }
+    std::sort(transports.begin(), transports.end());
+    transports.erase(std::unique(transports.begin(), transports.end()), transports.end());
 
     for (std::uint32_t session_index = 0; session_index < assignments.size(); ++session_index) {
         const auto& assignment = assignments[session_index];
-        auto client = std::make_unique<SessionClient>(ClientOptions{
+        auto client = make_session_client(assignment.transport, ClientOptions{
             .connect_timeout_ms = scenario.connect_timeout_ms,
             .read_timeout_ms = scenario.read_timeout_ms,
         });
 
         maybe_log(cli.verbose,
-                  "setup session=" + std::to_string(session_index) + " mode=" + mode_name(assignment.mode));
+                  "setup session=" + std::to_string(session_index) +
+                      " transport=" + transport_name(assignment.transport) +
+                      " mode=" + mode_name(assignment.mode));
 
         if (!client->connect(cli.host, cli.port)) {
             metrics.record_connect_failure();
@@ -676,7 +719,9 @@ RunSummary run_scenario(const ScenarioConfig& scenario, const CliOptions& cli) {
     const auto elapsed_ms = static_cast<std::uint64_t>(
         std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - run_started)
             .count());
-    return metrics.finalize(scenario, cli, resolved_room, elapsed_ms, clients);
+    auto summary = metrics.finalize(scenario, cli, resolved_room, elapsed_ms, clients);
+    summary.transports = std::move(transports);
+    return summary;
 }
 
 }  // namespace detail
@@ -690,9 +735,16 @@ int main(int argc, char** argv) {
         const auto report = loadgen::detail::to_json(summary);
         loadgen::detail::write_report(cli.report_path, report);
 
-        std::cout << "tcp_loadgen_summary"
+        std::cout << "loadgen_summary"
                   << " scenario=" << summary.scenario
-                  << " sessions=" << summary.sessions
+                  << " transports=";
+        for (std::size_t i = 0; i < summary.transports.size(); ++i) {
+            if (i != 0) {
+                std::cout << ",";
+            }
+            std::cout << summary.transports[i];
+        }
+        std::cout << " sessions=" << summary.sessions
                   << " connected=" << summary.connected_sessions
                   << " authenticated=" << summary.authenticated_sessions
                   << " joined=" << summary.joined_sessions
@@ -705,7 +757,7 @@ int main(int argc, char** argv) {
 
         return summary.error_count == 0 && summary.connected_sessions > 0 ? 0 : 1;
     } catch (const std::exception& ex) {
-        std::cerr << "tcp_loadgen error: " << ex.what() << '\n';
+        std::cerr << "loadgen error: " << ex.what() << '\n';
         return 1;
     }
 }

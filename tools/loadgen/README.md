@@ -1,19 +1,19 @@
-# TCP Load Generator
+# Load Generator
 
-`tcp_loadgen`은 기존 `haproxy -> gateway_app -> server_app` TCP 경로를 그대로 대상으로 두고, headless 다중 세션 부하를 재현 가능한 방식으로 주기 위한 도구다.
+`stack_loadgen`은 기존 `haproxy -> gateway_app -> server_app` 경로를 대상으로 두고, transport-aware 시나리오를 하나의 headless binary로 실행하기 위한 도구다. 현재 구현 단계에서는 `tcp` transport만 지원한다.
 
 ## Build
 
 Windows:
 
 ```powershell
-pwsh scripts/build.ps1 -Config Release -Target tcp_loadgen
+pwsh scripts/build.ps1 -Config Release -Target stack_loadgen
 ```
 
 Linux / Docker build dir:
 
 ```bash
-cmake --build build-linux --target tcp_loadgen
+cmake --build build-linux --target stack_loadgen
 ```
 
 ## Scenarios
@@ -42,12 +42,19 @@ cmake --build build-linux --target tcp_loadgen
 ```json
 {
   "name": "chat",
+  "transport": "tcp",
   "mode": "chat",
   "count": 24,
   "rate_per_sec": 2.0,
   "join_room": true
 }
 ```
+
+transport:
+
+- `tcp`
+- `udp` (planned)
+- `rudp` (planned)
 
 모드:
 
@@ -60,7 +67,7 @@ cmake --build build-linux --target tcp_loadgen
 예시:
 
 ```powershell
-build-windows\Release\tcp_loadgen.exe `
+build-windows\Release\stack_loadgen.exe `
   --host 127.0.0.1 `
   --port 6000 `
   --scenario tools/loadgen/scenarios/steady_chat.json `
@@ -72,7 +79,7 @@ Docker stack against HAProxy frontend:
 
 ```powershell
 pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build
-build-windows\Release\tcp_loadgen.exe `
+build-windows\Release\stack_loadgen.exe `
   --host 127.0.0.1 `
   --port 6000 `
   --scenario tools/loadgen/scenarios/mixed_session_soak.json `
@@ -100,3 +107,4 @@ build-windows\Release\tcp_loadgen.exe `
 - 커스텀 room을 여러 세션이 공유하려면 `room_password`를 지정하는 편이 안전하다. 현재 서버 정책상 초기에 만들어진 room은 owner/invite 제약이 생길 수 있다.
 - 기본값으로 `unique_room_per_run=true`를 사용해 run마다 room name에 seed suffix를 붙여 이전 run의 room history/state와 분리한다.
 - chat rate는 기본 spam/mute 임계값 아래로 유지해야 한다. 제공된 샘플 시나리오는 이 기준을 반영한다.
+- `udp`/`rudp` transport 필드는 schema에 예약돼 있지만, 현재 바이너리는 명시적으로 `tcp`만 구현한다.

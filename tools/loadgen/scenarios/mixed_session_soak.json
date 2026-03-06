@@ -13,6 +13,7 @@
   "groups": [
     {
       "name": "chat",
+      "transport": "tcp",
       "mode": "chat",
       "count": 12,
       "rate_per_sec": 0.25,
@@ -20,6 +21,7 @@
     },
     {
       "name": "ping",
+      "transport": "tcp",
       "mode": "ping",
       "count": 6,
       "rate_per_sec": 0.35,
@@ -27,6 +29,7 @@
     },
     {
       "name": "login_only",
+      "transport": "tcp",
       "mode": "login_only",
       "count": 6
     }

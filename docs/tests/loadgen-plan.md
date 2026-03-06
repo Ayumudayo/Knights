@@ -1,6 +1,6 @@
-# TCP Load Generator Plan
+# Load Generator Plan
 
-상태: implemented and locally verified
+상태: transport-aware TCP phase implemented and locally verified
 
 브랜치: `feature/tcp-loadgen`
 
@@ -10,7 +10,7 @@
 
 - `haproxy -> gateway_app -> server_app`
 
-를 그대로 대상으로 두고, 다수의 가짜 TCP 클라이언트를 붙여 정량 검증을 수행하는 headless load generator를 추가한다.
+를 그대로 대상으로 두고, transport-aware 시나리오를 단일 headless load generator binary에서 실행할 수 있게 만든다. 현재 구현 단계에서는 `tcp` transport만 지원한다.
 
 이 도구의 1차 목표는 다음과 같다.
 
@@ -25,7 +25,7 @@
 - GUI 포함 클라이언트
 - 운영형 distributed coordinator/worker 구조
 
-초기 버전은 단일 프로세스, TCP-only, headless CLI로 제한한다.
+초기 버전은 단일 프로세스, headless CLI로 제한하며, transport adapter 구조 아래에서 `tcp`만 구현한다.
 
 ## 3. 재사용 자산
 
@@ -54,7 +54,7 @@
 ## 4. 배치 위치
 
 - 새 도구 경로: `tools/loadgen/`
-- 새 실행 파일 이름: `tcp_loadgen`
+- 새 실행 파일 이름: `stack_loadgen`
 - 새 문서/시나리오 경로:
   - `tools/loadgen/README.md`
   - `tools/loadgen/scenarios/*.json`
@@ -79,12 +79,14 @@
 초기 구조:
 
 1. `session_client`
-   - 단일 TCP 세션
+   - `SessionClient` interface
+   - `TcpSessionClient` 구현
    - connect / login / join / chat / ping
    - `gateway_app` 경로 기준 immediate `LOGIN_REQ`
 
 2. `scenario_runner`
    - 세션 수, ramp-up, duration, message rate 제어
+   - group별 `transport` 선택
    - run별 unique room suffix 적용 가능
 
 3. `metrics_collector`
@@ -116,7 +118,7 @@
 예시:
 
 ```text
-tcp_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json
+stack_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json
 ```
 
 필수 인자:
@@ -147,6 +149,7 @@ tcp_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/stea
   "groups": [
     {
       "name": "chat",
+      "transport": "tcp",
       "mode": "chat",
       "count": 24,
       "rate_per_sec": 0.4,
@@ -162,6 +165,7 @@ tcp_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/stea
 {
   "scenario": "steady_chat",
   "room": "loadgen_room_<seed>",
+  "transports": ["tcp"],
   "sessions": 64,
   "connected_sessions": 64,
   "authenticated_sessions": 64,
@@ -199,7 +203,7 @@ tcp_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/stea
 
 ### 11.2 구현 검증
 
-- 로컬 빌드: `tcp_loadgen` 단독 빌드 성공
+- 로컬 빌드: `stack_loadgen` 단독 빌드 성공
 - 로컬 stack:
   - baseline connect/login/join/chat
   - JSON report 출력 확인
@@ -215,17 +219,18 @@ tcp_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/stea
 
 ### 11.4 실제 완료 검증
 
-- `pwsh scripts/build.ps1 -Config Release -Target tcp_loadgen`
+- `pwsh scripts/build.ps1 -Config Release -Target stack_loadgen`
 - `pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build`
 - `python tests/python/verify_chat.py`
 - `python tests/python/verify_pong.py`
-- `build-windows\\Release\\tcp_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json`
-- `build-windows\\Release\\tcp_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak.json --report build/loadgen/mixed_session_soak.json`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak.json --report build/loadgen/mixed_session_soak.json`
 
 실제 결과:
 
-- `steady_chat`: `connected=24 authenticated=24 joined=24 success=155 errors=0 throughput_rps=8.60 p95_ms=14.11`
-- `mixed_session_soak`: `connected=24 authenticated=24 joined=12 success=84 errors=0 throughput_rps=4.60 p95_ms=14.51`
+- `steady_chat`: `loadgen_summary scenario=steady_chat transports=tcp sessions=24 connected=24 authenticated=24 joined=24 success=155 errors=0 throughput_rps=8.60 p95_ms=14.41`
+- `mixed_session_soak`: `loadgen_summary scenario=mixed_session_soak transports=tcp sessions=24 connected=24 authenticated=24 joined=12 success=85 errors=0 throughput_rps=4.67 p95_ms=12.66`
+- unsupported transport guardrail: `transport=udp` scenario는 `loadgen error: transport 'udp' is not implemented yet`로 명시적으로 실패
 
 후속 결함 처리:
 
@@ -234,7 +239,12 @@ tcp_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/stea
 
 ## 12. 1차 완료 기준
 
-- `tcp_loadgen`이 실제 stack에 TCP 세션 다수를 붙일 수 있다.
+- `stack_loadgen`이 실제 stack에 TCP 세션 다수를 붙일 수 있다.
 - `steady_chat`, `mixed_session_soak` 2개 시나리오를 실행할 수 있다.
 - JSON report에 latency/throughput/error 요약이 남는다.
 - Docker stack 기준 실행 절차가 문서화된다.
+
+## 13. 장기 후속
+
+- 복잡한 분기/반복/장애 주입 시나리오를 JSON에 억지로 넣지 않는다.
+- 현재는 schema-driven JSON을 유지하되, 제어 흐름 복잡도가 커지면 richer scenario language를 별도 장기 TODO로 검토한다.

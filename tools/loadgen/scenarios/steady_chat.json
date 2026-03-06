@@ -13,6 +13,7 @@
   "groups": [
     {
       "name": "chat",
+      "transport": "tcp",
       "mode": "chat",
       "count": 24,
       "rate_per_sec": 0.4,

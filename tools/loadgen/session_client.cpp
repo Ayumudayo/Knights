@@ -13,6 +13,7 @@
 #include <cstring>
 #include <future>
 #include <span>
+#include <stdexcept>
 #include <utility>
 
 namespace asio = boost::asio;
@@ -39,16 +40,16 @@ void complete_async_result(const std::shared_ptr<AsyncConnectResult>& result,
 
 }  // namespace
 
-SessionClient::SessionClient(ClientOptions options)
+TcpSessionClient::TcpSessionClient(ClientOptions options)
     : options_(options) {
     read_header_.resize(proto::k_header_bytes);
 }
 
-SessionClient::~SessionClient() {
+TcpSessionClient::~TcpSessionClient() {
     close();
 }
 
-bool SessionClient::connect(const std::string& host, unsigned short port) {
+bool TcpSessionClient::connect(const std::string& host, unsigned short port) {
     close();
 
     reset_state();
@@ -115,7 +116,7 @@ bool SessionClient::connect(const std::string& host, unsigned short port) {
     return true;
 }
 
-bool SessionClient::login(const std::string& user, const std::string& token, LoginResult* result) {
+bool TcpSessionClient::login(const std::string& user, const std::string& token, LoginResult* result) {
     std::vector<std::uint8_t> payload;
     proto::write_lp_utf8(payload, user);
     proto::write_lp_utf8(payload, token);
@@ -145,7 +146,7 @@ bool SessionClient::login(const std::string& user, const std::string& token, Log
     return true;
 }
 
-bool SessionClient::join(const std::string& room, const std::string& password, SnapshotResult* result) {
+bool TcpSessionClient::join(const std::string& room, const std::string& password, SnapshotResult* result) {
     std::vector<std::uint8_t> payload;
     proto::write_lp_utf8(payload, room);
     proto::write_lp_utf8(payload, password);
@@ -177,7 +178,7 @@ bool SessionClient::join(const std::string& room, const std::string& password, S
     return true;
 }
 
-bool SessionClient::send_chat_and_wait_echo(const std::string& room, const std::string& text) {
+bool TcpSessionClient::send_chat_and_wait_echo(const std::string& room, const std::string& text) {
     std::vector<std::uint8_t> payload;
     proto::write_lp_utf8(payload, room);
     proto::write_lp_utf8(payload, text);
@@ -194,14 +195,14 @@ bool SessionClient::send_chat_and_wait_echo(const std::string& room, const std::
         "chat echo");
 }
 
-bool SessionClient::send_ping_and_wait_pong() {
+bool TcpSessionClient::send_ping_and_wait_pong() {
     enqueue_packet(proto::MSG_PING, 0);
     return wait_for_event(std::chrono::milliseconds(options_.read_timeout_ms),
                           [](const Event& event) { return event.type == EventType::kPong; },
                           "pong");
 }
 
-void SessionClient::close() {
+void TcpSessionClient::close() {
     closing_.store(true);
     connected_.store(false);
 
@@ -226,17 +227,17 @@ void SessionClient::close() {
     }
 }
 
-std::string SessionClient::last_error() const {
+std::string TcpSessionClient::last_error() const {
     std::lock_guard<std::mutex> lock(mu_);
     return last_error_;
 }
 
-TransportStats SessionClient::transport_stats() const noexcept {
+TransportStats TcpSessionClient::transport_stats() const noexcept {
     std::lock_guard<std::mutex> lock(mu_);
     return transport_;
 }
 
-void SessionClient::reset_state() {
+void TcpSessionClient::reset_state() {
     io_.restart();
     closing_.store(false);
     connected_.store(false);
@@ -252,7 +253,7 @@ void SessionClient::reset_state() {
     transport_ = {};
 }
 
-void SessionClient::start_read_header() {
+void TcpSessionClient::start_read_header() {
     asio::async_read(
         socket_,
         asio::buffer(read_header_),
@@ -270,7 +271,7 @@ void SessionClient::start_read_header() {
             }));
 }
 
-void SessionClient::start_read_body(std::uint16_t payload_size, std::uint16_t msg_id, std::uint16_t flags) {
+void TcpSessionClient::start_read_body(std::uint16_t payload_size, std::uint16_t msg_id, std::uint16_t flags) {
     if (payload_size == 0) {
         handle_frame(msg_id, flags, {});
         start_read_header();
@@ -294,9 +295,9 @@ void SessionClient::start_read_body(std::uint16_t payload_size, std::uint16_t ms
             }));
 }
 
-void SessionClient::handle_frame(std::uint16_t msg_id,
-                                 std::uint16_t flags,
-                                 const std::vector<std::uint8_t>& payload) {
+void TcpSessionClient::handle_frame(std::uint16_t msg_id,
+                                    std::uint16_t flags,
+                                    const std::vector<std::uint8_t>& payload) {
     if (msg_id == proto::MSG_PING) {
         enqueue_packet(proto::MSG_PONG, 0);
         return;
@@ -400,9 +401,9 @@ void SessionClient::handle_frame(std::uint16_t msg_id,
     }
 }
 
-void SessionClient::enqueue_packet(std::uint16_t msg_id,
-                                   std::uint16_t flags,
-                                   std::vector<std::uint8_t> payload) {
+void TcpSessionClient::enqueue_packet(std::uint16_t msg_id,
+                                      std::uint16_t flags,
+                                      std::vector<std::uint8_t> payload) {
     asio::post(
         strand_,
         [this, msg_id, flags, payload = std::move(payload)]() mutable {
@@ -435,7 +436,7 @@ void SessionClient::enqueue_packet(std::uint16_t msg_id,
         });
 }
 
-void SessionClient::drain_send_queue() {
+void TcpSessionClient::drain_send_queue() {
     if (write_queue_.empty()) {
         return;
     }
@@ -460,7 +461,7 @@ void SessionClient::drain_send_queue() {
             }));
 }
 
-void SessionClient::handle_disconnect(const boost::system::error_code& ec, const char* context) {
+void TcpSessionClient::handle_disconnect(const boost::system::error_code& ec, const char* context) {
     if (closing_.load()) {
         return;
     }
@@ -476,7 +477,7 @@ void SessionClient::handle_disconnect(const boost::system::error_code& ec, const
     cv_.notify_all();
 }
 
-void SessionClient::push_event(Event event) {
+void TcpSessionClient::push_event(Event event) {
     {
         std::lock_guard<std::mutex> lock(mu_);
         events_.push_back(std::move(event));
@@ -484,10 +485,10 @@ void SessionClient::push_event(Event event) {
     cv_.notify_all();
 }
 
-bool SessionClient::wait_for_event(std::chrono::milliseconds timeout,
-                                   const std::function<bool(const Event&)>& predicate,
-                                   const char* wait_label,
-                                   Event* out) {
+bool TcpSessionClient::wait_for_event(std::chrono::milliseconds timeout,
+                                      const std::function<bool(const Event&)>& predicate,
+                                      const char* wait_label,
+                                      Event* out) {
     std::unique_lock<std::mutex> lock(mu_);
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     for (;;) {
@@ -524,8 +525,20 @@ bool SessionClient::wait_for_event(std::chrono::milliseconds timeout,
     }
 }
 
-void SessionClient::set_last_error_locked(std::string message) {
+void TcpSessionClient::set_last_error_locked(std::string message) {
     last_error_ = std::move(message);
+}
+
+std::unique_ptr<SessionClient> make_session_client(TransportKind transport, ClientOptions options) {
+    switch (transport) {
+    case TransportKind::kTcp:
+        return std::make_unique<TcpSessionClient>(options);
+    case TransportKind::kUdp:
+        throw std::runtime_error("transport 'udp' is not implemented yet");
+    case TransportKind::kRudp:
+        throw std::runtime_error("transport 'rudp' is not implemented yet");
+    }
+    throw std::runtime_error("unknown transport kind");
 }
 
 }  // namespace loadgen
