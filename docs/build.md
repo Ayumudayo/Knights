@@ -71,7 +71,7 @@ cmake --preset linux-asan
 cmake --build --preset linux-asan --target server_app --parallel
 ```
 
-CI에서는 `knights-base` 컨테이너 내부에서 `linux-asan` 빌드를 수행한다. (`.github/workflows/ci.yml` 참고)
+CI에서는 `knights-base` 컨테이너 내부에서 `linux-asan` 빌드를 수행한다. (`.github/workflows/ci-hardening.yml` 참고)
 
 ## 코드 생성(opcodes)
 

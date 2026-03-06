@@ -125,7 +125,7 @@ required PR gate는 다음 성격만 남긴다.
 
 ## 5. 제안 Workflow 구조
 
-### 5.1 `ci-fast.yml`
+### 5.1 `ci.yml`
 
 용도:
 
@@ -242,7 +242,7 @@ required PR gate는 다음 성격만 남긴다.
 
 작업:
 
-- `ci.yml`에서 fast / governance / stack / extensibility / hardening / prewarm 역할을 분리
+- 단일 `ci.yml`에서 fast / governance / stack / extensibility / hardening / prewarm 역할을 분리
 - required gate와 optional/nightly gate를 재분류
 - path filter 도입
 
@@ -254,13 +254,13 @@ required PR gate는 다음 성격만 남긴다.
 
 - 1차 구현 완료 (2026-03-06)
 - 분리 결과:
-  - `ci-fast.yml`
+  - `ci.yml`
   - `ci-api-governance.yml`
   - `ci-stack.yml`
   - `ci-extensibility.yml`
   - `ci-hardening.yml`
   - `ci-prewarm.yml`
-- 기존 단일 `.github/workflows/ci.yml`는 제거했다.
+- 기존 단일 `.github/workflows/ci.yml`는 해체했고, 기본 required gate 이름은 다시 `.github/workflows/ci.yml`로 정리했다.
 - 남은 운영 작업:
   - GitHub branch protection / required check 이름을 새 workflow 이름 기준으로 재설정
   - path filter 범위와 required 여부를 실제 CI telemetry 기준으로 추가 미세조정
@@ -318,8 +318,8 @@ required PR gate는 다음 성격만 남긴다.
 - LuaJIT/sol2 vendor helper는 capability-always-on 모델로 수정해, 깨끗한 configure에서도 Lua vendor target이 항상 생성되도록 정리했다.
 - `KNIGHTS_BUILD_LUA_SCRIPTING` 호환 매크로와 dead test branch를 제거해 Lua 테스트를 항상-capability 기준으로 단순화했다.
 - Windows fast CI의 중복 Lua ctest 재실행을 제거했다.
-- 기존 단일 `ci.yml`을 `ci-fast`, `ci-api-governance`, `ci-stack`, `ci-extensibility`, `ci-hardening`, `ci-prewarm`으로 분리하고 역할별 trigger를 재설정했다.
-- `CI Fast`는 branch protection 안전성을 위해 path filter 없이 항상 실행되도록 두고, path-gated workflow는 선택적/보조 gate로 분리했다.
+- 기존 단일 `ci.yml`을 `ci`, `ci-api-governance`, `ci-stack`, `ci-extensibility`, `ci-hardening`, `ci-prewarm`으로 분리하고 역할별 trigger를 재설정했다.
+- `CI`는 branch protection 안전성을 위해 path filter 없이 항상 실행되도록 두고, path-gated workflow는 선택적/보조 gate로 분리했다.
 - prewarm 성격 job은 PR gate에서 분리하고 schedule / `workflow_dispatch` 전용 workflow로 옮겼다.
 - hardening 성격 검증(ASan/fuzz/soak)은 PR 기본 gate에서 분리하고 `main` / `merge_group` / nightly 경로로 이동했다.
 - 검증:
@@ -350,7 +350,7 @@ required PR gate는 다음 성격만 남긴다.
 
 완화:
 
-- 기존 required check가 `CI` 단일 workflow 이름에 묶여 있었다면, 새 workflow 이름(`CI Fast`, `CI API Governance`, `CI Stack` 등) 기준으로 GitHub repository settings를 갱신한다.
+- 기존 required check가 이전 `CI` 단일 workflow 설정에 묶여 있었다면, 새 workflow 이름(`CI`, `CI API Governance`, `CI Stack` 등) 기준으로 GitHub repository settings를 갱신한다.
 - merge 전 실제 PR check list에서 required/optional 구성이 의도대로 보이는지 확인한다.
 
 ### 리스크 3 - plugin/script 검증의 path filter 누락

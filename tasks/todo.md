@@ -766,7 +766,7 @@
 - [x] Phase C - CI 구조 재편
   - [x] `.github/workflows/ci.yml`의 현재 job/step을 목적별로 분류한다 (fast/api/stack/extensibility/hardening/prewarm)
   - [x] required PR gate와 `main`/nightly gate를 분리하는 새 workflow 구조를 설계한다
-  - [x] `ci-fast.yml`로 Windows fast gate를 분리하고 기존 `ci.yml`의 fast 책임을 이전한다
+  - [x] `ci.yml`로 기본 required gate를 분리하고 기존 단일 workflow의 fast 책임을 이전한다
   - [x] `ci-api-governance.yml`로 core API consumer/governance gate를 분리한다
   - [x] `ci-stack.yml`로 baseline/off + runtime-on 기본 stack smoke를 분리한다
   - [x] `ci-extensibility.yml`로 plugin/script stack smoke를 path-gated workflow로 분리한다
@@ -798,9 +798,9 @@
   - 검증(Docker, runtime on): `CHAT_HOOK_ENABLED=1`, `LUA_ENABLED=1`로 재기동 후 `verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 1 --expect-lua-enabled 1`, `verify_script_hot_reload.py`, `verify_chat_hook_behavior.py`, `verify_plugin_hot_reload.py --check-only` 통과.
   - 잔여 작업은 workflow 파일 분리와 required/main/nightly gate 재분류 같은 Phase C 구조 리팩터링으로 좁혀졌다.
 - 진행 메모 (2026-03-06, CI split 구현 완료):
-  - 기존 `.github/workflows/ci.yml`를 제거하고 `ci-fast.yml`, `ci-api-governance.yml`, `ci-stack.yml`, `ci-extensibility.yml`, `ci-hardening.yml`, `ci-prewarm.yml`로 분리했다.
+  - 기존 단일 `.github/workflows/ci.yml`를 해체하고 `ci.yml`, `ci-api-governance.yml`, `ci-stack.yml`, `ci-extensibility.yml`, `ci-hardening.yml`, `ci-prewarm.yml`로 분리했다.
   - PR 기본 gate는 fast/api/stack 중심으로 남기고, hardening은 `main`/`merge_group`/nightly, prewarm은 `schedule`/`workflow_dispatch` 전용으로 이동했다.
   - `ci-extensibility.yml`은 plugin/script 관련 path에서만 동작하도록 path filter를 추가했다.
-  - branch protection에서 required check로 쓰기 안전하도록 `ci-fast.yml`은 항상 실행되게 두고, path-gated workflow는 기본 required 대상에서 제외한다는 원칙을 문서에 명시했다.
+  - branch protection에서 required check로 쓰기 안전하도록 `ci.yml`은 항상 실행되게 두고, path-gated workflow는 기본 required 대상에서 제외한다는 원칙을 문서에 명시했다.
   - 정적 검증: `python -c "import pathlib,yaml; ..."`로 `.github/workflows/*.yml` 전부 YAML parse 성공을 확인했다.
   - 후속 운영 작업: GitHub branch protection의 required check 이름을 새 workflow 이름 기준으로 갱신해야 한다.

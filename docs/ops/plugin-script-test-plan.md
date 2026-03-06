@@ -116,7 +116,7 @@ L2 Integration (`tests/python/` + docker stack):
 
 보강 대상:
 - `tests/CMakeLists.txt` (타깃 + `gtest_discover_tests`)
-- `.github/workflows/ci.yml` (plugin/script ctest label 게이트)
+- `.github/workflows/ci-extensibility.yml` (plugin/script stack 게이트)
 
 ## 6. CI Plan
 

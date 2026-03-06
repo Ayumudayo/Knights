@@ -82,7 +82,7 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 | DB 마이그레이션 | `tools/migrations/runner.cpp`, `tools/migrations/*.sql` | `CREATE INDEX CONCURRENTLY`는 트랜잭션 밖 |
 | 프로토콜 코드 생성 | `core/protocol/system_opcodes.json`, `tools/gen_opcodes.py`, `protocol/wire_map.json`, `tools/gen_wire_codec.py` | 생성 대상: `core/include/server/core/protocol/system_opcodes.hpp`, `core/include/server/wire/codec.hpp` |
 | Opcode 문서/검증 | `tools/gen_opcode_docs.py`, `docs/protocol/opcodes.md` | system/game 전체 16-bit 중복 검증 + CI 체크 |
-| CI | `.github/workflows/ci.yml` | Windows 빌드/테스트 + Linux Docker 풀스택 스모크 + opcode check |
+| CI | `.github/workflows/ci.yml`, `.github/workflows/ci-stack.yml`, `.github/workflows/ci-hardening.yml` | 기본 required gate(Windows 빌드/테스트 + opcode/doc 검증)와 분리된 stack/hardening workflow |
 | 테스트 | `tests/CMakeLists.txt`, `scripts/smoke_wb.ps1` | `ctest --preset windows-test` |
 
 ## Commands

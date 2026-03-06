@@ -1,4 +1,4 @@
-name: CI Fast
+name: CI
 
 on:
   push:
