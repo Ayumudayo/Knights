@@ -14,6 +14,7 @@ option(BUILD_SERVER_TESTS "Build server tests" ON)
 option(BUILD_GTEST_TESTS "Build GTest-based unit tests" ON)
 option(BUILD_CONTRACT_TESTS "Build non-GTest contract/governance checks" ON)
 option(BUILD_WRITE_BEHIND_TOOLS "Build write-behind helper tools" ON)
+option(BUILD_LOADGEN_TOOLS "Build TCP load generator tools" ON)
 option(BUILD_ADMIN_APP "Build admin management app" ON)
 option(BUILD_MIGRATIONS_RUNNER "Build migrations runner tool" ON)
 set(KNIGHTS_LUAJIT_SUBMODULE_DIR "${CMAKE_SOURCE_DIR}/external/luajit" CACHE PATH
@@ -84,6 +85,9 @@ if (NOT BUILD_SERVER_STACK)
 
     if (BUILD_WRITE_BEHIND_TOOLS)
         message(FATAL_ERROR "write-behind tools require BUILD_SERVER_STACK=ON")
+    endif()
+    if (BUILD_LOADGEN_TOOLS)
+        message(FATAL_ERROR "load generator tools require BUILD_SERVER_STACK=ON")
     endif()
 endif()
 
@@ -204,6 +208,39 @@ if (_PQXX_TARGET)
 else()
   message(WARNING "libpqxx not found ? wb_worker/wb_dlq_replayer/wb_check will fail to link")
 endif()
+endif()
+
+if (BUILD_LOADGEN_TOOLS)
+  if (NOT TARGET nlohmann_json::nlohmann_json)
+    message(FATAL_ERROR "nlohmann_json target not found ? tcp_loadgen requires nlohmann_json")
+  endif()
+
+  add_executable(tcp_loadgen
+    tools/loadgen/main.cpp
+    tools/loadgen/session_client.cpp
+  )
+  target_include_directories(tcp_loadgen PRIVATE
+    ${CMAKE_SOURCE_DIR}/server/include
+    ${CMAKE_BINARY_DIR}/proto
+  )
+  target_link_libraries(tcp_loadgen PRIVATE
+    server_core
+    wire_proto
+    nlohmann_json::nlohmann_json
+  )
+
+  if (TARGET generate_game_opcodes)
+    add_dependencies(tcp_loadgen generate_game_opcodes)
+  endif()
+
+  if (WIN32 AND CMAKE_VERSION VERSION_GREATER_EQUAL "3.21")
+    add_custom_command(TARGET tcp_loadgen POST_BUILD
+      COMMAND ${CMAKE_COMMAND}
+              -Druntime_dlls=$<TARGET_RUNTIME_DLLS:tcp_loadgen>
+              -Dtarget_dir=$<TARGET_FILE_DIR:tcp_loadgen>
+              -P ${CMAKE_SOURCE_DIR}/cmake/copy_runtime_dlls_if_any.cmake
+      COMMAND_EXPAND_LISTS)
+  endif()
 endif()
 
 if (BUILD_ADMIN_APP)

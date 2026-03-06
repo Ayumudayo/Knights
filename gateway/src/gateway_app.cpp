@@ -482,6 +482,7 @@ void GatewayApp::BackendConnection::send(std::vector<std::uint8_t> payload) {
         return;
     }
 
+    auto buffer = std::make_shared<std::vector<std::uint8_t>>(std::move(payload));
     bool overflow = false;
 
     {
@@ -490,12 +491,12 @@ void GatewayApp::BackendConnection::send(std::vector<std::uint8_t> payload) {
             return;
         }
 
-        const auto payload_bytes = payload.size();
+        const auto payload_bytes = buffer->size();
         if (server::core::net::exceeds_queue_budget(send_queue_max_bytes_, queued_bytes_, payload_bytes)) {
             overflow = true;
         } else {
             queued_bytes_ += payload_bytes;
-            write_queue_.push_back(std::move(payload));
+            write_queue_.push_back(std::move(buffer));
             if (connected_ && !write_in_progress_) {
                 do_write();
             }
@@ -520,6 +521,7 @@ void GatewayApp::BackendConnection::send(const std::uint8_t* data, std::size_t l
         return;
     }
 
+    auto buffer = std::make_shared<std::vector<std::uint8_t>>(data, data + length);
     // 브리지 read 버퍼를 바로 큐에 복사해 caller의 중간 임시 payload vector를 줄인다.
     bool overflow = false;
 
@@ -529,11 +531,12 @@ void GatewayApp::BackendConnection::send(const std::uint8_t* data, std::size_t l
             return;
         }
 
-        if (server::core::net::exceeds_queue_budget(send_queue_max_bytes_, queued_bytes_, length)) {
+        const auto payload_bytes = buffer->size();
+        if (server::core::net::exceeds_queue_budget(send_queue_max_bytes_, queued_bytes_, payload_bytes)) {
             overflow = true;
         } else {
-            queued_bytes_ += length;
-            write_queue_.emplace_back(data, data + length);
+            queued_bytes_ += payload_bytes;
+            write_queue_.push_back(std::move(buffer));
             if (connected_ && !write_in_progress_) {
                 do_write();
             }
@@ -560,11 +563,23 @@ void GatewayApp::BackendConnection::do_write() {
     }
 
     write_in_progress_ = true;
-    auto& msg = write_queue_.front();
+    auto msg = write_queue_.front();
+    if (!msg) {
+        write_queue_.pop_front();
+        if (!write_queue_.empty()) {
+            do_write();
+        } else {
+            write_in_progress_ = false;
+        }
+        return;
+    }
     
     auto self = shared_from_this();
-    boost::asio::async_write(socket_, boost::asio::buffer(msg),
-        [self, this](const boost::system::error_code& ec, std::size_t /*bytes_transferred*/) {
+    boost::asio::async_write(socket_, boost::asio::buffer(*msg),
+        [self, this, msg](const boost::system::error_code& ec, std::size_t /*bytes_transferred*/) {
+            if (ec == boost::asio::error::operation_aborted || closed_.load(std::memory_order_relaxed)) {
+                return;
+            }
             if (ec) {
                 app_.record_backend_write_error();
                 if (auto conn = connection_.lock()) {
@@ -577,7 +592,7 @@ void GatewayApp::BackendConnection::do_write() {
 
             std::lock_guard<std::mutex> lock(send_mutex_);
             if (!write_queue_.empty()) {
-                const auto sent = write_queue_.front().size();
+                const auto sent = msg->size();
                 queued_bytes_ = queued_bytes_ >= sent ? (queued_bytes_ - sent) : 0;
                 write_queue_.pop_front();
             }

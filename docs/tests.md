@@ -64,3 +64,9 @@ scripts/smoke_wb.ps1 -Config Debug -BuildDir build-windows
   - `python tools/check_core_api_contracts.py --check-boundary-fixtures`
   - `python tools/check_core_api_contracts.py --check-stable-governance-fixtures`
 - Linux 경로는 Docker stack 로컬 검증 + 원격 GitHub CI 결과를 기준으로 판단한다.
+
+## 8. TCP Loadgen Plan
+
+- 설계 문서: [tcp-loadgen-plan.md](/E:/Repos/MyRepos/Knights/docs/tests/tcp-loadgen-plan.md)
+- 실행 가이드: [README.md](/E:/Repos/MyRepos/Knights/tools/loadgen/README.md)
+- 목적: 기존 `haproxy -> gateway_app -> server_app` 경로를 그대로 대상으로 두고 headless TCP load generator를 추가해 soak/latency/throughput을 재현 가능하게 측정

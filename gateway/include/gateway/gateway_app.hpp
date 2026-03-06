@@ -166,7 +166,7 @@ public:
         std::uint32_t retry_attempt_{0};
         
         std::mutex send_mutex_;
-        std::deque<std::vector<std::uint8_t>> write_queue_;
+        std::deque<std::shared_ptr<std::vector<std::uint8_t>>> write_queue_;
         std::size_t queued_bytes_{0};
         std::size_t send_queue_max_bytes_{256 * 1024};
         std::chrono::milliseconds connect_timeout_{5000};
