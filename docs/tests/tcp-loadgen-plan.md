@@ -31,24 +31,24 @@
 
 ### 3.1 프로토콜/프레이밍
 
-- [packet.hpp](/E:/Repos/MyRepos/Knights/core/include/server/core/protocol/packet.hpp)
+- [packet.hpp](../../core/include/server/core/protocol/packet.hpp)
   - `PacketHeader`
   - `encode_header()`
   - `decode_header()`
   - `write_lp_utf8()`
-- [system_opcodes.hpp](/E:/Repos/MyRepos/Knights/core/include/server/core/protocol/system_opcodes.hpp)
-- [game_opcodes.hpp](/E:/Repos/MyRepos/Knights/server/include/server/protocol/game_opcodes.hpp)
-- [codec.hpp](/E:/Repos/MyRepos/Knights/core/include/server/wire/codec.hpp)
+- [system_opcodes.hpp](../../core/include/server/core/protocol/system_opcodes.hpp)
+- [game_opcodes.hpp](../../server/include/server/protocol/game_opcodes.hpp)
+- [codec.hpp](../../core/include/server/wire/codec.hpp)
 
 ### 3.2 기존 클라이언트 구현 참고
 
-- [net_client.cpp](/E:/Repos/MyRepos/Knights/client_gui/src/net_client.cpp)
+- [net_client.cpp](../../client_gui/src/net_client.cpp)
   - TCP 송수신 루프
   - 로그인/입장/채팅 요청 직렬화
   - `MSG_HELLO`, `MSG_ERR`, `MSG_LOGIN_RES`, `MSG_CHAT_BROADCAST` 처리
-- [verify_chat.py](/E:/Repos/MyRepos/Knights/tests/python/verify_chat.py)
+- [verify_chat.py](../../tests/python/verify_chat.py)
   - 최소 TCP smoke 시나리오
-- [verify_soak_perf_gate.py](/E:/Repos/MyRepos/Knights/tests/python/verify_soak_perf_gate.py)
+- [verify_soak_perf_gate.py](../../tests/python/verify_soak_perf_gate.py)
   - 현재 soak/perf gate 기준과 출력 형태
 
 ## 4. 배치 위치

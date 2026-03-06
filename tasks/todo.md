@@ -16,6 +16,9 @@
 - [ ] `main` branch protection과 required check 정책을 정리한다.
   - 기본 required: `CI`
   - path-gated workflow는 optional 유지 또는 별도 no-op wrapper 설계 후 required 승격
+- [ ] 저장소 문서/노트에 로컬 절대 경로가 남아 있지 않도록 전수 점검하고 정리한다.
+  - 대상: workspace-local absolute path 흔적
+  - 기준: 저장소 상대 경로 또는 일반 markdown 링크만 허용
 
 ## 3) TCP Load Generator
 
