@@ -1,7 +1,7 @@
 # 서버 코어 개선 TODO (상용 서버 엔진 비교 기반)
 
 > Status (2026-03-05): Archived snapshot. 실행 항목 완료.
-> Active tracking: `tasks/todo.md`
+> Active tracking: `tasks/todo.md`, `tasks/quantitative-validation.md`
 
 기준 입력:
 
