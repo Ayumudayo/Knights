@@ -16,7 +16,6 @@
       "directive_testing"
     ],
     "requires": [
-      "BUILD_LUA_SCRIPTING=ON",
       "LUA_ENABLED=1"
     ]
   },

@@ -739,3 +739,55 @@
 - Docker 검증(2026-03-06): baseline/off stack에서 `verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 0 --expect-lua-enabled 0`, `verify_pong.py`, `verify_chat.py`를 통과했다.
 - Docker 검증(2026-03-06): runtime on stack에서 health/ready, `verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 1 --expect-lua-enabled 1`, `verify_pong.py`, `test_load_balancing.py`, `verify_whisper_cross_instance.py`, `verify_admin_api.py`, `verify_admin_auth.py`, `verify_admin_control_plane_e2e.py`, `verify_soak_perf_gate.py`를 통과했다.
 - Docker 검증(2026-03-06): plugin/script smoke로 `verify_plugin_hot_reload.py --check-only`, `verify_plugin_hot_reload.py`, `verify_plugin_v2_fallback.py`, `verify_plugin_rollback.py`, `verify_script_hot_reload.py`, `verify_script_fallback_switch.py`, `verify_chat_hook_behavior.py`를 모두 통과했다.
+
+### 15.8 CI / Build Capability 단순화 계획 (2026-03-06)
+
+기준 문서:
+
+- `docs/ops/ci-runtime-capability-simplification-plan.md`
+
+목표:
+
+- capability는 기본 빌드에 항상 포함하고, 사용 여부는 런타임 설정으로만 제어하는 방향을 문서/코드/CI에 일관되게 반영한다.
+- `BUILD_LUA_SCRIPTING`, `KNIGHTS_ENABLE_GATEWAY_UDP_INGRESS`처럼 제품 변형보다는 과도기 검증 성격이 강한 빌드 플래그를 제거 대상으로 전환한다.
+- 단일 `ci.yml`에 혼재된 빠른 게이트/운영형 stack smoke/하드닝/캐시 prewarm 역할을 분리해 required CI를 단순화한다.
+
+체크리스트:
+
+- [x] Phase A - 정책/경계 고정
+  - [x] 런타임 토글 최소 집합 확정: `CHAT_HOOK_ENABLED`, `LUA_ENABLED`, `GATEWAY_UDP_LISTEN`
+  - [x] 제거 대상 빌드 플래그 확정: `BUILD_LUA_SCRIPTING`, `KNIGHTS_ENABLE_GATEWAY_UDP_INGRESS`
+  - [x] runtime toggle vs build capability 정책을 문서/README/configuration에 고정
+- [x] Phase B - 빌드 그래프 단순화
+  - [x] `server_core`에서 Lua capability 항상 포함 경로로 정리
+  - [x] `gateway_app`에서 UDP ingress capability 항상 포함 경로로 정리
+  - [x] `lua_runtime_disabled.cpp`, lua-off preset, source-selection checker 제거 범위 확정
+  - [x] 관련 CMake/프리셋/도커 빌드 경로 영향 파일 목록 정리
+- [ ] Phase C - CI 구조 재편
+  - [x] `.github/workflows/ci.yml`의 현재 job/step을 목적별로 분류한다 (fast/api/stack/extensibility/hardening/prewarm)
+  - [ ] required PR gate와 `main`/nightly gate를 분리하는 새 workflow 구조를 설계한다
+  - [x] build-variant 검증을 runtime-off/runtime-on 검증으로 치환하는 계획을 확정한다
+  - [ ] cache prewarm/PoC 성격 workflow를 required gate에서 분리하는 계획을 확정한다
+- [x] Phase D - 이행/검증 계획
+  - [x] 단계별 롤아웃 순서와 각 단계의 성공/롤백 기준을 정의한다
+  - [x] 최소 검증 세트(PR 기본), 확장 검증 세트(main/nightly), path-gated 검증 세트를 정의한다
+  - [x] 문서/스크립트/테스트 동기화 대상 목록을 확정한다
+
+검증 게이트:
+
+- [x] 계획 문서와 `tasks/todo.md` 체크리스트가 같은 커밋에서 동기화된다
+- [x] 제거 대상/유지 대상/이행 순서/리스크/롤백 기준이 문서에 모두 명시된다
+
+리뷰:
+
+- [x] 계획 문서 작성 후 핵심 결정과 남은 open question을 본 섹션에 기록
+- 진행 메모 (2026-03-06, 후속 구현 중):
+  - 루트 build option 제거 이후에도 `cmake/knights_luajit_submodule.cmake`, `cmake/knights_sol2_submodule.cmake`가 여전히 `BUILD_LUA_SCRIPTING` 캐시 변수를 참조해 깨끗한 configure에서 vendor target이 비어질 수 있는 버그를 확인했고, helper를 capability-always-on 모델로 수정했다.
+  - `Dockerfile`, 루트 `README.md`, `docker/stack/scripts/on_login_welcome.script.json`, Windows fast CI의 중복 Lua ctest 호출을 새 정책에 맞춰 정리했다.
+- 진행 메모 (2026-03-06, 후속 구현 완료):
+  - 내부 호환 매크로 `KNIGHTS_BUILD_LUA_SCRIPTING`와 dead test branch를 제거해 Lua 테스트를 항상-capability 기준으로 단순화했다.
+  - 코드/테스트 기준 `BUILD_LUA_SCRIPTING`, `KNIGHTS_ENABLE_GATEWAY_UDP_INGRESS`, `KNIGHTS_BUILD_LUA_SCRIPTING` 검색 결과는 계획 문서를 제외하면 0건이다.
+  - 검증(Windows): `pwsh scripts/build.ps1 -Config Release`, `ctest --preset windows-test --output-on-failure` 결과 `0 failed / 239` (`StorageBasic` 1건, stack Python 8건 skip).
+  - 검증(Docker, clean build): `scripts/deploy_docker.ps1 -Action up -Detached -Build` 후 baseline/off `verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 0 --expect-lua-enabled 0`, `verify_pong.py`, `verify_chat.py` 통과.
+  - 검증(Docker, runtime on): `CHAT_HOOK_ENABLED=1`, `LUA_ENABLED=1`로 재기동 후 `verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 1 --expect-lua-enabled 1`, `verify_script_hot_reload.py`, `verify_chat_hook_behavior.py`, `verify_plugin_hot_reload.py --check-only` 통과.
+  - 잔여 작업은 workflow 파일 분리와 required/main/nightly gate 재분류 같은 Phase C 구조 리팩터링으로 좁혀졌다.

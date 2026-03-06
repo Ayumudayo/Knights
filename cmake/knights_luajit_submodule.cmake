@@ -4,11 +4,6 @@ function(knights_configure_luajit_submodule out_target)
         return()
     endif()
 
-    if (NOT BUILD_LUA_SCRIPTING)
-        set(${out_target} "" PARENT_SCOPE)
-        return()
-    endif()
-
     set(_luajit_source_root "${KNIGHTS_LUAJIT_SUBMODULE_DIR}")
     set(_luajit_source_src "${_luajit_source_root}/src")
     set(_luajit_build_root "${CMAKE_BINARY_DIR}/third_party/luajit")
@@ -22,7 +17,7 @@ function(knights_configure_luajit_submodule out_target)
         find_program(KNIGHTS_LUAJIT_MAKE_PROGRAM NAMES gmake make)
         if (NOT KNIGHTS_LUAJIT_MAKE_PROGRAM)
             message(FATAL_ERROR
-                "BUILD_LUA_SCRIPTING=ON requires make or gmake to build upstream LuaJIT")
+                "Lua capability requires make or gmake to build upstream LuaJIT")
         endif()
 
         set(_luajit_output_lib "${_luajit_build_src}/libluajit.a")

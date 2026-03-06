@@ -28,20 +28,12 @@ add_library(server_core
     src/plugin/shared_library.cpp
     src/scripting/lua_sandbox.cpp
     src/scripting/script_watcher.cpp
+    src/scripting/lua_runtime.cpp
 )
 add_library(server_core::server_core ALIAS server_core)
 
-if (BUILD_LUA_SCRIPTING)
-    target_sources(server_core PRIVATE
-        src/scripting/lua_runtime.cpp
-    )
-    knights_configure_luajit_submodule(KNIGHTS_LUAJIT_VENDOR_TARGET)
-    knights_configure_sol2_submodule(KNIGHTS_SOL2_VENDOR_TARGET)
-else()
-    target_sources(server_core PRIVATE
-        src/scripting/lua_runtime_disabled.cpp
-    )
-endif()
+knights_configure_luajit_submodule(KNIGHTS_LUAJIT_VENDOR_TARGET)
+knights_configure_sol2_submodule(KNIGHTS_SOL2_VENDOR_TARGET)
 
 # -----------------------------------------------------------------------------
 # Build metadata (git hash/describe + build time)
@@ -88,12 +80,6 @@ target_compile_definitions(server_core PUBLIC
     KNIGHTS_BUILD_TIME_UTC="${KNIGHTS_BUILD_TIME_UTC}"
 )
 
-if (BUILD_LUA_SCRIPTING)
-    target_compile_definitions(server_core PUBLIC KNIGHTS_BUILD_LUA_SCRIPTING=1)
-else()
-    target_compile_definitions(server_core PUBLIC KNIGHTS_BUILD_LUA_SCRIPTING=0)
-endif()
-
 find_package(OpenSSL REQUIRED)
 find_package(lz4 CONFIG QUIET)
 if (NOT TARGET lz4::lz4)
@@ -106,11 +92,11 @@ endif()
 
 target_link_libraries(server_core PUBLIC OpenSSL::SSL OpenSSL::Crypto lz4::lz4)
 
-if (BUILD_LUA_SCRIPTING AND KNIGHTS_LUAJIT_VENDOR_TARGET)
+if (KNIGHTS_LUAJIT_VENDOR_TARGET)
     target_link_libraries(server_core PRIVATE $<BUILD_INTERFACE:${KNIGHTS_LUAJIT_VENDOR_TARGET}>)
 endif()
 
-if (BUILD_LUA_SCRIPTING AND KNIGHTS_SOL2_VENDOR_TARGET)
+if (KNIGHTS_SOL2_VENDOR_TARGET)
     target_link_libraries(server_core PRIVATE $<BUILD_INTERFACE:${KNIGHTS_SOL2_VENDOR_TARGET}>)
 endif()
 

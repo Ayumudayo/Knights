@@ -162,7 +162,7 @@ docker exec knights-stack-server-1-1 rm -f /app/plugins_builtin/10_chat_hook_sam
 ## Lua cold-hook authoring model (실험)
 
 Phase 16 backlog 기준으로 Lua 스크립트의 기본 작성 모델은 function-style hook + `ctx`다.
-공식 빌드/런타임 이미지는 `BUILD_LUA_SCRIPTING=ON`을 전제로 하고, 실제 활성화는 `LUA_ENABLED=1`에서만 일어난다.
+공식 빌드/런타임 이미지는 Lua capability를 항상 포함하고, 실제 활성화는 `LUA_ENABLED=1`에서만 일어난다.
 
 권장 형태:
 

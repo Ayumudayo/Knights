@@ -107,11 +107,7 @@ TEST(ChatLuaBindingsTest, RegistersExpectedBindingCount) {
     const auto result = server::app::scripting::register_chat_lua_bindings(runtime, host);
 
     EXPECT_EQ(result.attempted, server::app::scripting::chat_lua_binding_count());
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_EQ(result.registered, result.attempted);
-#else
-    EXPECT_EQ(result.registered, 0u);
-#endif
 
     const auto metrics = runtime.metrics_snapshot();
     EXPECT_EQ(metrics.registered_host_api, result.registered);
@@ -144,17 +140,12 @@ TEST(ChatLuaBindingsTest, FunctionStyleScriptCanUseRegisteredBindings) {
     ctx.user = "alice";
     const auto result = runtime.call_all("on_login", ctx);
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.decision, server::core::scripting::LuaHookDecision::kDeny);
     EXPECT_EQ(result.reason, "on_login:bindings");
     EXPECT_EQ(host.last_session_id, 42u);
     EXPECT_EQ(host.last_room, "lobby");
     EXPECT_EQ(host.last_notice, "alice:2");
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 
     std::error_code ec;
     std::filesystem::remove(temp_dir, ec);

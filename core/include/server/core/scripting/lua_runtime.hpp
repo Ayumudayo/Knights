@@ -13,10 +13,6 @@
 #include <variant>
 #include <vector>
 
-#ifndef KNIGHTS_BUILD_LUA_SCRIPTING
-#define KNIGHTS_BUILD_LUA_SCRIPTING 0
-#endif
-
 namespace server::core::scripting {
 
 /** @brief Hook invocation metadata exposed to Lua functions and host callbacks. */
@@ -42,13 +38,7 @@ enum class LuaHookDecision {
     kDeny,
 };
 
-/**
- * @brief Build-toggle-safe Lua runtime facade used by server-side scripting hooks.
- *
- * When `KNIGHTS_BUILD_LUA_SCRIPTING=1`, the runtime follows the enabled implementation path.
- * When `KNIGHTS_BUILD_LUA_SCRIPTING=0`, the runtime keeps the same API surface and returns
- * deterministic disabled-mode results so callers can preserve control-flow compatibility.
- */
+/** @brief Lua runtime facade used by server-side scripting hooks. */
 class LuaRuntime {
 public:
     enum class ScriptFailureKind {

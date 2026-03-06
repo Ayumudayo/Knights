@@ -68,17 +68,6 @@
       "description": "Windows configuration using Visual Studio 2022"
     },
     {
-      "name": "windows-lua-off",
-      "inherits": "windows-base",
-      "displayName": "Windows Lua OFF (VS2022)",
-      "description": "Windows configuration with BUILD_LUA_SCRIPTING=OFF",
-      "binaryDir": "${sourceDir}/build-windows-lua-off",
-      "toolchainFile": "${sourceDir}/build-windows/conan/build/generators/conan_toolchain.cmake",
-      "cacheVariables": {
-        "BUILD_LUA_SCRIPTING": "OFF"
-      }
-    },
-    {
       "name": "windows-core-engine",
       "inherits": "windows-base",
       "displayName": "Windows Core Engine (VS2022)",
@@ -133,16 +122,6 @@
       "inherits": "linux-base",
       "displayName": "Linux (Ninja)",
       "description": "Linux configuration using Ninja (Debug)"
-    },
-    {
-      "name": "linux-lua-off",
-      "inherits": "linux-base",
-      "displayName": "Linux Lua OFF (Ninja)",
-      "description": "Linux configuration with BUILD_LUA_SCRIPTING=OFF",
-      "binaryDir": "${sourceDir}/build-linux-lua-off",
-      "cacheVariables": {
-        "BUILD_LUA_SCRIPTING": "OFF"
-      }
     },
     {
       "name": "linux-release",
@@ -261,12 +240,6 @@
       "displayName": "Windows Release"
     },
     {
-      "name": "windows-lua-off-debug",
-      "configurePreset": "windows-lua-off",
-      "configuration": "Debug",
-      "displayName": "Windows Lua OFF Debug"
-    },
-    {
       "name": "windows-core-engine-debug",
       "configurePreset": "windows-core-engine",
       "configuration": "Debug",
@@ -295,12 +268,6 @@
       "configurePreset": "linux",
       "configuration": "Debug",
       "displayName": "Linux Debug"
-    },
-    {
-      "name": "linux-lua-off-debug",
-      "configurePreset": "linux-lua-off",
-      "configuration": "Debug",
-      "displayName": "Linux Lua OFF Debug"
     },
     {
       "name": "linux-release",
@@ -364,29 +331,8 @@
       }
     },
     {
-      "name": "windows-lua-off-test",
-      "configurePreset": "windows-lua-off",
-      "configuration": "Debug",
-      "execution": {
-        "jobs": 8
-      },
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
       "name": "linux-test",
       "configurePreset": "linux",
-      "execution": {
-        "jobs": 8
-      },
-      "output": {
-        "outputOnFailure": true
-      }
-    },
-    {
-      "name": "linux-lua-off-test",
-      "configurePreset": "linux-lua-off",
       "execution": {
         "jobs": 8
       },

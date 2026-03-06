@@ -9,7 +9,7 @@
 | 표면 | 위치 | 성숙도 | 비고 |
 |---|---|---|---|
 | Chat hook plugin ABI v1/v2 | `server/include/server/chat/chat_hook_plugin_abi.hpp` | Transitional | 로더는 `chat_hook_api_v2()`를 우선 탐색하고, 미존재 시 `chat_hook_api_v1()`로 폴백합니다. |
-| Lua runtime facade | `core/include/server/core/scripting/lua_runtime.hpp` | Transitional | 기본 배포 빌드는 `BUILD_LUA_SCRIPTING=ON`이며, 운영 활성화는 `LUA_ENABLED` 런타임 토글로 제어합니다. OFF 빌드는 호환성 목적으로만 유지됩니다. |
+| Lua runtime facade | `core/include/server/core/scripting/lua_runtime.hpp` | Transitional | 공식 빌드는 Lua capability를 항상 포함하며, 운영 활성화는 `LUA_ENABLED` 런타임 토글로 제어합니다. |
 
 ## Chat hook ABI v2 계약
 
@@ -42,23 +42,20 @@
   - `tests/server/test_chat_plugin_chain_v2.cpp`
   - `tests/server/test_server_chat.cpp`
 
-## Lua runtime build-toggle 계약
+## Lua runtime capability 계약
 
 ### 표면/호환성
-- `LuaRuntime` public API는 ON/OFF 빌드에서 동일한 시그니처를 유지한다.
-- `BUILD_LUA_SCRIPTING=ON`: `core/src/scripting/lua_runtime.cpp` 경로가 활성화된다.
-- `BUILD_LUA_SCRIPTING=OFF`: `core/src/scripting/lua_runtime_disabled.cpp` 경로가 활성화되며, 호출자는 동일한 API로 disabled 결과를 수신한다.
+- `LuaRuntime` public API는 공식 빌드에서 항상 활성 capability를 제공한다.
+- 운영 사용 여부는 `LUA_ENABLED`와 스크립트 디렉터리 설정이 결정한다.
 
 ### 동작 규약
-- 기본 정책: 공식 배포/개발 바이너리는 `BUILD_LUA_SCRIPTING=ON`으로 제공하고, 기능 사용 여부는 `LUA_ENABLED`로 결정한다.
-- `enabled()`는 빌드 토글 상태를 그대로 반영한다.
-- OFF 빌드에서 `load_script`/`reload_scripts`/`call`/`call_all`/`register_host_api`는 실패-안전(disabled) 결과를 반환하고, 런타임은 크래시 없이 계속 동작한다.
-- `metrics_snapshot()`의 구조와 필드 의미는 ON/OFF 모두에서 동일하다.
+- 기본 정책: 공식 배포/개발 바이너리는 Lua capability를 항상 포함하고, 기능 사용 여부는 `LUA_ENABLED`로 결정한다.
+- `enabled()`는 capability 존재 여부가 아니라 런타임 객체 상태를 반영한다.
+- `metrics_snapshot()`의 구조와 필드 의미는 capability 포함 빌드에서 안정적으로 유지된다.
 
 ### 테스트 기준
-- 코어: `tests/core/test_lua_runtime.cpp` (build-toggle 및 error counter 분기 포함)
+- 코어: `tests/core/test_lua_runtime.cpp`
 - 서버 바인딩: `tests/server/test_chat_lua_bindings.cpp`
-- OFF 호환성 프리셋: `windows-lua-off`, `linux-lua-off`
 
 ## 확장 ABI 거버넌스 규칙
 - 확장 ABI 변경은 PR 설명에서 호환/파괴 변경으로 분류해야 합니다.

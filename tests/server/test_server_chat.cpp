@@ -1145,9 +1145,6 @@ TEST_F(ChatServiceTest, ThrowingChatHookExceptionDoesNotStopChatOrAdminSettingPa
 }
 
 TEST_F(ChatServiceTest, LuaColdHooksRunForLoginAndJoinButNotChatSend) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_chat_lua_cold_hook");
     const auto script_path = script_temp.path() / "on_login.lua";
     {
@@ -1176,13 +1173,9 @@ TEST_F(ChatServiceTest, LuaColdHooksRunForLoginAndJoinButNotChatSend) {
 
     const auto after = lua_runtime->metrics_snapshot();
     EXPECT_EQ(after.calls_total, before.calls_total + 2u);
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookDenyStopsLoginWhenNativePathPasses) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_chat_lua_login_deny");
     const auto script_path = script_temp.path() / "policy.lua";
     {
@@ -1214,13 +1207,9 @@ TEST_F(ChatServiceTest, LuaColdHookDenyStopsLoginWhenNativePathPasses) {
     ASSERT_TRUE(error.has_value());
     EXPECT_EQ(error->code, core_proto::errc::FORBIDDEN);
     EXPECT_EQ(error->message, "login denied by lua scaffold");
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookPassSendsLoginWelcomeNotice) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_chat_lua_login_notice");
     const auto script_path = script_temp.path() / "policy.lua";
     {
@@ -1254,13 +1243,9 @@ TEST_F(ChatServiceTest, LuaColdHookPassSendsLoginWelcomeNotice) {
     FlushSessionIO();
 
     EXPECT_TRUE(WaitForBroadcastText("welcome lua_notice_user online=0"));
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaAdminHookCanUseArgsAndBroadcastAll) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_chat_lua_admin_announce");
     const auto script_path = script_temp.path() / "policy.lua";
     {
@@ -1292,13 +1277,9 @@ TEST_F(ChatServiceTest, LuaAdminHookCanUseArgsAndBroadcastAll) {
     FlushSessionIO();
 
     EXPECT_TRUE(WaitForBroadcastText("[announce] server maintenance"));
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookDenyStopsJoinWhenNativePathPasses) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_chat_lua_join_deny");
     const auto script_path = script_temp.path() / "policy.lua";
     {
@@ -1332,13 +1313,9 @@ TEST_F(ChatServiceTest, LuaColdHookDenyStopsJoinWhenNativePathPasses) {
     ASSERT_TRUE(error.has_value());
     EXPECT_EQ(error->code, core_proto::errc::FORBIDDEN);
     EXPECT_EQ(error->message, "join denied by lua scaffold");
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookJoinVipPolicyCanDenyAccess) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_chat_lua_join_vip_policy");
     const auto script_path = script_temp.path() / "policy.lua";
     {
@@ -1372,13 +1349,9 @@ TEST_F(ChatServiceTest, LuaColdHookJoinVipPolicyCanDenyAccess) {
     ASSERT_TRUE(error.has_value());
     EXPECT_EQ(error->code, core_proto::errc::FORBIDDEN);
     EXPECT_EQ(error->message, "vip room requires policy approval");
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookDenySkipsAdminRuntimeSettingReload) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_chat_lua_admin_deny");
     const auto script_path = script_temp.path() / "policy.lua";
     {
@@ -1407,13 +1380,9 @@ TEST_F(ChatServiceTest, LuaColdHookDenySkipsAdminRuntimeSettingReload) {
 
     const auto after = server::core::runtime_metrics::snapshot().runtime_setting_reload_attempt_total;
     EXPECT_EQ(after, before);
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookCanDenyAfterNativePluginPassesLogin) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
         GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
     }
@@ -1461,13 +1430,9 @@ TEST_F(ChatServiceTest, LuaColdHookCanDenyAfterNativePluginPassesLogin) {
 
     const auto after = lua_runtime->metrics_snapshot();
     EXPECT_EQ(after.calls_total, before.calls_total + 1u);
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLogin) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
         GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
     }
@@ -1514,13 +1479,9 @@ TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLogin) {
 
     const auto after = lua_runtime->metrics_snapshot();
     EXPECT_EQ(after.calls_total, before.calls_total);
-#endif
 }
 
 TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLeave) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
         GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
     }
@@ -1575,7 +1536,6 @@ TEST_F(ChatServiceTest, LuaColdHookSkippedWhenNativePluginBlocksLeave) {
 
     const auto after_leave = lua_runtime->metrics_snapshot();
     EXPECT_EQ(after_leave.calls_total, before_leave.calls_total);
-#endif
 }
 
 // 세션 종료 테스트

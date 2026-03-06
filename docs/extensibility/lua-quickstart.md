@@ -27,9 +27,8 @@
 
 빌드/능력(capability) 기준:
 
-- 공식 배포/개발 빌드와 Docker runtime image는 `BUILD_LUA_SCRIPTING=ON`을 전제로 한다.
-- `LUA_ENABLED`는 런타임 토글이며, `BUILD_LUA_SCRIPTING=OFF` 커스텀 빌드에서는 `1`이어도 Lua 경로가 활성화되지 않는다.
-- OFF 호환성 회귀는 `windows-lua-off` 또는 `linux-lua-off` preset으로 분리 점검한다.
+- 공식 배포/개발 빌드와 Docker runtime image는 Lua capability를 항상 포함한다.
+- `LUA_ENABLED`는 런타임 토글이며, capability가 포함된 바이너리에서 실제 스크립트 경로를 켜고 끄는 역할을 한다.
 
 ## 2) 권장 스캐폴드 생성
 
@@ -137,20 +136,19 @@ docker logs knights-stack-server-1-1 --since 5m
 - `lua_memory_limit_hits_total`
 - `hook_auto_disable_total{source="lua"}`
 
-build-toggle 확인 예시:
+capability 포함 기본 빌드 확인 예시:
 
 ```powershell
-python tools/check_lua_build_toggle.py --build-dir build-windows --expect on
-python tools/check_lua_build_toggle.py --build-dir build-windows-lua-off --expect off
+pwsh scripts/build.ps1 -Config Release
+ctest --preset windows-test -R "LuaRuntimeTest|LuaSandboxTest|ChatLuaBindingsTest" --output-on-failure --no-tests=error
 ```
 
 Linux/Ninja 기준:
 
 ```bash
 cmake --preset linux
-python3 tools/check_lua_build_toggle.py --build-dir build-linux --expect on --require-source-check
-cmake --preset linux-lua-off
-python3 tools/check_lua_build_toggle.py --build-dir build-linux-lua-off --expect off --require-source-check
+cmake --build --preset linux-debug --target core_plugin_runtime_tests --parallel
+ctest --test-dir build-linux -R 'LuaRuntimeTest|LuaSandboxTest' --output-on-failure --no-tests=error
 ```
 
 ### 5.1 제어면 배포 smoke

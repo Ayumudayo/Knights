@@ -761,11 +761,6 @@ LuaRuntime::LoadResult LuaRuntime::load_script(const std::filesystem::path& path
                                                const std::string& env_name) {
     std::lock_guard<std::mutex> lock(mu_);
 
-    if (!enabled()) {
-        ++errors_total_;
-        return LoadResult{false, "lua scripting is disabled at build time (BUILD_LUA_SCRIPTING=OFF)"};
-    }
-
     if (env_name.empty()) {
         ++errors_total_;
         return LoadResult{false, "env_name is empty"};
@@ -796,11 +791,6 @@ LuaRuntime::LoadResult LuaRuntime::load_script(const std::filesystem::path& path
 
 LuaRuntime::ReloadResult LuaRuntime::reload_scripts(const std::vector<ScriptEntry>& scripts) {
     std::lock_guard<std::mutex> lock(mu_);
-
-    if (!enabled()) {
-        ++errors_total_;
-        return ReloadResult{0, scripts.size(), "lua scripting is disabled at build time (BUILD_LUA_SCRIPTING=OFF)"};
-    }
 
     std::unordered_map<std::string, std::filesystem::path> reloaded;
     reloaded.reserve(scripts.size());
@@ -855,11 +845,6 @@ LuaRuntime::CallResult LuaRuntime::call(const std::string& env_name,
                                         const LuaHookContext& ctx) {
     std::lock_guard<std::mutex> lock(mu_);
 
-    if (!enabled()) {
-        ++errors_total_;
-        return CallResult{false, false, "lua scripting is disabled at build time (BUILD_LUA_SCRIPTING=OFF)"};
-    }
-
     if (func_name.empty()) {
         ++errors_total_;
         return CallResult{false, false, "func_name is empty"};
@@ -910,19 +895,6 @@ LuaRuntime::CallResult LuaRuntime::call(const std::string& env_name,
 LuaRuntime::CallAllResult LuaRuntime::call_all(const std::string& func_name,
                                                const LuaHookContext& ctx) {
     std::lock_guard<std::mutex> lock(mu_);
-
-    if (!enabled()) {
-        ++errors_total_;
-        return CallAllResult{
-            0,
-            loaded_scripts_.size(),
-            LuaHookDecision::kPass,
-            {},
-            {},
-            "lua scripting is disabled at build time (BUILD_LUA_SCRIPTING=OFF)",
-            {},
-        };
-    }
 
     if (func_name.empty()) {
         ++errors_total_;
@@ -1034,11 +1006,6 @@ bool LuaRuntime::register_host_api(const std::string& table_name,
                                    HostCallback callback) {
     std::lock_guard<std::mutex> lock(mu_);
 
-    if (!enabled()) {
-        ++errors_total_;
-        return false;
-    }
-
     if (table_name.empty() || func_name.empty() || !callback) {
         ++errors_total_;
         return false;
@@ -1062,11 +1029,7 @@ void LuaRuntime::reset() {
 }
 
 bool LuaRuntime::enabled() const {
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     return true;
-#else
-    return false;
-#endif
 }
 
 LuaRuntime::MetricsSnapshot LuaRuntime::metrics_snapshot() const {

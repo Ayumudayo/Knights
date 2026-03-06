@@ -363,9 +363,6 @@ protected:
 };
 
 TEST_F(LuaHookIntegrationTest, NativePassThenLuaDenyOnLogin) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
         GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
     }
@@ -409,13 +406,9 @@ TEST_F(LuaHookIntegrationTest, NativePassThenLuaDenyOnLogin) {
     EXPECT_EQ(*error_message, "login denied after native pass");
     const auto after = lua_runtime_->metrics_snapshot();
     EXPECT_EQ(after.calls_total, before.calls_total + 1u);
-#endif
 }
 
 TEST_F(LuaHookIntegrationTest, NativeBlockSkipsLuaOnLogin) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     if (std::string(TEST_CHAT_HOOK_V2_ONLY_PATH).empty()) {
         GTEST_SKIP() << "TEST_CHAT_HOOK_V2_ONLY_PATH is not configured";
     }
@@ -458,7 +451,6 @@ TEST_F(LuaHookIntegrationTest, NativeBlockSkipsLuaOnLogin) {
     EXPECT_EQ(*error_message, "login blocked by v2-only test plugin");
     const auto after = lua_runtime_->metrics_snapshot();
     EXPECT_EQ(after.calls_total, before.calls_total);
-#endif
 }
 
 } // namespace

@@ -4,15 +4,10 @@ function(knights_configure_sol2_submodule out_target)
         return()
     endif()
 
-    if (NOT BUILD_LUA_SCRIPTING)
-        set(${out_target} "" PARENT_SCOPE)
-        return()
-    endif()
-
     set(_sol2_include_dir "${KNIGHTS_SOL2_SUBMODULE_DIR}/include")
     if (NOT EXISTS "${_sol2_include_dir}/sol/sol.hpp")
         message(FATAL_ERROR
-            "BUILD_LUA_SCRIPTING=ON requires sol2 headers at: ${_sol2_include_dir}. "
+            "Lua capability requires sol2 headers at: ${_sol2_include_dir}. "
             "Run: git submodule update --init --recursive external/sol2")
     endif()
 

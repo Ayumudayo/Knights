@@ -142,9 +142,6 @@ TEST_F(ScriptWatcherTest, RecursiveFlagControlsNestedFileDiscovery) {
 }
 
 TEST_F(ScriptWatcherTest, FileModificationCanTriggerLuaRuntimeReloadFlow) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     const auto script_path = temp_dir_ / "policy.lua";
     write_text(script_path,
                "return { hook = \"on_login\", decision = \"pass\" }\n");
@@ -193,7 +190,6 @@ TEST_F(ScriptWatcherTest, FileModificationCanTriggerLuaRuntimeReloadFlow) {
     EXPECT_TRUE(after_reload.error.empty());
     EXPECT_EQ(after_reload.decision, LuaHookDecision::kDeny);
     EXPECT_EQ(after_reload.reason, "reloaded deny");
-#endif
 }
 
 } // namespace

@@ -15,7 +15,7 @@ WORKDIR /app
 COPY . .
 
 # Configure CMake with Linux preset (uses system packages)
-RUN cmake --preset linux-release -DBUILD_SERVER_TESTS=OFF -DBUILD_LUA_SCRIPTING=ON
+RUN cmake --preset linux-release -DBUILD_SERVER_TESTS=OFF
 
 # Build server components only (devclient excluded for image scope)
 RUN cmake --build --preset linux-release --target \

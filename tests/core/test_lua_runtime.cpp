@@ -36,7 +36,7 @@ protected:
     std::filesystem::path temp_dir_;
 };
 
-TEST_F(LuaRuntimeTest, LoadScriptReflectsBuildToggle) {
+TEST_F(LuaRuntimeTest, LoadScriptLoadsTrackedEnvironment) {
     LuaRuntime runtime;
 
     const auto script_path = temp_dir_ / "sample.lua";
@@ -44,27 +44,17 @@ TEST_F(LuaRuntimeTest, LoadScriptReflectsBuildToggle) {
 
     const auto result = runtime.load_script(script_path, "sample");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(result.ok);
     EXPECT_TRUE(result.error.empty());
 
     const auto metrics = runtime.metrics_snapshot();
     EXPECT_EQ(metrics.loaded_scripts, 1u);
-#else
-    EXPECT_FALSE(result.ok);
-    EXPECT_FALSE(result.error.empty());
-    EXPECT_NE(result.error.find("disabled"), std::string::npos);
-#endif
 }
 
-TEST_F(LuaRuntimeTest, EnabledReflectsBuildToggle) {
+TEST_F(LuaRuntimeTest, EnabledReturnsTrue) {
     LuaRuntime runtime;
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(runtime.enabled());
-#else
-    EXPECT_FALSE(runtime.enabled());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallUnknownEnvironmentIsSkippableWhenEnabled) {
@@ -72,15 +62,9 @@ TEST_F(LuaRuntimeTest, CallUnknownEnvironmentIsSkippableWhenEnabled) {
 
     const auto result = runtime.call("missing_env", "on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(result.ok);
     EXPECT_FALSE(result.executed);
     EXPECT_TRUE(result.error.empty());
-#else
-    EXPECT_FALSE(result.ok);
-    EXPECT_FALSE(result.executed);
-    EXPECT_NE(result.error.find("disabled"), std::string::npos);
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallLoadedEnvironmentIsSkippableInScaffoldMode) {
@@ -92,15 +76,9 @@ TEST_F(LuaRuntimeTest, CallLoadedEnvironmentIsSkippableInScaffoldMode) {
 
     const auto result = runtime.call("sample", "on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(result.ok);
     EXPECT_FALSE(result.executed);
     EXPECT_TRUE(result.error.empty());
-#else
-    EXPECT_FALSE(result.ok);
-    EXPECT_FALSE(result.executed);
-    EXPECT_NE(result.error.find("disabled"), std::string::npos);
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallExecutesLuaFunctionWhenPresent) {
@@ -115,15 +93,9 @@ TEST_F(LuaRuntimeTest, CallExecutesLuaFunctionWhenPresent) {
 
     const auto result = runtime.call("callable", "on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(result.ok);
     EXPECT_TRUE(result.executed);
     EXPECT_TRUE(result.error.empty());
-#else
-    EXPECT_FALSE(result.ok);
-    EXPECT_FALSE(result.executed);
-    EXPECT_NE(result.error.find("disabled"), std::string::npos);
-#endif
 }
 
 TEST_F(LuaRuntimeTest, ReloadScriptsReplacesTrackedEnvironmentSet) {
@@ -139,7 +111,6 @@ TEST_F(LuaRuntimeTest, ReloadScriptsReplacesTrackedEnvironmentSet) {
 
     const auto first_reload = runtime.reload_scripts(scripts);
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     const auto epoch_before = runtime.metrics_snapshot().reload_epoch;
     EXPECT_TRUE(first_reload.error.empty());
     EXPECT_EQ(first_reload.loaded, 1u);
@@ -160,11 +131,6 @@ TEST_F(LuaRuntimeTest, ReloadScriptsReplacesTrackedEnvironmentSet) {
     const auto old_env = runtime.call("env_first", "on_login");
     EXPECT_TRUE(old_env.ok);
     EXPECT_FALSE(old_env.executed);
-#else
-    EXPECT_FALSE(first_reload.error.empty());
-    EXPECT_EQ(first_reload.loaded, 0u);
-    EXPECT_EQ(first_reload.failed, 1u);
-#endif
 }
 
 TEST_F(LuaRuntimeTest, ResetClearsReloadEpoch) {
@@ -179,9 +145,7 @@ TEST_F(LuaRuntimeTest, ResetClearsReloadEpoch) {
 
     runtime.reset();
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_EQ(runtime.metrics_snapshot().reload_epoch, 0u);
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllTracksLoadedScriptCountInScaffoldMode) {
@@ -200,7 +164,6 @@ TEST_F(LuaRuntimeTest, CallAllTracksLoadedScriptCountInScaffoldMode) {
     const auto before = runtime.metrics_snapshot();
     const auto result = runtime.call_all("on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.attempted, 2u);
     EXPECT_EQ(result.failed, 0u);
@@ -209,13 +172,9 @@ TEST_F(LuaRuntimeTest, CallAllTracksLoadedScriptCountInScaffoldMode) {
 
     const auto after = runtime.metrics_snapshot();
     EXPECT_EQ(after.calls_total, before.calls_total + 2u);
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
-TEST_F(LuaRuntimeTest, DisabledBuildCountsErrorsPerApiCall) {
+TEST_F(LuaRuntimeTest, ErrorsAreTrackedPerApiCall) {
     LuaRuntime runtime;
 
     const auto before = runtime.metrics_snapshot();
@@ -231,7 +190,6 @@ TEST_F(LuaRuntimeTest, DisabledBuildCountsErrorsPerApiCall) {
     const auto call_all = runtime.call_all("on_login");
     const auto after_call_all = runtime.metrics_snapshot();
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_TRUE(call.ok);
     EXPECT_TRUE(call.error.empty());
@@ -239,15 +197,6 @@ TEST_F(LuaRuntimeTest, DisabledBuildCountsErrorsPerApiCall) {
     EXPECT_EQ(after_reload.errors_total, before.errors_total + 1u);
     EXPECT_EQ(after_call.errors_total, after_reload.errors_total);
     EXPECT_EQ(after_call_all.errors_total, after_call.errors_total);
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(call.ok);
-    EXPECT_FALSE(call.error.empty());
-    EXPECT_FALSE(call_all.error.empty());
-    EXPECT_EQ(after_reload.errors_total, before.errors_total + 1u);
-    EXPECT_EQ(after_call.errors_total, after_reload.errors_total + 1u);
-    EXPECT_EQ(after_call_all.errors_total, after_call.errors_total + 1u);
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllParsesReturnTableDecisionForMatchingHook) {
@@ -264,7 +213,6 @@ TEST_F(LuaRuntimeTest, CallAllParsesReturnTableDecisionForMatchingHook) {
     const auto login_result = runtime.call_all("on_login");
     const auto join_result = runtime.call_all("on_join");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
 
     EXPECT_EQ(login_result.decision, LuaHookDecision::kDeny);
@@ -277,11 +225,6 @@ TEST_F(LuaRuntimeTest, CallAllParsesReturnTableDecisionForMatchingHook) {
     EXPECT_TRUE(join_result.reason.empty());
     EXPECT_TRUE(join_result.notices.empty());
     EXPECT_TRUE(join_result.error.empty());
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(login_result.error.empty());
-    EXPECT_FALSE(join_result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllUsesFunctionReturnDecisionWhenHookExists) {
@@ -298,17 +241,12 @@ TEST_F(LuaRuntimeTest, CallAllUsesFunctionReturnDecisionWhenHookExists) {
     const auto reload = runtime.reload_scripts(scripts);
     const auto result = runtime.call_all("on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.decision, LuaHookDecision::kDeny);
     EXPECT_EQ(result.reason, "deny from function");
     ASSERT_EQ(result.notices.size(), 1u);
     EXPECT_EQ(result.notices.front(), "function notice");
     EXPECT_TRUE(result.error.empty());
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllPassesHookContextIntoLuaAndHostCallbacks) {
@@ -344,7 +282,6 @@ TEST_F(LuaRuntimeTest, CallAllPassesHookContextIntoLuaAndHostCallbacks) {
     ctx.user = "alice";
     const auto result = runtime.call_all("on_login", ctx);
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_TRUE(registered);
     EXPECT_EQ(result.decision, LuaHookDecision::kDeny);
@@ -355,11 +292,6 @@ TEST_F(LuaRuntimeTest, CallAllPassesHookContextIntoLuaAndHostCallbacks) {
     EXPECT_EQ(observed_context.hook_name, "on_login");
     EXPECT_EQ(observed_context.script_name, "host_api");
     EXPECT_EQ(observed_context.hook.user, "alice");
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(registered);
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllAggregatesNoticesAcrossScripts) {
@@ -379,17 +311,12 @@ TEST_F(LuaRuntimeTest, CallAllAggregatesNoticesAcrossScripts) {
     const auto reload = runtime.reload_scripts(scripts);
     const auto result = runtime.call_all("on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.decision, LuaHookDecision::kPass);
     ASSERT_EQ(result.notices.size(), 2u);
     EXPECT_EQ(result.notices[0], "notice from env_a");
     EXPECT_EQ(result.notices[1], "notice from env_b");
     EXPECT_TRUE(result.error.empty());
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllIgnoresInvalidDirectiveForDifferentHook) {
@@ -405,16 +332,11 @@ TEST_F(LuaRuntimeTest, CallAllIgnoresInvalidDirectiveForDifferentHook) {
     const auto reload = runtime.reload_scripts(scripts);
     const auto result = runtime.call_all("on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.decision, LuaHookDecision::kPass);
     EXPECT_TRUE(result.reason.empty());
     EXPECT_TRUE(result.error.empty());
     EXPECT_EQ(result.failed, 0u);
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllUsesDeterministicReasonAcrossMultipleDenyScripts) {
@@ -434,15 +356,10 @@ TEST_F(LuaRuntimeTest, CallAllUsesDeterministicReasonAcrossMultipleDenyScripts) 
     const auto reload = runtime.reload_scripts(scripts);
     const auto result = runtime.call_all("on_login");
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.decision, LuaHookDecision::kDeny);
     EXPECT_EQ(result.reason, "reason from env_a");
     EXPECT_TRUE(result.error.empty());
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllInstructionLimitIncrementsLimitHits) {
@@ -465,7 +382,6 @@ TEST_F(LuaRuntimeTest, CallAllInstructionLimitIncrementsLimitHits) {
     const auto result = runtime.call_all("on_login");
     const auto after = runtime.metrics_snapshot();
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.attempted, 1u);
     EXPECT_EQ(result.failed, 1u);
@@ -476,10 +392,6 @@ TEST_F(LuaRuntimeTest, CallAllInstructionLimitIncrementsLimitHits) {
     EXPECT_EQ(result.script_results.front().failure_kind, LuaRuntime::ScriptFailureKind::kInstructionLimit);
     EXPECT_EQ(after.instruction_limit_hits, before.instruction_limit_hits + 1u);
     EXPECT_EQ(after.memory_limit_hits, before.memory_limit_hits);
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, CallAllMemoryLimitIncrementsLimitHits) {
@@ -505,7 +417,6 @@ TEST_F(LuaRuntimeTest, CallAllMemoryLimitIncrementsLimitHits) {
     const auto result = runtime.call_all("on_login");
     const auto after = runtime.metrics_snapshot();
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
     EXPECT_TRUE(reload.error.empty());
     EXPECT_EQ(result.attempted, 1u);
     EXPECT_EQ(result.failed, 1u);
@@ -516,10 +427,6 @@ TEST_F(LuaRuntimeTest, CallAllMemoryLimitIncrementsLimitHits) {
     EXPECT_EQ(result.script_results.front().failure_kind, LuaRuntime::ScriptFailureKind::kMemoryLimit);
     EXPECT_EQ(after.memory_limit_hits, before.memory_limit_hits + 1u);
     EXPECT_EQ(after.instruction_limit_hits, before.instruction_limit_hits);
-#else
-    EXPECT_FALSE(reload.error.empty());
-    EXPECT_FALSE(result.error.empty());
-#endif
 }
 
 TEST_F(LuaRuntimeTest, ResetClearsRuntimeState) {

@@ -326,7 +326,6 @@ int run_server(int argc, char** argv) {
         }
 
         if (config.lua_enabled) {
-#if KNIGHTS_BUILD_LUA_SCRIPTING
             corelog::info(
                 "Lua scripting enabled"
                 " scripts_dir=" + config.lua_scripts_dir
@@ -338,12 +337,8 @@ int run_server(int argc, char** argv) {
             if (config.lua_scripts_dir.empty() && config.lua_fallback_scripts_dir.empty()) {
                 corelog::warn("LUA_ENABLED is set but LUA_SCRIPTS_DIR and LUA_FALLBACK_SCRIPTS_DIR are both empty; scripts will not be loaded until configured");
             }
-#else
-            corelog::warn("LUA_ENABLED is set but this binary was built with BUILD_LUA_SCRIPTING=OFF; Lua path remains disabled");
-#endif
         }
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
         if (config.lua_enabled) {
             core::scripting::LuaRuntime::Config lua_cfg{};
             lua_cfg.instruction_limit = config.lua_instruction_limit;
@@ -356,16 +351,13 @@ int run_server(int argc, char** argv) {
             services::set(lua_runtime);
             corelog::info("Lua runtime scaffold initialised");
         }
-#endif
 
         // 3. 코어 컴포넌트 초기화
         asio::io_context io;
-#if KNIGHTS_BUILD_LUA_SCRIPTING
         if (lua_runtime) {
             lua_reload_strand = std::make_shared<asio::strand<asio::io_context::executor_type>>(
                 asio::make_strand(io));
         }
-#endif
         core::JobQueue job_queue(config.job_queue_max);
         auto* job_queue_ptr = &job_queue;
         core::ThreadManager workers(job_queue);
@@ -391,11 +383,9 @@ int run_server(int argc, char** argv) {
         core_internal::register_connection_runtime_state_service(state);
         services::set(make_ref(scheduler));
         services::set(make_ref(app_host));
-#if KNIGHTS_BUILD_LUA_SCRIPTING
         if (lua_reload_strand) {
             services::set(lua_reload_strand);
         }
-#endif
 
         // 스케줄러 타이머 설정
         scheduler_timer = std::make_shared<asio::steady_timer>(io);
@@ -416,7 +406,6 @@ int run_server(int argc, char** argv) {
         };
         (*scheduler_tick)();
 
-#if KNIGHTS_BUILD_LUA_SCRIPTING
         if (lua_runtime
             && (!config.lua_scripts_dir.empty() || !config.lua_fallback_scripts_dir.empty())) {
             const std::filesystem::path primary_scripts_dir =
@@ -617,7 +606,6 @@ int run_server(int argc, char** argv) {
                     + " interval_ms=" + std::to_string(config.lua_reload_interval_ms));
             }
         }
-#endif
 
         // 4. DB 커넥션 풀 구성
         std::shared_ptr<core::storage::IConnectionPool> db_pool;

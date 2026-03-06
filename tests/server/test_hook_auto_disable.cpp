@@ -245,9 +245,6 @@ protected:
 };
 
 TEST_F(HookAutoDisableTest, LuaHookAutoDisablesAfterConsecutiveFailuresAndReenablesOnReload) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_hook_auto_disable");
     const auto bad_script_path = script_temp.path() / "policy_bad.lua";
     {
@@ -314,13 +311,9 @@ TEST_F(HookAutoDisableTest, LuaHookAutoDisablesAfterConsecutiveFailuresAndReenab
             EXPECT_EQ(hook.consecutive_failures, 0u);
         }
     }
-#endif
 }
 
 TEST_F(HookAutoDisableTest, LuaInstructionLimitFailureDoesNotStopAdminSettingPath) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_hook_instruction_limit");
     const auto script_path = script_temp.path() / "policy_instruction.lua";
     {
@@ -367,13 +360,9 @@ TEST_F(HookAutoDisableTest, LuaInstructionLimitFailureDoesNotStopAdminSettingPat
         }
     }
     EXPECT_TRUE(found_hook);
-#endif
 }
 
 TEST_F(HookAutoDisableTest, LuaMemoryLimitFailureDoesNotStopAdminSettingPath) {
-#if !KNIGHTS_BUILD_LUA_SCRIPTING
-    GTEST_SKIP() << "Lua scripting build flag is disabled";
-#else
     ScopedTempDir script_temp("knights_hook_memory_limit");
     const auto script_path = script_temp.path() / "policy_memory.lua";
     {
@@ -423,7 +412,6 @@ TEST_F(HookAutoDisableTest, LuaMemoryLimitFailureDoesNotStopAdminSettingPath) {
         }
     }
     EXPECT_TRUE(found_hook);
-#endif
 }
 
 } // namespace
