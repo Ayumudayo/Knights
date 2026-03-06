@@ -84,6 +84,72 @@
   - `gateway-1`, `gateway-2` 컨테이너가 same-stack repeated run 이후에도 `Up` 유지
   - gateway logs에 `free(): double free detected in tcache 2` 재발 없음
 
+## 5) Pre-Push CI Verification
+
+- [x] `CI` 로컬 동등 검증을 수행한다.
+  - opcode / wire / doxygen / workflow YAML check
+  - Windows Release build
+  - `ctest --preset windows-test`
+- [x] `CI API Governance` 로컬 동등 검증을 수행한다.
+  - core boundary / fixture / stable governance checks
+  - core public API consumer targets + tests
+- [x] `CI Stack` 로컬 동등 검증을 수행한다.
+  - runtime off baseline smoke
+  - runtime on stack smoke
+- [x] `CI Extensibility` 로컬 동등 검증을 수행한다.
+  - runtime toggle metrics
+  - plugin / script smoke
+
+### Review
+
+- static checks
+  - `python tools/gen_opcode_docs.py --check`
+  - `python tools/check_doxygen_coverage.py`
+  - `python tests/python/test_check_doxygen_coverage.py`
+  - `python tools/gen_wire_codec.py protocol/wire_map.json core/include/server/wire/codec.hpp`
+  - `python tools/check_core_api_contracts.py --check-boundary`
+  - `python tools/check_core_api_contracts.py --check-boundary-fixtures`
+  - `python tools/check_core_api_contracts.py --check-stable-governance-fixtures`
+  - 결과: 모두 통과
+- Windows build / test
+  - `pwsh scripts/build.ps1 -Config Release`
+  - `pwsh scripts/build.ps1 -Config Release -Target core_public_api_smoke`
+  - `pwsh scripts/build.ps1 -Config Release -Target core_public_api_headers_compile`
+  - `pwsh scripts/build.ps1 -Config Release -Target core_public_api_stable_header_scenarios`
+  - `ctest --preset windows-test --parallel 8 --output-on-failure`
+  - 결과: `239/239 pass` (`9 skipped`)
+  - 참고: 첫 `Release` 전체 빌드는 `server_plugin_chain_v2_tests` GoogleTest discovery timeout으로 한 번 실패했지만, 바이너리 자체는 정상적으로 `--gtest_list_tests`를 반환했고 즉시 재실행에서 통과했다.
+- core API governance follow-up
+  - `core/include/server/core/net/connection.hpp` 변경으로 stable header governance가 걸려 `docs/core-api/net.md`, `docs/core-api/changelog.md`, `docs/core-api/compatibility-matrix.json`, `core/include/server/core/api/version.hpp`를 함께 갱신했다.
+  - 임시 index/tree + synthetic PR event payload 기준
+    - `python tools/check_core_api_contracts.py --check-doc-freshness ...`
+    - `python tools/check_core_api_contracts.py --check-stable-change-governance ...`
+    - `python tools/check_core_api_contracts.py --check-pr-governance ...`
+  - 결과: 모두 통과
+- Docker stack
+  - baseline off
+    - `pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build`
+    - `python tests/python/verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 0 --expect-lua-enabled 0`
+    - `python tests/python/verify_pong.py`
+    - `python tests/python/verify_chat.py`
+  - runtime on
+    - `python tests/python/verify_runtime_toggle_metrics.py --expect-chat-hook-enabled 1 --expect-lua-enabled 1`
+    - `python tests/python/test_load_balancing.py`
+    - `python tests/python/verify_whisper_cross_instance.py`
+    - `python tests/python/verify_admin_api.py`
+    - `python tests/python/verify_admin_auth.py`
+    - `python tests/python/verify_admin_control_plane_e2e.py`
+  - 결과: 모두 통과
+- Docker extensibility
+  - `python tests/python/verify_plugin_hot_reload.py --check-only`
+  - `python tests/python/verify_plugin_hot_reload.py`
+  - `python tests/python/verify_plugin_v2_fallback.py`
+  - `python tests/python/verify_plugin_rollback.py`
+  - `python tests/python/verify_script_hot_reload.py`
+  - `python tests/python/verify_script_fallback_switch.py`
+  - `python tests/python/verify_chat_hook_behavior.py`
+  - 결과: 모두 통과
+
 ## Quantitative Validation
 
 - 정량적 검증 backlog는 `tasks/quantitative-validation.md`에서 별도 추적한다.
