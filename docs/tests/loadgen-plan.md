@@ -1,6 +1,6 @@
 # Load Generator Plan
 
-상태: transport-aware TCP phase implemented and locally verified
+상태: transport-aware TCP/UDP/RUDP attach phase implemented and locally verified
 
 브랜치: `feature/tcp-loadgen`
 
@@ -10,7 +10,7 @@
 
 - `haproxy -> gateway_app -> server_app`
 
-를 그대로 대상으로 두고, transport-aware 시나리오를 단일 headless load generator binary에서 실행할 수 있게 만든다. 현재 구현 단계에서는 `tcp` transport만 지원한다.
+를 그대로 대상으로 두고, transport-aware 시나리오를 단일 headless load generator binary에서 실행할 수 있게 만든다. 현재 구현 단계에서는 `tcp` workload와 `udp` / `rudp` attach validation을 지원한다.
 
 이 도구의 1차 목표는 다음과 같다.
 
@@ -21,11 +21,11 @@
 ## 2. 비목표
 
 - 별도 synthetic server 구현
-- UDP/RUDP 부하 경로 동시 구현
+- UDP/RUDP data workload 전체 구현
 - GUI 포함 클라이언트
 - 운영형 distributed coordinator/worker 구조
 
-초기 버전은 단일 프로세스, headless CLI로 제한하며, transport adapter 구조 아래에서 `tcp`만 구현한다.
+초기 버전은 단일 프로세스, headless CLI로 제한하며, transport adapter 구조 아래에서 `tcp` workload와 `udp` / `rudp` attach visibility를 우선 구현한다.
 
 ## 3. 재사용 자산
 
@@ -113,6 +113,21 @@
 - 일부 세션은 ping only
 - duration 동안 steady-state 유지
 
+### 7.3 mixed_session_soak_long
+
+- `mixed_session_soak`의 장시간 / 대세션 control sample
+- HAProxy frontend 기준 TCP workload baseline을 장시간으로 확보
+
+### 7.4 mixed_direct_udp_soak_long
+
+- direct same-gateway 경로에서 TCP workload + UDP attach를 함께 유지
+- duration 동안 `udp_bind_failures=0`을 유지하는지 확인
+
+### 7.5 mixed_direct_rudp_soak_long
+
+- direct same-gateway 경로에서 TCP workload + RUDP attach를 함께 유지
+- success-path rollout rehearsal baseline으로 사용
+
 ## 8. CLI 초안
 
 예시:
@@ -130,6 +145,7 @@ stack_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/st
 
 선택 인자:
 
+- `--udp-port`
 - `--seed`
 - `--verbose`
 
@@ -225,22 +241,54 @@ stack_loadgen --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/st
 - `python tests/python/verify_pong.py`
 - `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/steady_chat.json --report build/loadgen/steady_chat.json`
 - `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak.json --report build/loadgen/mixed_session_soak.json`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak_long.json --report build/loadgen/mixed_session_soak_long.json`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/udp_attach_login_only.json --report build/loadgen/udp_attach_login_only.host.json --verbose`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/rudp_attach_login_only.json --report build/loadgen/rudp_attach_login_only.host.json --verbose`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/mixed_direct_udp_soak_long.json --report build/loadgen/mixed_direct_udp_soak_long.host.json`
+- `build-windows\\Release\\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/mixed_direct_rudp_soak_long.json --report build/loadgen/mixed_direct_rudp_soak_long.host.json`
 
 실제 결과:
 
 - `steady_chat`: `loadgen_summary scenario=steady_chat transports=tcp sessions=24 connected=24 authenticated=24 joined=24 success=155 errors=0 throughput_rps=8.60 p95_ms=14.41`
 - `mixed_session_soak`: `loadgen_summary scenario=mixed_session_soak transports=tcp sessions=24 connected=24 authenticated=24 joined=12 success=85 errors=0 throughput_rps=4.67 p95_ms=12.66`
-- unsupported transport guardrail: `transport=udp` scenario는 `loadgen error: transport 'udp' is not implemented yet`로 명시적으로 실패
+- `mixed_session_soak_long`: `loadgen_summary scenario=mixed_session_soak_long transports=tcp sessions=48 connected=48 authenticated=48 joined=24 success=639 errors=0 attach_failures=0 udp_bind_ok=0 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0 throughput_rps=9.64 p95_ms=12.83`
+- `udp_attach_login_only` (Windows host-path direct same-gateway): `loadgen_summary scenario=udp_attach_login_only transports=udp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0`
+- `rudp_attach_login_only` (Windows host-path direct same-gateway): `loadgen_summary scenario=rudp_attach_login_only transports=rudp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=4 rudp_attach_fallback=0`
+- `mixed_direct_udp_soak` (Windows host-path direct same-gateway): `loadgen_summary scenario=mixed_direct_udp_soak transports=tcp,udp sessions=24 connected=24 authenticated=24 joined=10 success=283 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0 throughput_rps=4.48 p95_ms=12.06`
+- `mixed_direct_udp_soak_long` (Windows host-path direct same-gateway): `loadgen_summary scenario=mixed_direct_udp_soak_long transports=tcp,udp sessions=48 connected=48 authenticated=48 joined=20 success=1128 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0 throughput_rps=8.93 p95_ms=12.26`
+- `mixed_direct_rudp_soak_long` (Windows host-path direct same-gateway): `loadgen_summary scenario=mixed_direct_rudp_soak_long transports=rudp,tcp sessions=48 connected=48 authenticated=48 joined=20 success=1134 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=8 rudp_attach_fallback=0 throughput_rps=8.98 p95_ms=12.08`
+- `mixed_direct_rudp_soak_long` fallback policy (Windows host-path direct same-gateway + `docker/stack/.env.rudp-fallback.example`): `loadgen_summary scenario=mixed_direct_rudp_soak_long transports=rudp,tcp sessions=48 connected=48 authenticated=48 joined=20 success=1130 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=8 throughput_rps=8.96 p95_ms=14.21`
+- `mixed_direct_rudp_soak_long` OFF policy (Windows host-path direct same-gateway + `docker/stack/.env.rudp-off.example`): `loadgen_summary scenario=mixed_direct_rudp_soak_long transports=rudp,tcp sessions=48 connected=48 authenticated=48 joined=20 success=1131 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=8 throughput_rps=8.96 p95_ms=12.95`
+- `mixed_direct_rudp_soak_long` env restore proof (Windows host-path direct same-gateway + `docker/stack/.env.rudp-attach.example`): `loadgen_summary scenario=mixed_direct_rudp_soak_long transports=rudp,tcp sessions=48 connected=48 authenticated=48 joined=20 success=1131 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=8 rudp_attach_fallback=0 throughput_rps=8.96 p95_ms=13.04`
+- same-network Docker bridge verification:
+  - `udp_attach_login_only`: `udp_bind_ok=4 udp_bind_fail=0 attach_failures=0`
+  - `rudp_attach_login_only`: `udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=4 rudp_attach_fallback=0`
+- forced fallback verification (Windows host-path direct same-gateway + `docker/stack/.env.rudp-fallback.example`): `loadgen_summary scenario=rudp_attach_login_only transports=rudp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=4`
+- RUDP OFF invariance verification (Windows host-path direct same-gateway + `docker/stack/.env.rudp-off.example`): `loadgen_summary scenario=rudp_attach_login_only transports=rudp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=4`
+- repeatability pass after the gateway UDP send fix:
+  - `udp_attach_login_only.repeat1`: `udp_bind_ok=4 udp_bind_fail=0`
+  - `rudp_attach_login_only.repeat1`: `rudp_attach_ok=4 rudp_attach_fallback=0`
+  - `udp_attach_login_only.repeat2`: `udp_bind_ok=4 udp_bind_fail=0`
+  - `rudp_attach_login_only.repeat2`: `rudp_attach_ok=4 rudp_attach_fallback=0`
 
 후속 결함 처리:
 
 - loadgen 반복 실행 중 드러난 `gateway_app` 종료 경로의 in-flight write buffer 수명 문제를 같은 브랜치에서 수정했다.
 - 수정 후 same-stack repeated run(`steady -> mixed -> steady -> mixed`) 기준으로 gateway 컨테이너가 살아 있고 `double free` 로그가 재발하지 않음을 확인했다.
+- UDP attach follow-up에서 gateway UDP bind response의 `async_send_to` 버퍼 수명 문제가 zero-byte datagram을 유발한다는 점을 추적 로그로 확인했고, send buffer lifetime을 수정한 뒤 same-network / host-path direct same-gateway 검증이 모두 deterministic하게 통과했다.
+- `rudp_attach_fallback`는 forced-fallback scenario에서 기대되는 visibility counter이며, attach failure/error와 같은 의미로 해석하지 않는다.
+- mixed quantitative baseline으로 `mixed_direct_udp_soak` sample을 추가했고, direct same-gateway 경로에서 60초 동안 `udp_bind_fail=0`를 유지하며 TCP workload throughput/latency를 함께 기록했다.
+- 장시간 basic scenario 3종(`mixed_session_soak_long`, `mixed_direct_udp_soak_long`, `mixed_direct_rudp_soak_long`)을 추가해 HAProxy control sample과 direct same-gateway UDP/RUDP success-path 표본을 확대했다.
+- mixed long RUDP sample은 success / fallback / OFF / env restore 4-way 표본까지 확보해 rollout/rollback 비교 기준으로 사용할 수 있다.
 
-## 12. 1차 완료 기준
+## 12. 현재 완료 기준
 
 - `stack_loadgen`이 실제 stack에 TCP 세션 다수를 붙일 수 있다.
 - `steady_chat`, `mixed_session_soak` 2개 시나리오를 실행할 수 있다.
+- `mixed_session_soak_long`, `mixed_direct_udp_soak_long`, `mixed_direct_rudp_soak_long` 시나리오로 더 긴 / 더 큰 세션 표본을 재현할 수 있다.
+- `mixed_direct_udp_soak` 시나리오로 direct same-gateway mixed TCP+UDP baseline을 재현할 수 있다.
+- `udp_attach_login_only`, `rudp_attach_login_only` 시나리오가 direct same-gateway TCP+UDP 경로에서 deterministic하게 성공한다.
+- `rudp_attach_login_only` 시나리오가 forced-fallback / OFF invariance 설정에서도 attach failure 없이 fallback visibility를 남긴다.
 - JSON report에 latency/throughput/error 요약이 남는다.
 - Docker stack 기준 실행 절차가 문서화된다.
 
