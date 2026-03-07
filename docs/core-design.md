@@ -60,7 +60,7 @@
 | Hive/Connection 재사용 | Gateway는 `core::net::TransportConnection`, Server는 `core::net::Session` 중심으로 사용 | 필요 시 공통 수명주기 규칙을 추출 가능 |
 | 인증 플러그인 | `auth::IAuthenticator` 인터페이스로 구현, 기본은 NoopAuthenticator | 외부 OAuth 연동 시 구현 교체 |
 | 스크립팅 훅 | Lua/WASM 플러그인을 로드할 수 있도록 Hook 포인트 정의 | 성능 영향 검토 후 단계 도입 |
-| ECS/플러그인 | 채팅 외 모듈을 위한 Entity 시스템은 backlog에 남겨둠 | `docs/roadmap.md` 8번 항목 참조 |
+| ECS/플러그인 | 채팅 외 모듈을 위한 Entity 시스템은 backlog에 남겨둠 | 필요 시 별도 설계/작업 메모로 후속 추적 |
 | 관측성 표준화 | `/metrics` + structured log를 기본 제공, OpenTelemetry 추가 검토 | server_app에 우선 적용 후 Gateway/LB로 확장 |
 
 ## 5. 테스트 전략
@@ -69,7 +69,6 @@
 - PowerShell/Bash smoke 스크립트(`scripts/smoke_*.ps1`)로 Redis·Write-behind 경로를 CI에 포함한다.
 
 ## 6. 참고 문서
-- Sapphire 분석: `docs/sapphire_core_insights.md`
 - 전체 아키텍처: `docs/server-architecture.md`
 - Gateway & HAProxy 운영: `docs/ops/gateway-and-lb.md`
 - Redis/Write-behind 전략: `docs/db/redis-strategy.md`, `docs/db/write-behind.md`

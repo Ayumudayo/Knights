@@ -71,12 +71,14 @@ Knights는 C++20 기반 분산 채팅 스택입니다: HAProxy(TCP) -> `gateway_
 | Build presets / 옵션 | `CMakeLists.txt`, `CMakePresets.json` | `BUILD_*` 옵션, Windows(vcpkg) vs Linux(docker) 흐름 |
 | Windows 빌드 | `scripts/build.ps1` | vcpkg bootstrap + preset configure/build |
 | Docker 풀스택 | `docker/stack/docker-compose.yml`, `scripts/deploy_docker.ps1` | `observability` profile 포함 |
+| 문서 진입점 / 정책 | `docs/README.md` | 현재 유지되는 canonical docs entrypoint |
 | Observability | `docker/observability/prometheus/prometheus.yml`, `docker/observability/grafana/dashboards/`, `docs/ops/observability.md` | Grafana provisioning은 `docker/observability/grafana/provisioning/`; gateway/wb_worker 신규 하드닝 메트릭 포함 |
 | 서버 런타임 메트릭 | `core/include/server/core/runtime_metrics.hpp`, `server/src/app/metrics_server.cpp` | `/metrics` 텍스트 포맷 노출 |
 | 코어 플러그인/스크립팅 인프라 | `core/include/server/core/plugin/`, `core/include/server/core/scripting/`, `core/src/plugin/`, `core/src/scripting/` | `server`/`gateway`가 재사용하는 공용 host 계층 |
 | Chat hook plugin | `server/src/chat/chat_hook_plugin_*.{hpp,cpp}`, `server/plugins/` | 설정: `docs/configuration.md`, `server/README.md` |
 | Lua cold-hook scaffold | `core/src/scripting/lua_runtime.cpp`, `server/src/scripting/chat_lua_bindings.cpp`, `server/scripts/` | 현재는 directive/return-table 기반 scaffold 실행 |
 | Runtime extensibility docs | `docs/runtime-extensibility-plan.md`, `docs/extensibility/`, `docs/core-api/extensions.md` | quickstart/recipes/정책 및 ABI 계약 |
+| Admin control plane | `tools/admin_app/README.md` | admin_app API/권한/운영 surface의 canonical 문서 |
 | 게이트웨이 라우팅/세션 | `gateway/src/gateway_app.cpp`, `gateway/src/gateway_connection.cpp`, `gateway/README.md` | Redis Instance Registry + SessionDirectory + backend connect timeout/send queue guardrail |
 | Write-behind 워커 | `tools/wb_worker/main.cpp`, `tools/wb_worker/README.md`, `docs/db/write-behind.md` | Redis Streams -> Postgres + `/metrics`(옵션) + DB reconnect backoff/readiness/drop visibility |
 | DB 마이그레이션 | `tools/migrations/runner.cpp`, `tools/migrations/*.sql` | `CREATE INDEX CONCURRENTLY`는 트랜잭션 밖 |
@@ -106,15 +108,14 @@ python tools/gen_opcode_docs.py --check
 ```
 
 ## Conventions
-- Naming/namespace: `docs/naming-conventions.md` (역할 기반 네이밍, 파일/함수 snake_case, 코드 심볼 ASCII).
-- Repo 구조 원칙/금지사항: `docs/repo-structure.md`.
+- Naming/namespace and repo hygiene: `docs/naming-conventions.md` (역할 기반 네이밍, 파일/함수 snake_case, 코드 심볼 ASCII).
 - Headers: `.hpp` + `#pragma once`, include 순서(표준 -> 서드파티 -> 프로젝트).
 - CMake: 소스는 명시적으로 나열(= `file(GLOB ...)` 금지). 옵션은 `BUILD_SERVER_STACK`, `BUILD_GATEWAY_APP`, `BUILD_SERVER_TESTS`, `BUILD_GTEST_TESTS`, `BUILD_CONTRACT_TESTS`, `BUILD_WRITE_BEHIND_TOOLS` 중심.
 - Conan2: `conanfile.py` + `conan.lock` 기반으로 Windows 개발 의존성을 고정하며(리눅스/도커 런타임은 시스템 패키지 기반).
 - Metrics: `/metrics`는 Prometheus text format. 포트는 `METRICS_PORT`로 제어(서비스별 환경 변수로 주입).
 
 ## Anti-Patterns (This Repo)
-- 코드/타깃/산출물/네임스페이스에 `Knights/knights/kproj` 문자열 사용 금지(`docs/repo-structure.md`).
+- 코드/타깃/산출물/네임스페이스에 `Knights/knights/kproj` 문자열 사용 금지.
 - CMake에서 소스 수집을 `GLOB`로 처리 금지(리뷰 불가/증분 빌드 혼선).
 - `core/`가 `server/`/`gateway/` 구현에 의존하도록 만들지 말 것(단방향 의존).
 - Docker runtime 실행은 `scripts/deploy_docker.ps1`(또는 `scripts/run_full_stack_observability.ps1`) 경로만 사용하고, 임의 wrapper를 추가하지 않는다.
@@ -133,7 +134,7 @@ python tools/gen_opcode_docs.py --check
 ## Workflow Orchestration
 
 ### 1. Self-Improvement Loop
-- After ANY correction from the user: update 'tasks/lessons.md' with the pattern
+- After ANY correction from the user: update `tasks/_shared/lessons.md` with the pattern
 - Write rules for yourself that prevent the same mistake
 - Ruthlessly iterate on these lessons until mistake rate drops
 - Review lessons at session start for relevant project
@@ -158,12 +159,18 @@ python tools/gen_opcode_docs.py --check
 
 ## Task Management
 
-1. ** Plan First **: Write plan to 'tasks/todo.md' with checkable items
+1. ** Plan First **: Write plan to `tasks/README.md` and the relevant local task note with checkable items
 2. ** Verify Plan **: Check in before starting implementation
 3. ** Track Progress **: Mark items complete as you go
 4. ** Explain Changes **: High-level summary at each step
-5. ** Document Results **: Add review section to 'tasks/todo.md'
-6. ** Capture Lessons **: Update `tasks/lessons.md' after corrections
+5. ** Document Results **: Add review section to the relevant local task note
+6. ** Capture Lessons **: Update `tasks/_shared/lessons.md` after corrections
+
+### Local Task Workspace Shape
+- `tasks/` is local-only and gitignored; do not treat it as repo source of truth.
+- Use `tasks/README.md` as the local workspace index.
+- Preferred shape: `tasks/<domain>/<topic>/todo.md` with optional sibling `notes.md`.
+- Put cross-cutting rules and reusable snippets under `tasks/_shared/`.
 
 ## Core Principles
 
