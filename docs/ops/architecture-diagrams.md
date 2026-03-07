@@ -72,4 +72,4 @@ flowchart TB
 관련 문서:
 - `docs/ops/udp-rollout-rollback.md`
 - `docs/ops/observability.md`
-- `docs/ops/admin-console.md`
+- `tools/admin_app/README.md`

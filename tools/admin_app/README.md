@@ -2,6 +2,8 @@
 
 `admin_app`은 운영 관리 콘솔을 위한 제어면(control-plane) 서비스다.
 
+현재 구현된 API/권한/운영 surface의 canonical 문서는 이 README다.
+
 현재 제공 엔드포인트:
 
 - `/metrics`
@@ -93,9 +95,7 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 
 ## 참고 문서
 
-- `docs/ops/admin-console.md`
-- `docs/ops/admin-api-contract.md`
-- `docs/ops/admin-gui-wireframe.md`
+- `docs/ops/observability.md`
 
 ## 공통 쿼리 파라미터
 
