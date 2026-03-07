@@ -51,7 +51,7 @@
 
 ## 3. CMake 타깃/바이너리 네이밍
 - **라이브러리**: `server_core`, `gateway_common`, `storage_pg`.
-- **실행 파일**: `<role>_app` 또는 `<tool>`. 예: `server_app`, `gateway_app`, `wb_worker`, `dev_chat_cli`.
+- **실행 파일**: `<role>_app` 또는 `<tool>`. 예: `server_app`, `gateway_app`, `wb_worker`, `admin_app`, `client_gui`.
 - **테스트**: `<module>_tests`, `<scenario>_tests`. 예: `state_instance_registry_tests`, `core_concurrency_tests`.
 - **설치 산출물**: 동일 이름을 유지하며, `install(TARGETS server_core EXPORT server_coreTargets ...)` 형식으로 패키징한다.
 - CMake 네임스페이스/패키지 export 이름도 `server_core::` 처럼 역할 기반으로 통일한다.
@@ -60,9 +60,9 @@
 ```
 core/include/server/core/...   # public headers
 core/src/...                  # implementation
-server/...                    # server_app (추후 services/gateway 로 이동 예정)
+server/...                    # server_app
 gateway/...                   # gateway_app
-devclient/...                 # dev_chat_cli
+client_gui/...                # 개발용 GUI 클라이언트
 docs/...                      # 문서
 tools/...                     # 코드 생성/유틸
 scripts/...                   # 빌드/운영 스크립트
@@ -104,7 +104,7 @@ scripts/...                   # 빌드/운영 스크립트
 - **알람/대시보드**: Grafana 패널명은 기능 중심("Gateway Sessions Active", "Write-behind Commit Latency")으로 작성한다.
 
 ## 9. 문서/산출물
-- 문서 파일명은 소문자 snake_case (`docs/ops/distributed_routing_draft.md`, `docs/chat/recent-history.md`).
+- 문서 파일명은 소문자 snake_case (`docs/ops/fallback-and-alerts.md`, `docs/chat/recent-history.md`).
 - README는 `<project>/README.md` 형식을 유지하고, 최상위 제목은 역할 중심(`server_core`, `gateway_app`)으로 맞춘다.
 
 ## 10. 명명 체크리스트
