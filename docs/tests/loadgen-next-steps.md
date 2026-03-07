@@ -17,8 +17,6 @@
 
 - 설계/현재 상태: [loadgen-plan.md](loadgen-plan.md)
 - 실행 가이드: [README.md](../../tools/loadgen/README.md)
-- active backlog: [todo.md](../../tasks/todo.md)
-- 정량 측정 backlog: [quantitative-validation.md](../../tasks/quantitative-validation.md)
 
 ## 1. 왜 다음 작업이 필요한가
 
