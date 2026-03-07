@@ -5,10 +5,11 @@
 
 ## 1) Transport / RUDP
 
-- [ ] RUDP 운영 검증을 마감한다.
-  - OFF 불변성
-  - ON canary fallback
-  - 운영/롤백 리허설 근거
+- [x] RUDP 운영 검증을 마감한다.
+  - attach success/fallback smoke proof는 확보했다.
+  - OFF 불변성 smoke proof는 확보했다.
+  - ON canary fallback smoke proof는 확보했다.
+  - mixed long success/fallback/OFF proof와 env restore proof까지 확보했다.
 - [ ] NAT rebinding / MTU / 메모리 / 보안 강화 항목을 설계 문서 + 후속 이슈로 분리해 추적한다.
 
 ## 2) CI / Repo Ops
@@ -171,6 +172,28 @@
   - Release build
   - 기존 steady/mixed scenario 실행
 
+## 7) Load Generator (UDP/RUDP Follow-up)
+
+- [x] 시나리오 계약을 hardening한다.
+  - `schema_version` 필수화
+  - transport default + group override 유지
+  - unsupported transport / invalid mode / count mismatch / invalid rate를 명시적 오류로 고정
+  - `main.cpp`의 scenario/report/run 결합도를 낮춘다
+- [x] `udp` transport attach 검증 경로를 추가한다.
+  - TCP bootstrap 이후 `MSG_UDP_BIND_RES` 수신
+  - UDP bind 성공/실패를 명시적으로 기록
+  - 현재 프로토콜 정책상 `login_only` 외 workload는 명시적으로 거부
+- [x] `rudp` transport attach/fallback visibility를 추가한다.
+  - TCP bootstrap + UDP bind 이후 RUDP HELLO attach 시도
+  - attach success / fallback / timeout 결과를 summary + report에 기록
+  - 현재는 data workload가 아니라 attach visibility를 우선한다
+- [x] transport별 stats/report breakdown을 확장한다.
+  - bind / attach / fallback 카운터
+  - sample scenario / README / tests docs 동기화
+- [x] 정량 backlog와 실행 문서를 연결한다.
+  - `tasks/quantitative-validation.md`의 mixed TCP+UDP / RUDP 항목을 실행 가능한 수준으로 연결
+  - 검증 명령과 report 경로를 문서에 남긴다
+
 ### Review
 
 - build / compatibility
@@ -199,6 +222,76 @@
 - unsupported transport guardrail
   - temporary scenario에서 `transport=udp`로 실행
   - 결과: `loadgen error: transport 'udp' is not implemented yet`
+- attach/root-cause fix
+  - 원인: `gateway/src/gateway_app.cpp`의 `send_udp_datagram(...)`이 `async_send_to` 버퍼 수명을 잘못 다뤄 zero-byte UDP datagram을 보내고 있었다.
+  - 조치: send buffer를 `shared_ptr<std::vector<std::uint8_t>>`로 유지하고, handler capture를 사전 구성해 evaluation-order/UAF 위험을 제거했다.
+- Windows build
+  - `pwsh scripts/build.ps1 -Config Release -Target stack_loadgen`
+  - `pwsh scripts/build.ps1 -Config Release -Target gateway_app`
+  - 결과: 모두 통과
+- Linux / Docker same-network attach validation
+  - `docker run --rm --network "knights-stack_knights-stack" ... ./build-linux/stack_loadgen --host gateway-1 --port 6000 --udp-port 7000 --scenario tools/loadgen/scenarios/udp_attach_login_only.json --report build/loadgen/udp_attach_login_only.trace.json --verbose`
+  - 결과: `loadgen_summary scenario=udp_attach_login_only transports=udp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0`
+  - trace 확인: bind response `bytes=121 msg_id=19(MSG_UDP_BIND_RES) seq=1` 수신
+- Linux / Docker same-network RUDP validation
+  - `docker run --rm --network "knights-stack_knights-stack" ... ./build-linux/stack_loadgen --host gateway-1 --port 6000 --udp-port 7000 --scenario tools/loadgen/scenarios/rudp_attach_login_only.json --report build/loadgen/rudp_attach_login_only.trace.json --verbose`
+  - 결과: `loadgen_summary scenario=rudp_attach_login_only transports=rudp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=4 rudp_attach_fallback=0`
+  - trace 확인: client HELLO / server HELLO_ACK 왕복 확인
+- Windows host-path direct same-gateway validation
+  - `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/udp_attach_login_only.json --report build/loadgen/udp_attach_login_only.host.json --verbose`
+  - 결과: `loadgen_summary scenario=udp_attach_login_only transports=udp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0`
+- Windows host-path direct same-gateway RUDP validation
+  - `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/rudp_attach_login_only.json --report build/loadgen/rudp_attach_login_only.host.json --verbose`
+  - 결과: `loadgen_summary scenario=rudp_attach_login_only transports=rudp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=4 rudp_attach_fallback=0`
+
+## 8) Load Generator (Quantitative Follow-up)
+
+- [x] direct same-gateway mixed TCP+UDP soak baseline을 남긴다.
+  - sample scenario 추가
+  - summary/report path 기록
+  - attach counter와 throughput/latency를 함께 검증
+- [x] RUDP OFF invariance smoke proof를 남긴다.
+  - `GATEWAY_RUDP_ENABLE=0`
+  - `rudp_attach_login_only`가 failure 대신 fallback으로 수렴하는지 검증
+- [x] immediate long sample 3종을 추가하고 검증한다.
+  - HAProxy TCP control sample
+  - direct same-gateway UDP long sample
+  - direct same-gateway RUDP long sample
+
+### Review
+
+- mixed direct soak
+  - scenario: `tools/loadgen/scenarios/mixed_direct_udp_soak.json`
+  - command: `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/mixed_direct_udp_soak.json --report build/loadgen/mixed_direct_udp_soak.host.json`
+  - 결과: `loadgen_summary scenario=mixed_direct_udp_soak transports=tcp,udp sessions=24 connected=24 authenticated=24 joined=10 success=283 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0 throughput_rps=4.48 p95_ms=12.06`
+- RUDP OFF invariance
+  - env: `docker/stack/.env.rudp-off.example`
+  - command: `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/rudp_attach_login_only.json --report build/loadgen/rudp_attach_login_only.off.json --verbose`
+  - 결과: `loadgen_summary scenario=rudp_attach_login_only transports=rudp sessions=4 connected=4 authenticated=4 joined=0 success=0 errors=0 attach_failures=0 udp_bind_ok=4 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=4`
+- long TCP control sample
+  - scenario: `tools/loadgen/scenarios/mixed_session_soak_long.json`
+  - command: `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 6000 --scenario tools/loadgen/scenarios/mixed_session_soak_long.json --report build/loadgen/mixed_session_soak_long.json`
+  - 결과: `loadgen_summary scenario=mixed_session_soak_long transports=tcp sessions=48 connected=48 authenticated=48 joined=24 success=639 errors=0 attach_failures=0 udp_bind_ok=0 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0 throughput_rps=9.64 p95_ms=12.83`
+- long direct UDP sample
+  - scenario: `tools/loadgen/scenarios/mixed_direct_udp_soak_long.json`
+  - command: `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/mixed_direct_udp_soak_long.json --report build/loadgen/mixed_direct_udp_soak_long.host.json`
+  - 결과: `loadgen_summary scenario=mixed_direct_udp_soak_long transports=tcp,udp sessions=48 connected=48 authenticated=48 joined=20 success=1128 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=0 throughput_rps=8.93 p95_ms=12.26`
+- long direct RUDP sample
+  - scenario: `tools/loadgen/scenarios/mixed_direct_rudp_soak_long.json`
+  - command: `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/mixed_direct_rudp_soak_long.json --report build/loadgen/mixed_direct_rudp_soak_long.host.json`
+  - 결과: `loadgen_summary scenario=mixed_direct_rudp_soak_long transports=rudp,tcp sessions=48 connected=48 authenticated=48 joined=20 success=1134 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=8 rudp_attach_fallback=0 throughput_rps=8.98 p95_ms=12.08`
+- long direct RUDP fallback sample
+  - env: `docker/stack/.env.rudp-fallback.example`
+  - command: `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/mixed_direct_rudp_soak_long.json --report build/loadgen/mixed_direct_rudp_soak_long.fallback.host.json`
+  - 결과: `loadgen_summary scenario=mixed_direct_rudp_soak_long transports=rudp,tcp sessions=48 connected=48 authenticated=48 joined=20 success=1130 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=8 throughput_rps=8.96 p95_ms=14.21`
+- long direct RUDP OFF sample
+  - env: `docker/stack/.env.rudp-off.example`
+  - command: `build-windows\Release\stack_loadgen.exe --host 127.0.0.1 --port 36100 --udp-port 7000 --scenario tools/loadgen/scenarios/mixed_direct_rudp_soak_long.json --report build/loadgen/mixed_direct_rudp_soak_long.off.host.json`
+  - 결과: `loadgen_summary scenario=mixed_direct_rudp_soak_long transports=rudp,tcp sessions=48 connected=48 authenticated=48 joined=20 success=1131 errors=0 attach_failures=0 udp_bind_ok=8 udp_bind_fail=0 rudp_attach_ok=0 rudp_attach_fallback=8 throughput_rps=8.96 p95_ms=12.95`
+- full system matrix recheck
+  - baseline protocol checks: `verify_chat.py`, `verify_pong.py`
+  - scenario matrix: attach env 8개 + fallback env 2개 + off env 2개 + final restore 2개
+  - 결과: 모든 run `errors=0`, final restore 후 `rudp_attach_login_only`와 `mixed_direct_rudp_soak_long` 모두 success path 복귀 확인
 
 ## Quantitative Validation
 
