@@ -1,3 +1,9 @@
+add_library(gateway_session_directory STATIC
+    src/session_directory.cpp
+)
+target_include_directories(gateway_session_directory PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(gateway_session_directory PUBLIC server_core)
+
 add_library(gateway_backends STATIC
     src/registry_backend_factory.cpp
 )
@@ -8,7 +14,6 @@ target_link_libraries(gateway_backends PRIVATE server_state)
 add_executable(gateway_app
     src/gateway_connection.cpp
     src/gateway_app.cpp
-    src/session_directory.cpp
     src/main.cpp
 )
 
@@ -18,6 +23,7 @@ target_include_directories(gateway_app PRIVATE
 
 target_link_libraries(gateway_app PRIVATE
     gateway_backends
+    gateway_session_directory
     server_core
 )
 
