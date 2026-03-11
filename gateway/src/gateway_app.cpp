@@ -28,6 +28,7 @@
 
 #include "gateway/gateway_connection.hpp"
 #include "server/core/net/queue_budget.hpp"
+#include "server/core/state/instance_registry.hpp"
 #include "server/core/protocol/packet.hpp"
 #include "server/core/protocol/protocol_errors.hpp"
 #include "server/core/protocol/system_opcodes.hpp"

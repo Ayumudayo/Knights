@@ -29,7 +29,7 @@
 #include "server/core/net/hive.hpp"
 #include "server/core/net/listener.hpp"
 #include "server/core/net/rudp/rudp_engine.hpp"
-#include "server/state/instance_registry.hpp"
+#include "server/core/state/instance_registry.hpp"
 #include "server/storage/redis/client.hpp"
 #include "gateway/session_directory.hpp"
 
@@ -71,7 +71,7 @@ public:
 
     /** @brief backend 선택 결과입니다. */
     struct SelectedBackend {
-        server::state::InstanceRecord record;
+        server::core::state::InstanceRecord record;
         bool sticky_hit{false};
     };
 
@@ -399,7 +399,7 @@ public:
 
     // 상태 및 저장소
     std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
-    std::shared_ptr<server::state::IInstanceStateBackend> backend_registry_;
+    std::shared_ptr<server::core::state::IInstanceStateBackend> backend_registry_;
     std::unique_ptr<SessionDirectory> session_directory_;
     std::string redis_uri_;
 
