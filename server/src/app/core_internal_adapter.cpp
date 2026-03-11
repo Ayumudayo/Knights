@@ -15,8 +15,8 @@
 #include "server/core/util/crash_handler.hpp"
 #include "server/storage/connection_pool.hpp"
 #include "server/storage/postgres/connection_pool.hpp"
-#include "server/storage/redis/client.hpp"
-#include "server/state/instance_registry.hpp"
+#include "server/storage/redis/factory.hpp"
+#include "server/state/redis_instance_registry.hpp"
 
 /**
  * @brief server_app와 server_core 내부 구현을 연결하는 부트스트랩 어댑터 구현부입니다.
