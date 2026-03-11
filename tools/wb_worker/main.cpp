@@ -13,7 +13,7 @@
 #include <limits>
 #include <random>
 
-#include "redis_client_factory.hpp"
+#include "../wb_common/redis_client_factory.hpp"
 #include "server/core/storage/redis/client.hpp"
 #include "server/core/util/log.hpp"
 #include "server/core/trace/context.hpp"
@@ -211,7 +211,7 @@ public:
 
         // Redis 연결
         server::core::storage::redis::Options ropts{};
-        redis_ = wb_worker::make_redis_client(config_.redis_uri, ropts);
+        redis_ = wb_tools::make_redis_client(config_.redis_uri, ropts);
         if (!redis_ || !redis_->health_check()) {
             std::cerr << "WB worker: Redis health check failed" << std::endl;
             app_host_.set_lifecycle_phase(server::core::app::AppHost::LifecyclePhase::kFailed);
