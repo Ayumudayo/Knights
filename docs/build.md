@@ -72,6 +72,37 @@ cmake --build build-windows/factory-redis-consumer/build --config Debug
 
 자동화된 검증에서는 `FactoryPgInstalledPackageConsumer`, `FactoryRedisInstalledPackageConsumer` contract test가 같은 흐름을 실행한다.
 
+## Factory Package Publish Bundle
+
+first milestone publish automation은 `server_storage_pg_factory`와 `server_storage_redis_factory`를 별도 package manager publish가 아니라
+하나의 Release install-prefix bundle로 배포한다.
+
+로컬 생성:
+
+```powershell
+pwsh scripts/publish_factory_packages.ps1 -BuildDir build-windows -OutputRoot artifacts/factory-packages -Zip -CleanOutput
+```
+
+출력:
+- bundle 디렉터리: `artifacts/factory-packages/dynaxis-factory-packages-windows-x64-release-<version>/`
+- staged prefix: `.../prefix/`
+- manifest: `.../manifest.json`
+- zip: `...zip`
+
+이 bundle에는 다음 package surface가 포함된다.
+- `server_core`
+- `server_storage_pg_factory`
+- `server_storage_redis_factory`
+
+다음 항목은 의도적으로 포함되지 않는다.
+- app-local helper target
+- compatibility umbrella target의 우선 surface
+- `server_state_redis_factory`
+
+CI 수동 artifact 생성:
+- GitHub Actions `Factory Package Publish` workflow (`workflow_dispatch`)
+- 업로드 artifact root: `artifacts/factory-packages/**`
+
 ## 리눅스(Linux) (표준 런타임 = Docker 풀스택)
 
 `scripts/deploy_docker.ps1`를 통해 base 이미지/compose profile/포트 매핑을 일관되게 유지한다.
