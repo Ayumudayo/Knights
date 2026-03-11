@@ -243,7 +243,7 @@ private:
         w.commit();
     }
 
-    void HandleFailure(const server::storage::redis::IRedisClient::StreamEntry& e, 
+    void HandleFailure(const server::core::storage::redis::IRedisClient::StreamEntry& e,
                        const std::string& orig_id, int retry_count, const char* error_msg) {
         
         // 재시도 한도 초과 -> Dead Letter Stream으로 이동
@@ -261,7 +261,7 @@ private:
         }
     }
 
-    bool MoveToDeadStream(const server::storage::redis::IRedisClient::StreamEntry& e, 
+    bool MoveToDeadStream(const server::core::storage::redis::IRedisClient::StreamEntry& e,
                           const std::string& orig_id, const char* error_msg) {
         try {
             std::vector<std::pair<std::string, std::string>> fields;
@@ -277,7 +277,7 @@ private:
         }
     }
 
-    void RetryLater(const server::storage::redis::IRedisClient::StreamEntry& e, 
+    void RetryLater(const server::core::storage::redis::IRedisClient::StreamEntry& e,
                     const std::string& orig_id, int retry_count, const char* error_msg) {
         try {
             // 지수 백오프 (최대 10초)
