@@ -66,9 +66,6 @@ if (BUILD_GTEST_TESTS)
     add_executable(chat_history_tests
         chat_history_tests.cpp
     )
-    target_include_directories(chat_history_tests PRIVATE
-        ${CMAKE_SOURCE_DIR}/core/include
-    )
     target_link_libraries(chat_history_tests PRIVATE
         GTest::gtest_main
         server_chat_runtime
@@ -174,9 +171,6 @@ if (BUILD_GTEST_TESTS)
         server/test_chat_lua_bindings.cpp
         server/test_lua_hook_integration.cpp
         server/test_hook_auto_disable.cpp
-    )
-    target_include_directories(server_general_tests PRIVATE
-        ${CMAKE_SOURCE_DIR}/core/include
     )
     target_link_libraries(server_general_tests PRIVATE
         GTest::gtest_main
