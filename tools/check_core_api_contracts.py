@@ -48,6 +48,7 @@ INTERNAL_HEADERS = {
     "server/core/state/instance_registry.hpp",
     "server/core/storage/connection_pool.hpp",
     "server/core/storage/db_worker_pool.hpp",
+    "server/core/storage/redis/client.hpp",
     "server/core/storage/unit_of_work.hpp",
     "server/core/util/crash_handler.hpp",
 }

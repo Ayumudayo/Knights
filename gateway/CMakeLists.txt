@@ -7,7 +7,6 @@ add_executable(gateway_app
 
 target_include_directories(gateway_app PRIVATE
     ${CMAKE_SOURCE_DIR}/gateway/include
-    ${CMAKE_SOURCE_DIR}/server/include
 )
 
 target_link_libraries(gateway_app PRIVATE

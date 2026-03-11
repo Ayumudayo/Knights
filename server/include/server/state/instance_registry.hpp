@@ -13,12 +13,7 @@
 #include <vector>
 
 #include "server/core/state/instance_registry.hpp"
-
-namespace server {
-namespace storage::redis {
-class IRedisClient;
-} // namespace storage::redis
-} // namespace server
+#include "server/storage/redis/client.hpp"
 
 namespace server::state {
 using server::core::state::InstanceRecord;

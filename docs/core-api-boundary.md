@@ -63,6 +63,7 @@
 | `server/core/trace/context.hpp` | Internal | 로그/상관관계 추적 컨텍스트의 구현 결합 helper |
 | `server/core/storage/connection_pool.hpp` | Internal | generic transaction/UoW factory + health-check SPI. repository 접근자는 포함하지 않음 |
 | `server/core/storage/db_worker_pool.hpp` | Internal | generic `IUnitOfWork` commit/rollback seam 위에서 동작하는 비동기 DB 실행 helper |
+| `server/core/storage/redis/client.hpp` | Internal | gateway/server/tools가 공유하는 Redis client contract. concrete redis-plus-plus adapter와 factory는 여전히 server-owned |
 | `server/core/storage/unit_of_work.hpp` | Internal | 도메인 저장소 accessor 없는 generic commit/rollback transaction 경계 |
 | `server/core/util/crash_handler.hpp` | Internal | 앱 엔트리포인트용 프로세스 레벨 크래시 훅 |
 | `server/core/util/log.hpp` | Stable | 모든 바이너리가 사용하는 공통 로깅 계약 |

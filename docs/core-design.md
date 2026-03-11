@@ -31,9 +31,9 @@
 - 테스트: `core/tests/task_scheduler_tests.cpp`(추가 예정)에서 scheduling/취소 로직을 검증하도록 구조를 분리해 두었다.
 
 ### 2.3 저장소(`core::storage`)
-- `core::storage`는 generic transaction 경계(`IUnitOfWork`), connection factory(`IConnectionPool`), `DbWorkerPool` 같은 비동기 실행 seam만 소유한다.
+- `core::storage`는 generic transaction 경계(`IUnitOfWork`), connection factory(`IConnectionPool`), shared Redis client contract(`core::storage::redis::IRedisClient`), `DbWorkerPool` 같은 비동기 실행 seam을 소유한다.
 - 채팅 도메인 repository DTO/인터페이스와 Postgres SQL 구현은 `server/storage/*`에 두어 core가 채팅 스키마에 직접 결합되지 않게 유지한다.
-- `redis::client`는 Pub/Sub, Streams, Lua, set-if-equals 등 Redis 기능을 추상화해 Gateway/Server 모두 같은 API를 사용한다.
+- concrete Redis factory/redis-plus-plus adapter는 `server/storage/*`에 두고, Gateway/Server/worker는 shared client contract만 직접 본다.
 - DI(ServiceRegistry)와 결합해 mock 백엔드(예: InMemoryStateBackend)를 손쉽게 끼울 수 있다.
 
 ### 2.4 상태/유틸(`core::state`, `core::util`)

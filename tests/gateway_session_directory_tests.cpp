@@ -11,11 +11,11 @@
 #include <gtest/gtest.h>
 
 #include "../gateway/include/gateway/session_directory.hpp"
-#include "server/storage/redis/client.hpp"
+#include "server/core/storage/redis/client.hpp"
 
 namespace {
 
-class FakeRedisClient final : public server::storage::redis::IRedisClient {
+class FakeRedisClient final : public server::core::storage::redis::IRedisClient {
 public:
     bool health_check() override { return true; }
     bool lpush_trim(const std::string&, const std::string&, std::size_t) override { return true; }

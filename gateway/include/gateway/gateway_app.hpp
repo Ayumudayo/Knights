@@ -30,7 +30,7 @@
 #include "server/core/net/listener.hpp"
 #include "server/core/net/rudp/rudp_engine.hpp"
 #include "server/core/state/instance_registry.hpp"
-#include "server/storage/redis/client.hpp"
+#include "server/core/storage/redis/client.hpp"
 #include "gateway/session_directory.hpp"
 
 namespace gateway {
@@ -398,7 +398,7 @@ public:
     std::array<std::uint8_t, 2048> udp_read_buffer_{};
 
     // 상태 및 저장소
-    std::shared_ptr<server::storage::redis::IRedisClient> redis_client_;
+    std::shared_ptr<server::core::storage::redis::IRedisClient> redis_client_;
     std::shared_ptr<server::core::state::IInstanceStateBackend> backend_registry_;
     std::unique_ptr<SessionDirectory> session_directory_;
     std::string redis_uri_;
