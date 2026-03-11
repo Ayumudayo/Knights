@@ -57,7 +57,6 @@ if (BUILD_GTEST_TESTS)
     )
     target_include_directories(server_state_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
-        ${CMAKE_SOURCE_DIR}/server/include
         ${CMAKE_SOURCE_DIR}/gateway/include
     )
     target_link_libraries(server_state_tests PRIVATE
