@@ -132,7 +132,4 @@ add_library(server_state_consul STATIC
 target_include_directories(server_state_consul PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(server_state_consul PUBLIC server_state_common)
 
-add_library(server_state INTERFACE)
-target_link_libraries(server_state INTERFACE server_state_redis server_state_consul)
-
 add_subdirectory(plugins)
