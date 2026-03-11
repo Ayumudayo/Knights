@@ -6,6 +6,7 @@ Windows는 개발/디버깅(빌드/클라이언트) 용도로 유지한다.
 ## 전제
 - CMake 3.21+ (`CMakePresets.json` 사용)
 - C++20 컴파일러
+- Conan 2 (`scripts/build.ps1`는 Conan-generated toolchain만 지원)
 - Python 3 (선택: opcodes/wire codegen 자동 실행)
 
 ## 로컬 사전 검증
@@ -17,12 +18,7 @@ Windows는 개발/디버깅(빌드/클라이언트) 용도로 유지한다.
 
 ## 윈도우(Windows) 개발 빌드
 
-### 1) vcpkg 준비(권장, 최초 1회)
-```powershell
-pwsh scripts/setup_vcpkg.ps1 -Triplet x64-windows
-```
-
-### 2) 빌드
+### 1) 빌드
 ```powershell
 # 권장: 경량 클라이언트 전용 릴리즈 빌드
 pwsh scripts/build.ps1 -ClientOnly -Target client_gui
@@ -34,12 +30,14 @@ pwsh scripts/build.ps1 -Config Debug
 pwsh scripts/build.ps1 -Config Debug -Target server_app
 ```
 
-### 3) 테스트
+`scripts/build.ps1`는 Conan 출력/toolchain을 자동으로 사용한다. `conan` 실행 파일이 보이지 않으면 먼저 Conan 2 설치 상태를 확인한다.
+
+### 2) 테스트
 ```powershell
 ctest --preset windows-test
 ```
 
-### 4) 산출물 위치(예시)
+### 3) 산출물 위치(예시)
 - `build-windows-client/client_gui/Release/client_gui.exe` (권장 client-only 빌드)
 - `build-windows/server/Debug/server_app.exe` (전체 Windows 빌드 시)
 - `build-windows/gateway/Debug/gateway_app.exe` (전체 Windows 빌드 시)

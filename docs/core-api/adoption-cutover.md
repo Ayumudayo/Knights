@@ -27,7 +27,7 @@
 - internal session/runtime-state 사용을 server 로컬 어댑터 뒤로 숨깁니다.
 - internal include 직접 참조를 어댑터 구현 단위로 제한합니다.
 - 외부로 노출되는 server 모듈 경계는 `Stable` 계약으로 유지합니다.
-- 상태: 시작됨
+- 상태: 완료
   - `server/include/server/app/core_internal_adapter.hpp`, `server/src/app/core_internal_adapter.cpp` 추가
   - `server/src/app/bootstrap.cpp`는 크래시 핸들러 설치, 런타임 연결 수 조회, 세션 리스너 start/stop, DB 풀/worker 수명주기 처리 시 어댑터 API를 사용
   - `server/src/app/router.cpp`는 session 헤더 직접 include를 제거하고 `ChatService::NetSession` 별칭 사용
@@ -36,13 +36,15 @@
 ### 단계 B(Phase B) - Server 저장소 경계 어댑터
 - 채팅 도메인 저장소 결합을 server 로컬 인터페이스 뒤로 이동합니다.
 - `core` 저장소 헤더는 internal 범위를 유지하고, server 저장소 구현 바깥으로 include가 퍼지지 않게 합니다.
-- 상태: 진행 중
+- 상태: 완료
   - 채팅 핸들러와 `chat_service_core`에서 `repositories.hpp`/`unit_of_work.hpp` 직접 include를 제거했고, 저장소 API 사용은 `connection_pool.hpp` 경유로 통합했습니다.
+  - Postgres/Redis concrete backend는 narrower factory target(`server_storage_pg_factory`, `server_storage_redis_factory`)과 implementation object로 분리했고, 기존 broader target 이름은 compatibility umbrella로 유지했습니다.
 
 ### 단계 C(Phase C) - 강제 및 회귀 방지
 - 공개 예제/소비자 테스트에 `Stable` 헤더 전용 include 정책을 강제합니다.
 - CI에서 boundary 및 stable-governance fixture 검증을 유지합니다.
 - 설치된 prefix를 대상으로 `find_package(server_core)` consumer 빌드를 자동 검증합니다.
+- 상태: 완료
 
 ## 검증 기록
 - Boundary 계약 점검: `python tools/check_core_api_contracts.py --check-boundary`

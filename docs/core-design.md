@@ -65,7 +65,7 @@
 - 반대로 단일 실행 파일의 composition root를 감추는 목적이라면, 이름이 다소 일반적이어도 app-local helper로 남기는 편이 ownership 경계를 더 분명하게 유지한다.
 
 ## 3. 실행 흐름
-1. `.env` 로드 → `ServiceRegistry` 초기화 → generic DB connection/worker seam, Redis, Write-behind, TaskScheduler를 등록한다.
+1. 실행 환경/인자에서 설정을 읽고 `ServiceRegistry`를 초기화한 뒤 generic DB connection/worker seam, Redis, Write-behind, TaskScheduler를 등록한다.
 2. `core::net::Session`은 wire decoder로 opcode를 구문 분석한 뒤 Dispatcher에 넘기고, Dispatcher는 ServiceRegistry에서 필요한 핸들러를 찾는다.
 3. 백그라운드 DB 작업은 `DbWorkerPool`이 generic `IUnitOfWork` 경계를 열어 Worker 스레드에서 실행하고, 도메인 repository 접근은 `server/storage/*` 계층이 담당한다.
 4. `TaskScheduler`는 health check, presence TTL 정리, metrics 플러시, registry heartbeat 작업을 주기적으로 수행한다.
