@@ -43,7 +43,6 @@ if (BUILD_GTEST_TESTS)
     )
     target_include_directories(core_concurrency_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
-        ${CMAKE_SOURCE_DIR}/server/include
     )
     target_link_libraries(core_concurrency_tests PRIVATE
         GTest::gtest_main
@@ -110,7 +109,6 @@ if (BUILD_GTEST_TESTS)
     )
     target_include_directories(core_general_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
-        ${CMAKE_SOURCE_DIR}/server/include
         ${CMAKE_SOURCE_DIR}/gateway/include
     )
     target_link_libraries(core_general_tests PRIVATE
