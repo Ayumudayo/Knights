@@ -54,3 +54,17 @@
 - `docs/core-api-boundary.md`의 `Transitional = 0` 상태를 유지합니다.
 - `gateway`, `tools`는 internal `core` 헤더 include가 없는 상태를 유지합니다.
 - `server` internal include는 구현 어댑터 내부에 한정되고 공개/예제 계약으로 전파되지 않습니다.
+
+## Package-First Follow-Up (2026-03-12)
+- `server_storage_redis_factory`와 `server_storage_pg_factory` 도입 이후, helper target의 concrete backend 결합은 narrower factory seam 뒤로 줄어들었습니다.
+- 남은 source-level coupling은 의도적으로 app/tool-local composition helper와 adapter 구현 파일에 집중되어 있습니다.
+  - `server/src/app/core_internal_adapter.cpp`
+  - `server/src/state/redis_backend_factory.cpp`
+  - `gateway/src/registry_backend_factory.cpp`
+  - `tools/admin_app/redis_client_factory.cpp`
+  - `tools/wb_common/redis_client_factory.cpp`
+- 이 상태는 installed-package consumer 검증을 막지 않으므로, 현재 시점에서 raw source repo split을 다시 여는 것보다 package-first 경로가 더 안전합니다.
+- 후속 extraction이 필요해지면 아래 순서를 우선합니다.
+  1. `server_core`와 narrower backend factory package를 먼저 배포/버전화합니다.
+  2. `gateway_backends`, `admin_app_backends`, `server_app_backends`, `wb_common_redis_factory` 같은 app-local helper는 integration repo에 남깁니다.
+  3. 둘 이상의 실행 파일이 동일 helper 구현을 공유하게 될 때만 helper 자체의 package 승격 또는 별도 repo 이동을 재평가합니다.

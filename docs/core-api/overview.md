@@ -31,4 +31,5 @@
 ## 관련 문서
 - 경계 정의: `docs/core-api-boundary.md`
 - 호환성 정책: `docs/core-api/compatibility-policy.md`
+- 채택/컷오버: `docs/core-api/adoption-cutover.md`
 - 빠른 시작: `docs/core-api/quickstart.md`
