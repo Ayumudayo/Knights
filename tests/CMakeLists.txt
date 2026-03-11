@@ -177,7 +177,6 @@ if (BUILD_GTEST_TESTS)
         server/test_chat_lua_bindings.cpp
         server/test_lua_hook_integration.cpp
         server/test_hook_auto_disable.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/app/config.cpp
     )
     target_include_directories(server_general_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
@@ -186,6 +185,7 @@ if (BUILD_GTEST_TESTS)
     )
     target_link_libraries(server_general_tests PRIVATE
         GTest::gtest_main
+        server_app_config
         server_chat_runtime
         server_core
     )
