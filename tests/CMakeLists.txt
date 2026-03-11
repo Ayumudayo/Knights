@@ -66,10 +66,6 @@ if (BUILD_GTEST_TESTS)
 
     add_executable(chat_history_tests
         chat_history_tests.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/scripting/chat_lua_bindings.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/chat_service_core.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_manager.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_chain.cpp
     )
     target_include_directories(chat_history_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
@@ -78,9 +74,7 @@ if (BUILD_GTEST_TESTS)
     )
     target_link_libraries(chat_history_tests PRIVATE
         GTest::gtest_main
-        server_core
-        server_storage_redis
-        wire_proto
+        server_chat_runtime
     )
 
     # Linux dynamic loader symbols (dlopen/dlsym)
@@ -184,16 +178,6 @@ if (BUILD_GTEST_TESTS)
         server/test_lua_hook_integration.cpp
         server/test_hook_auto_disable.cpp
         ${CMAKE_SOURCE_DIR}/server/src/app/config.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/scripting/chat_lua_bindings.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/chat_service_core.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_manager.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/chat_hook_plugin_chain.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_login.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_join.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_leave.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_chat.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/handlers_ping.cpp
-        ${CMAKE_SOURCE_DIR}/server/src/chat/session_events.cpp
     )
     target_include_directories(server_general_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
@@ -202,9 +186,8 @@ if (BUILD_GTEST_TESTS)
     )
     target_link_libraries(server_general_tests PRIVATE
         GTest::gtest_main
+        server_chat_runtime
         server_core
-        server_storage_redis
-        wire_proto
     )
     if (TARGET generate_game_opcodes)
         add_dependencies(server_general_tests generate_game_opcodes)
