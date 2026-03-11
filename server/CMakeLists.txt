@@ -105,8 +105,15 @@ else()
 endif()
 
 # Redis client/pool (skeleton)
-add_library(server_storage_redis STATIC
+add_library(server_storage_redis_objects OBJECT
     src/storage/redis/client.cpp
+)
+target_include_directories(server_storage_redis_objects PRIVATE ${CMAKE_CURRENT_LIST_DIR}/include)
+target_link_libraries(server_storage_redis_objects PUBLIC server_core)
+
+add_library(server_storage_redis STATIC
+    src/storage/redis/client_factory.cpp
+    $<TARGET_OBJECTS:server_storage_redis_objects>
 )
 target_include_directories(server_storage_redis PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(server_storage_redis PUBLIC server_core)
@@ -114,18 +121,26 @@ target_link_libraries(server_storage_redis PUBLIC server_core)
 # Try to find redis-plus-plus exported targets
 find_package(redis++ CONFIG QUIET)
 if (TARGET redis++::redis++)
+    target_link_libraries(server_storage_redis_objects PUBLIC redis++::redis++)
     target_link_libraries(server_storage_redis PUBLIC redis++::redis++)
     target_compile_definitions(server_storage_redis PUBLIC HAVE_REDIS_PLUS_PLUS)
+    target_compile_definitions(server_storage_redis_objects PUBLIC HAVE_REDIS_PLUS_PLUS)
 elseif (TARGET redis++)
     # fallback: some older exports may use un-namespaced target
+    target_link_libraries(server_storage_redis_objects PUBLIC redis++)
     target_link_libraries(server_storage_redis PUBLIC redis++)
     target_compile_definitions(server_storage_redis PUBLIC HAVE_REDIS_PLUS_PLUS)
+    target_compile_definitions(server_storage_redis_objects PUBLIC HAVE_REDIS_PLUS_PLUS)
 elseif (TARGET redis++_static::redis++_static)
+    target_link_libraries(server_storage_redis_objects PUBLIC redis++_static::redis++_static)
     target_link_libraries(server_storage_redis PUBLIC redis++_static::redis++_static)
     target_compile_definitions(server_storage_redis PUBLIC HAVE_REDIS_PLUS_PLUS)
+    target_compile_definitions(server_storage_redis_objects PUBLIC HAVE_REDIS_PLUS_PLUS)
 elseif (TARGET redis++_static)
+    target_link_libraries(server_storage_redis_objects PUBLIC redis++_static)
     target_link_libraries(server_storage_redis PUBLIC redis++_static)
     target_compile_definitions(server_storage_redis PUBLIC HAVE_REDIS_PLUS_PLUS)
+    target_compile_definitions(server_storage_redis_objects PUBLIC HAVE_REDIS_PLUS_PLUS)
 else()
     message(WARNING "redis-plus-plus not found ? Redis client stays as stub")
 endif()
