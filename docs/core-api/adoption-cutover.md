@@ -42,12 +42,13 @@
 ### 단계 C(Phase C) - 강제 및 회귀 방지
 - 공개 예제/소비자 테스트에 `Stable` 헤더 전용 include 정책을 강제합니다.
 - CI에서 boundary 및 stable-governance fixture 검증을 유지합니다.
+- 설치된 prefix를 대상으로 `find_package(server_core)` consumer 빌드를 자동 검증합니다.
 
 ## 검증 기록
 - Boundary 계약 점검: `python tools/check_core_api_contracts.py --check-boundary`
 - Boundary fixture 점검: `python tools/check_core_api_contracts.py --check-boundary-fixtures`
 - Stable governance fixture 점검: `python tools/check_core_api_contracts.py --check-stable-governance-fixtures`
-- 소비자 테스트: `ctest --preset windows-test -R "CorePublicApi|CoreApiBoundaryFixtures|CoreApiStableGovernanceFixtures" --output-on-failure`
+- 소비자 테스트: `ctest -C Debug --test-dir build-windows/tests -L contract --output-on-failure`
 
 ## 종료 기준
 - `docs/core-api-boundary.md`의 `Transitional = 0` 상태를 유지합니다.

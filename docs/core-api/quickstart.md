@@ -71,6 +71,12 @@ cmake --build build-windows/package-smoke/build --config Debug
 
 의존성 탐색에 실패하면 `Boost`, `OpenSSL`, `lz4` 패키지 루트가 `CMAKE_PREFIX_PATH`에 포함되어 있는지 확인합니다.
 
+자동화된 계약 검증에서는 같은 흐름을 `CoreInstalledPackageConsumer` 테스트로 실행합니다. 관련 label은 `contract;public-api;installed-consumer`이며, Windows multi-config 빌드에서는 다음처럼 `tests` 하위 test-dir로 실행하는 것이 가장 안전합니다.
+
+```powershell
+ctest -C Debug --test-dir build-windows/tests -L contract --output-on-failure
+```
+
 ## 참고
 - 이 빠른 시작 문서는 의도적으로 `Transitional`, `Internal` 헤더를 사용하지 않습니다.
 - 공개 API 경계는 `docs/core-api-boundary.md`에서 정의합니다.

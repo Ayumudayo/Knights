@@ -15,6 +15,14 @@ set_tests_properties(ProtocolFuzzHarness PROPERTIES LABELS "fuzz")
 if (BUILD_GTEST_TESTS)
     find_package(GTest CONFIG REQUIRED)
 
+    set(GTEST_DISCOVERY_TIMEOUT_SEC 30)
+
+    function(discover_labeled_gtests target labels)
+        gtest_discover_tests(${target}
+            DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC}
+            PROPERTIES LABELS "${labels}")
+    endfunction()
+
     add_executable(storage_basic_tests
         test_storage_basic.cpp
     )
@@ -44,10 +52,13 @@ if (BUILD_GTEST_TESTS)
 
     add_executable(server_state_tests
         state_instance_registry_tests.cpp
+        gateway_session_directory_tests.cpp
+        ${CMAKE_SOURCE_DIR}/gateway/src/session_directory.cpp
     )
     target_include_directories(server_state_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
         ${CMAKE_SOURCE_DIR}/server/include
+        ${CMAKE_SOURCE_DIR}/gateway/include
     )
     target_link_libraries(server_state_tests PRIVATE
         GTest::gtest_main
@@ -81,6 +92,7 @@ if (BUILD_GTEST_TESTS)
         core/test_core_util.cpp
         core/test_core_metrics.cpp
         core/test_core_paths.cpp
+        core/test_app_host_lifecycle.cpp
         core/test_core_net.cpp
         core/test_gateway_resilience_controls.cpp
         core/test_trace_context.cpp
@@ -308,23 +320,26 @@ if (BUILD_GTEST_TESTS)
     endif()
 
     include(GoogleTest)
-    set(GTEST_DISCOVERY_TIMEOUT_SEC 30)
-    gtest_discover_tests(storage_basic_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
-    gtest_discover_tests(core_concurrency_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
-    gtest_discover_tests(server_state_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
-    gtest_discover_tests(chat_history_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
-    gtest_discover_tests(core_general_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
-    gtest_discover_tests(core_plugin_runtime_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
-    gtest_discover_tests(server_general_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
+    discover_labeled_gtests(storage_basic_tests "integration;db")
+    discover_labeled_gtests(core_concurrency_tests "core-behavior")
+    discover_labeled_gtests(server_state_tests "integration;shared-state")
+    discover_labeled_gtests(chat_history_tests "integration;chat-history")
+    discover_labeled_gtests(core_general_tests "core-behavior")
+    discover_labeled_gtests(core_plugin_runtime_tests "core-behavior;extensibility")
+    discover_labeled_gtests(server_general_tests "integration;server-behavior;extensibility")
     if (TARGET server_plugin_chain_tests)
-        gtest_discover_tests(server_plugin_chain_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
+        discover_labeled_gtests(server_plugin_chain_tests "integration;extensibility")
     endif()
     if (TARGET server_plugin_chain_v2_tests)
-        gtest_discover_tests(server_plugin_chain_v2_tests DISCOVERY_TIMEOUT ${GTEST_DISCOVERY_TIMEOUT_SEC})
+        discover_labeled_gtests(server_plugin_chain_v2_tests "integration;extensibility")
     endif()
 endif()
 
 if (BUILD_CONTRACT_TESTS)
+    if (NOT CMAKE_INSTALL_LIBDIR)
+        set(CMAKE_INSTALL_LIBDIR "lib")
+    endif()
+
     add_executable(core_public_api_smoke
         core/public_api_smoke.cpp
     )
@@ -335,6 +350,7 @@ if (BUILD_CONTRACT_TESTS)
         server_core
     )
     add_test(NAME CorePublicApiSmoke COMMAND core_public_api_smoke)
+    set_tests_properties(CorePublicApiSmoke PROPERTIES LABELS "contract;public-api;smoke")
 
     add_executable(core_public_api_headers_compile
         core/public_api_headers_compile.cpp
@@ -346,6 +362,7 @@ if (BUILD_CONTRACT_TESTS)
         server_core
     )
     add_test(NAME CorePublicApiHeadersCompile COMMAND core_public_api_headers_compile)
+    set_tests_properties(CorePublicApiHeadersCompile PROPERTIES LABELS "contract;public-api;compile")
 
     add_executable(core_public_api_stable_header_scenarios
         core/public_api_stable_header_scenarios.cpp
@@ -357,20 +374,41 @@ if (BUILD_CONTRACT_TESTS)
         server_core
     )
     add_test(NAME CorePublicApiStableHeaderScenarios COMMAND core_public_api_stable_header_scenarios)
+    set_tests_properties(CorePublicApiStableHeaderScenarios PROPERTIES LABELS "contract;public-api;smoke")
+
+    add_test(
+      NAME CoreInstalledPackageConsumer
+      COMMAND "${CMAKE_COMMAND}"
+              "-DBUILD_DIR=${CMAKE_BINARY_DIR}"
+              "-DCONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}/tests/package/installed_consumer"
+              "-DCONSUMER_BUILD_DIR=${CMAKE_BINARY_DIR}/contract/installed-consumer/build"
+              "-DINSTALL_PREFIX=${CMAKE_BINARY_DIR}/contract/installed-consumer/prefix"
+              "-DSERVER_CORE_PACKAGE_DIR=${CMAKE_BINARY_DIR}/contract/installed-consumer/prefix/${CMAKE_INSTALL_LIBDIR}/cmake/server_core"
+              "-DTOOLCHAIN_FILE=${CMAKE_BINARY_DIR}/conan/build/generators/conan_toolchain.cmake"
+              "-DCONFIG=$<CONFIG>"
+              "-DGENERATOR=${CMAKE_GENERATOR}"
+              "-DGENERATOR_PLATFORM=${CMAKE_GENERATOR_PLATFORM}"
+              "-DGENERATOR_TOOLSET=${CMAKE_GENERATOR_TOOLSET}"
+              -P "${CMAKE_SOURCE_DIR}/tests/core/run_installed_package_consumer.cmake"
+    )
+    set_tests_properties(CoreInstalledPackageConsumer PROPERTIES LABELS "contract;public-api;installed-consumer")
 
     if (Python3_Interpreter_FOUND)
       add_test(
         NAME CoreApiBoundaryFixtures
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_core_api_contracts.py" --check-boundary-fixtures
       )
+      set_tests_properties(CoreApiBoundaryFixtures PROPERTIES LABELS "contract;docs-policy")
       add_test(
         NAME DoxygenCoverageToolTests
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tests/python/test_check_doxygen_coverage.py"
       )
+      set_tests_properties(DoxygenCoverageToolTests PROPERTIES LABELS "contract;docs-policy")
       add_test(
         NAME CoreApiStableGovernanceFixtures
         COMMAND "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/tools/check_core_api_contracts.py" --check-stable-governance-fixtures
       )
+      set_tests_properties(CoreApiStableGovernanceFixtures PROPERTIES LABELS "contract;docs-policy")
 
     else()
       message(WARNING "Python3 not found: CoreApiBoundaryFixtures test disabled")
