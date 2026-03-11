@@ -128,6 +128,7 @@ target_link_libraries(server_state_common PUBLIC server_core)
 
 add_library(server_state_redis STATIC
     src/state/instance_registry_redis.cpp
+    src/state/redis_backend_factory.cpp
 )
 target_include_directories(server_state_redis PUBLIC ${CMAKE_CURRENT_LIST_DIR}/include)
 target_link_libraries(server_state_redis PUBLIC server_state_common)

@@ -2,7 +2,7 @@
 
 #include <utility>
 
-#include "server/state/redis_instance_registry.hpp"
+#include "server/state/redis_backend_factory.hpp"
 #include "server/storage/redis/factory.hpp"
 
 namespace gateway {
@@ -21,11 +21,7 @@ make_registry_backend(const std::shared_ptr<server::core::storage::redis::IRedis
         return {};
     }
 
-    auto state_client = server::state::make_redis_state_client(redis_client);
-    return std::make_shared<server::state::RedisInstanceStateBackend>(
-        std::move(state_client),
-        std::move(key_prefix),
-        ttl);
+    return server::state::make_redis_registry_backend(redis_client, std::move(key_prefix), ttl);
 }
 
 } // namespace gateway
