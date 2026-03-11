@@ -9,10 +9,14 @@
 #include "server/core/net/session.hpp"
 #include "server/core/storage/connection_pool.hpp"
 #include "server/core/storage/db_worker_pool.hpp"
+#include "server/core/storage/redis/client.hpp"
+#include "server/core/state/instance_registry.hpp"
 #include "server/core/util/service_registry.hpp"
 #include "server/core/util/crash_handler.hpp"
 #include "server/storage/connection_pool.hpp"
 #include "server/storage/postgres/connection_pool.hpp"
+#include "server/storage/redis/client.hpp"
+#include "server/state/instance_registry.hpp"
 
 /**
  * @brief server_app와 server_core 내부 구현을 연결하는 부트스트랩 어댑터 구현부입니다.
@@ -90,6 +94,24 @@ std::shared_ptr<server::storage::IRepositoryConnectionPool> make_repository_conn
     options.query_timeout_ms = query_timeout_ms;
     options.prepare_statements = prepare_statements;
     return server::storage::postgres::make_connection_pool(db_uri, options);
+}
+
+std::shared_ptr<server::core::storage::redis::IRedisClient> make_redis_client(
+    const std::string& redis_uri,
+    const server::core::storage::redis::Options& options) {
+    return server::storage::redis::make_redis_client(redis_uri, options);
+}
+
+std::shared_ptr<server::core::state::IInstanceStateBackend> make_registry_backend(
+    const std::shared_ptr<server::core::storage::redis::IRedisClient>& redis_client,
+    const std::string& key_prefix,
+    std::chrono::seconds ttl) {
+    if (!redis_client) {
+        return {};
+    }
+
+    auto adapter = server::state::make_redis_state_client(redis_client);
+    return std::make_shared<server::state::RedisInstanceStateBackend>(adapter, key_prefix, ttl);
 }
 
 bool connection_pool_health_check(

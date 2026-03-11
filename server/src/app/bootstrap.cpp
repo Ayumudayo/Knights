@@ -38,6 +38,7 @@
 #include "server/core/memory/memory_pool.hpp"
 #include "server/core/runtime_metrics.hpp"
 #include "server/core/state/instance_registry.hpp"
+#include "server/core/storage/redis/client.hpp"
 #include "server/core/scripting/lua_runtime.hpp"
 #include "server/core/scripting/script_watcher.hpp"
 #include "server/chat/chat_service.hpp"
@@ -45,8 +46,6 @@
 #include "wire.pb.h"
 // 캐시/팬아웃: Redis 클라이언트(스켈레톤)
 #include "server/storage/connection_pool.hpp"
-#include "server/storage/redis/client.hpp"
-#include "server/state/instance_registry.hpp"
 
 namespace asio = boost::asio;
 namespace core = server::core;
@@ -280,7 +279,7 @@ int run_server(int argc, char** argv) {
     std::shared_ptr<core::scripting::LuaRuntime> lua_runtime;
     std::shared_ptr<asio::strand<asio::io_context::executor_type>> lua_reload_strand;
     std::shared_ptr<core::scripting::ScriptWatcher> lua_script_watcher;
-        std::shared_ptr<server::state::RedisInstanceStateBackend> registry_backend;
+        std::shared_ptr<server::core::state::IInstanceStateBackend> registry_backend;
         server::core::state::InstanceRecord registry_record{};
     bool registry_registered = false;
     server::core::app::AppHost app_host{"server_app"};
@@ -662,13 +661,13 @@ int run_server(int argc, char** argv) {
         }
 
         // 5. Redis 클라이언트 구성
-        std::shared_ptr<server::storage::redis::IRedisClient> redis;
+        std::shared_ptr<server::core::storage::redis::IRedisClient> redis;
         if (!config.redis_uri.empty()) {
             corelog::info("Detected REDIS_URI (redacted)");
-            server::storage::redis::Options ropts{};
+            server::core::storage::redis::Options ropts{};
             ropts.pool_max = config.redis_pool_max;
             ropts.use_streams = config.redis_use_streams;
-            redis = server::storage::redis::make_redis_client(config.redis_uri.c_str(), ropts);
+            redis = core_internal::make_redis_client(config.redis_uri.c_str(), ropts);
 
             if (redis) {
                 if (config.presence_clean_on_start) {
@@ -712,9 +711,8 @@ int run_server(int argc, char** argv) {
 
             // 인스턴스 레지스트리에 서버 등록
             try {
-                auto registry_client = server::state::make_redis_state_client(redis);
-                registry_backend = std::make_shared<server::state::RedisInstanceStateBackend>(
-                    registry_client, config.registry_prefix, config.registry_ttl);
+                registry_backend = core_internal::make_registry_backend(
+                    redis, config.registry_prefix, config.registry_ttl);
                 
                 registry_record.instance_id = config.server_instance_id;
                 registry_record.host = config.advertise_host;

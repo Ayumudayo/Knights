@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <chrono>
 #include <cstdint>
 #include <functional>
 #include <memory>
@@ -22,8 +23,17 @@ class IConnectionPool;
 class DbWorkerPool;
 }
 
+namespace server::core::storage::redis {
+struct Options;
+class IRedisClient;
+}
+
 namespace server::storage {
 class IRepositoryConnectionPool;
+}
+
+namespace server::core::state {
+class IInstanceStateBackend;
 }
 
 namespace server::core::net {
@@ -92,6 +102,15 @@ std::shared_ptr<server::storage::IRepositoryConnectionPool> make_repository_conn
     std::uint32_t connect_timeout_ms,
     std::uint32_t query_timeout_ms,
     bool prepare_statements);
+
+std::shared_ptr<server::core::storage::redis::IRedisClient> make_redis_client(
+    const std::string& redis_uri,
+    const server::core::storage::redis::Options& options);
+
+std::shared_ptr<server::core::state::IInstanceStateBackend> make_registry_backend(
+    const std::shared_ptr<server::core::storage::redis::IRedisClient>& redis_client,
+    const std::string& key_prefix,
+    std::chrono::seconds ttl);
 
 /**
  * @brief 커넥션 풀 헬스체크를 예외 안전하게 수행합니다.
