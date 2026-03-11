@@ -29,7 +29,6 @@ if (BUILD_GTEST_TESTS)
     )
     target_include_directories(storage_basic_tests PRIVATE
         ${CMAKE_SOURCE_DIR}/core/include
-        ${CMAKE_SOURCE_DIR}/server/include
     )
     target_link_libraries(storage_basic_tests PRIVATE
         GTest::gtest_main
