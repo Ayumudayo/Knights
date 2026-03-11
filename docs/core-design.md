@@ -54,6 +54,16 @@
 - `AppHost`는 공통 lifecycle phase(`init -> bootstrapping -> running -> stopping -> stopped|failed`)를 관리하고,
   `runtime_lifecycle_phase`, `runtime_lifecycle_phase_code` 메트릭으로 현재 단계를 노출한다.
 
+### 2.7 조합 헬퍼 타깃(Composition Helper Targets)
+- `server_app_backends`, `gateway_backends`, `admin_app_backends`, `wb_common_redis_factory`는 reusable engine module이 아니라 각 실행 파일의 composition helper로 취급한다.
+- 이 타깃들은 프로세스별 설정/수명주기/운영 맥락을 `server_storage_pg_factory`, `server_storage_redis_factory`, `server_state_redis_factory` 같은 narrower factory seam에 연결하는 얇은 조합 레이어다.
+- 따라서 현재 단계에서는 `server_core`나 별도 중립 패키지로 승격하지 않고, 해당 실행 파일이 있는 `server/`, `gateway/`, `tools/` 트리 안에 둔다.
+- helper target은 아래 조건을 모두 만족할 때만 상위 패키지로 이동을 검토한다.
+  - 둘 이상의 실행 파일이 동일한 helper 구현을 그대로 공유한다.
+  - helper가 앱/툴 로컬 설정, CLI, 수명주기 의미를 더 이상 직접 해석하지 않는다.
+  - 연결 대상 backend seam이 installable package/factory contract로 먼저 안정화돼 있다.
+- 반대로 단일 실행 파일의 composition root를 감추는 목적이라면, 이름이 다소 일반적이어도 app-local helper로 남기는 편이 ownership 경계를 더 분명하게 유지한다.
+
 ## 3. 실행 흐름
 1. `.env` 로드 → `ServiceRegistry` 초기화 → generic DB connection/worker seam, Redis, Write-behind, TaskScheduler를 등록한다.
 2. `core::net::Session`은 wire decoder로 opcode를 구문 분석한 뒤 Dispatcher에 넘기고, Dispatcher는 ServiceRegistry에서 필요한 핸들러를 찾는다.
