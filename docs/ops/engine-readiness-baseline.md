@@ -36,7 +36,9 @@ This file exists so each executed checkpoint can leave a commit-visible summary.
 - `ready to branch`: no
 - `reason`: overload/backpressure remains a common blocker, and worker Redis degraded-state visibility still needs tightening
 - detailed Phase 4 decision: `docs/ops/engine-readiness-decision.md`
+- Phase 5 branch-cut criteria: `docs/ops/engine-branch-cut-criteria.md`
+- preferred first branch once the baseline closes: `engine-roadmap-mmorpg`
 
 ## Next Checkpoint
 
-- `common blocker remediation and branch-cut preparation`
+- `common blocker remediation before any branch cut`

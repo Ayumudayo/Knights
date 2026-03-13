@@ -1,0 +1,110 @@
+# Engine Genre Branch-Cut Criteria
+
+This document records the Phase 5 branch preparation decision for the `engine-readiness-baseline` branch.
+
+It does **not** authorize a branch cut today.
+The current baseline decision remains `not ready to branch`; see `docs/ops/engine-readiness-decision.md`.
+
+## Shared Prerequisites For Any Genre Branch
+
+Do not open either `engine-roadmap-fps` or `engine-roadmap-mmorpg` until all shared prerequisites below are satisfied.
+
+### 1. Common baseline blockers are closed
+
+Required:
+
+- overload/login-collapse blocker is fixed or reclassified with convincing bounded-failure evidence
+- worker Redis degraded-state visibility gap is closed or replaced by an accepted alternative signal
+
+Reference:
+
+- `docs/ops/engine-readiness-decision.md`
+
+### 2. The affected evidence runs are rerun and accepted
+
+Minimum rerun set:
+
+- overload/backpressure rehearsal
+- targeted Redis outage/recovery verification for worker degraded-state signaling
+
+The reruns must leave fresh artifacts and update the checkpoint ledger.
+
+### 3. The common baseline conclusion is updated to `ready to branch`
+
+Required:
+
+- `docs/ops/engine-readiness-baseline.md` reflects a non-blocked baseline
+- the branch decision record is updated accordingly
+
+### 4. The target branch starts from a narrow charter
+
+Each genre branch must start with:
+
+- a first-tranche scope
+- explicit non-goals
+- a verification bar
+
+The branch must not reopen unresolved common runtime questions that belong in the baseline.
+
+## `engine-roadmap-fps` Branch-Cut Criteria
+
+Open this branch only when all shared prerequisites above are met **and** the first FPS tranche is explicitly limited to FPS-specific engine work.
+
+### First-Tranche Scope
+
+- authoritative tick/runtime loop decisions
+- snapshot/delta replication primitives
+- interest-management primitives
+- latency-compensation hooks
+- gameplay-grade UDP/RUDP data-path hardening
+
+### FPS Branch Must Not Start With
+
+- unresolved common overload/backpressure ambiguity
+- unresolved dependency-readiness signaling gaps
+- MMORPG-style persistence/session-resume scope creep
+
+### Minimum FPS Branch Entry Bar
+
+- common baseline is already accepted
+- current UDP/RUDP substrate remains green on attach success/fallback/OFF control scenarios
+- the FPS branch charter names the first gameplay-traffic proof target that goes beyond the current attach-only transport evidence
+
+## `engine-roadmap-mmorpg` Branch-Cut Criteria
+
+Open this branch only when all shared prerequisites above are met **and** the first MMORPG tranche is explicitly limited to MMORPG-specific engine work.
+
+### First-Tranche Scope
+
+- long-lived session resume/reconnect semantics
+- zone/shard/world lifecycle support
+- persistence/recovery orchestration beyond the current chat/write-behind stack
+- background task and state handoff guarantees
+
+### MMORPG Branch Must Not Start With
+
+- unresolved common overload/backpressure ambiguity
+- unresolved dependency-readiness signaling gaps
+- FPS gameplay replication or lag-compensation work mixed into the first tranche
+
+### Minimum MMORPG Branch Entry Bar
+
+- common baseline is already accepted
+- current restart/recovery evidence is accepted as sufficient for bounded partial failure
+- the MMORPG branch charter names the first session/persistence continuity proof target that goes beyond the current chat/control-path model
+
+## Preferred First Branch After Baseline Closure
+
+- preferred order: `engine-roadmap-mmorpg` first
+
+## Reason
+
+- The current stack is stronger in TCP control flow, readiness/lifecycle, Redis/Postgres dependency handling, write-behind, and admin/control-plane behavior than it is in gameplay-grade realtime transport.
+- That means the present architecture is already closer to MMORPG-style backend concerns than to FPS-style authoritative realtime simulation.
+- FPS work will almost certainly reopen the transport/runtime model more aggressively, especially around gameplay-frequency UDP/RUDP semantics.
+
+## Current Status
+
+- `engine-roadmap-fps`: not ready to cut
+- `engine-roadmap-mmorpg`: not ready to cut
+- `preferred first branch once ready`: `engine-roadmap-mmorpg`
