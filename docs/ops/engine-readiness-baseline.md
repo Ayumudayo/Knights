@@ -21,24 +21,29 @@ This file exists so each executed checkpoint can leave a commit-visible summary.
 | 4 | gateway restart during live traffic | `build/engine-readiness/20260314-0212-gateway-restart/` | pass with caveat | stack recovered and new traffic stayed routable, but the live soak recorded `24` disconnects / `24` errors for sessions on the restarted gateway. |
 | 5 | server restart during live traffic | `build/engine-readiness/20260314-0216-server-restart/` | pass with caveat | stack recovered and probes kept passing, but the live soak recorded `26` disconnects / `26` errors for sessions routed to the restarted backend. |
 | 6 | worker restart during backlog processing | `build/engine-readiness/20260314-0219-worker-restart/` | pass with caveat | user-facing chat stayed clean and the worker drained backlog after restart, but backlog visibility came from flush logs more than from `wb_pending`/ready metrics. |
-| 7 | overload/backpressure rehearsal | `build/engine-readiness/20260314-0223-overload-rehearsal/` | fail | `192` connected sessions produced `156` login failures, while the intended gateway queue/circuit counters stayed flat and did not explain the overload path. |
+| 7 | overload/backpressure rehearsal | `build/engine-readiness/20260314-0223-overload-rehearsal/` | fail | Initial rehearsal was later superseded: concurrent loadgen runs reused the same login IDs and produced an invalid duplicate-login collapse. |
+
+## Phase 6 Remediation Checkpoints
+
+| Order | Checkpoint | Run Root | Verdict | Key Outcome |
+| --- | --- | --- | --- | --- |
+| 8 | Redis worker degraded-state remediation | `build/engine-readiness/20260314-024138-redis-remediation/` | pass | `wb_worker` now drops to `503 not ready: deps=redis` during outage, flips `runtime_dependency_ready{name="redis",required="true"}` to `0`, and recovers automatically after Redis restart. |
+| 9 | overload/backpressure remediation rerun | `build/engine-readiness/20260314-025202-overload-remediation-v3/` | pass | Identity-safe `8 x steady_chat` completed with `192` connected / authenticated / joined sessions, `0` login failures, and `0` total errors; both servers handled live traffic. |
 
 ## Active Caveats
 
-- Redis outage signaling from `wb_worker` is weaker than the gateway/server story in the sampled window.
 - Gateway restart currently causes bounded session loss rather than transparent continuity for in-flight sessions behind the restarted instance.
 - Server restart currently causes bounded backend-session loss rather than transparent continuity for in-flight sessions routed through the restarted instance.
 - Worker restart recovery is visible, but backlog depth signaling is still weaker than ideal because `wb_pending` did not spike in the sampled window.
-- Higher concurrent chat load triggers bounded but poorly explained login collapse; the current backpressure metrics do not expose the dominant failure path clearly enough.
 
 ## Current Decision
 
-- `ready to branch`: no
-- `reason`: overload/backpressure remains a common blocker, and worker Redis degraded-state visibility still needs tightening
+- `ready to branch`: yes
+- `reason`: the remaining shared-runtime caveats are bounded restart/backlog-visibility concerns, not baseline blockers; the previous overload blocker was closed by fixing concurrent loadgen identity collisions and tightening gateway equal-load backend selection.
 - detailed Phase 4 decision: `docs/ops/engine-readiness-decision.md`
 - Phase 5 branch-cut criteria: `docs/ops/engine-branch-cut-criteria.md`
-- preferred first branch once the baseline closes: `engine-roadmap-mmorpg`
+- preferred first branch: `engine-roadmap-mmorpg`
 
 ## Next Checkpoint
 
-- `common blocker remediation before any branch cut`
+- `branch cut execution against the accepted genre criteria`

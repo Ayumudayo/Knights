@@ -2,12 +2,11 @@
 
 This document records the Phase 5 branch preparation decision for the `engine-readiness-baseline` branch.
 
-It does **not** authorize a branch cut today.
-The current baseline decision remains `not ready to branch`; see `docs/ops/engine-readiness-decision.md`.
+The current baseline decision is now `ready to branch`; see `docs/ops/engine-readiness-decision.md`.
 
 ## Shared Prerequisites For Any Genre Branch
 
-Do not open either `engine-roadmap-fps` or `engine-roadmap-mmorpg` until all shared prerequisites below are satisfied.
+Open either `engine-roadmap-fps` or `engine-roadmap-mmorpg` only while all shared prerequisites below remain satisfied.
 
 ### 1. Common baseline blockers are closed
 
@@ -20,6 +19,11 @@ Reference:
 
 - `docs/ops/engine-readiness-decision.md`
 
+Current status:
+
+- satisfied by `build/engine-readiness/20260314-024138-redis-remediation/`
+- satisfied by `build/engine-readiness/20260314-025202-overload-remediation-v3/`
+
 ### 2. The affected evidence runs are rerun and accepted
 
 Minimum rerun set:
@@ -29,12 +33,20 @@ Minimum rerun set:
 
 The reruns must leave fresh artifacts and update the checkpoint ledger.
 
+Current status:
+
+- satisfied
+
 ### 3. The common baseline conclusion is updated to `ready to branch`
 
 Required:
 
 - `docs/ops/engine-readiness-baseline.md` reflects a non-blocked baseline
 - the branch decision record is updated accordingly
+
+Current status:
+
+- satisfied
 
 ### 4. The target branch starts from a narrow charter
 
@@ -105,6 +117,6 @@ Open this branch only when all shared prerequisites above are met **and** the fi
 
 ## Current Status
 
-- `engine-roadmap-fps`: not ready to cut
-- `engine-roadmap-mmorpg`: not ready to cut
-- `preferred first branch once ready`: `engine-roadmap-mmorpg`
+- `engine-roadmap-fps`: ready to cut if the first tranche stays narrowly FPS-specific
+- `engine-roadmap-mmorpg`: ready to cut
+- `preferred first branch`: `engine-roadmap-mmorpg`

@@ -1,6 +1,6 @@
 # Engine Readiness Baseline Decision
 
-This document records the Phase 4 decision for the `engine-readiness-baseline` branch.
+This document records the current Phase 4 decision for the `engine-readiness-baseline` branch.
 
 Raw evidence for each rehearsal lives under `build/engine-readiness/<run_id>/`.
 The checkpoint ledger is tracked in `docs/ops/engine-readiness-baseline.md`.
@@ -19,55 +19,66 @@ The checkpoint ledger is tracked in `docs/ops/engine-readiness-baseline.md`.
 - `build/engine-readiness/20260314-0216-server-restart/`
 - `build/engine-readiness/20260314-0219-worker-restart/`
 - `build/engine-readiness/20260314-0223-overload-rehearsal/`
+- `build/engine-readiness/20260314-024138-redis-remediation/`
+- `build/engine-readiness/20260314-025202-overload-remediation-v3/`
 
-## Common Engine Blockers Exposed By The Matrix
+## Resolved Common Blockers
 
-## Must Fix Before Any Genre Split
-
-### 1. Overload/login collapse is real, but the intended backpressure signals do not explain it
+### 1. Worker Redis degraded-state visibility is now explicit
 
 Evidence:
 
-- `build/engine-readiness/20260314-0223-overload-rehearsal/summary/result.md`
-- aggregate overload run:
+- `build/engine-readiness/20260314-024138-redis-remediation/summary/result.md`
+- worker readiness path:
+  - pre: `200 ready`
+  - during outage: `503 not ready: deps=redis`
+  - post-recovery: `200 ready`
+- worker metrics:
+  - `runtime_dependency_ready{name="redis",required="true"} 0` during outage
+  - `wb_redis_unavailable_total` increments during outage
+  - `wb_reclaim_error_total` continues to expose reclaim-side Redis failures
+
+Interpretation:
+
+- The earlier Redis caveat on `wb_worker` was a real observability gap.
+- The worker now advertises Redis degradation through the same dependency/readiness surfaces used by gateway/server.
+- This blocker is closed for branch-cut purposes.
+
+### 2. The overload/login-collapse blocker was an invalid harness result, and the accepted rerun passes
+
+Evidence:
+
+- initial failing run: `build/engine-readiness/20260314-0223-overload-rehearsal/summary/result.md`
+- accepted rerun: `build/engine-readiness/20260314-025202-overload-remediation-v3/summary/result.md`
+- loadgen remediation:
+  - concurrent runs no longer reuse the same login IDs; usernames are now suffixed with the run seed
+- accepted rerun aggregate:
   - `192` connected sessions
-  - `36` authenticated sessions
-  - `156` login failures
-  - `164` total errors
+  - `192` authenticated sessions
+  - `192` joined sessions
+  - `0` login failures
+  - `0` total errors
 
-Why this blocks the baseline:
+Why the original blocker was invalid:
 
-- The current baseline requires overload to degrade in a bounded and observable way.
-- The stack did degrade without wedging, but the expected gateway queue/circuit/reject counters stayed flat while logins failed in bulk.
-- That means the dominant common-runtime overload path is still not explained well enough for branch split.
+- The original `8 x steady_chat` rehearsal launched eight separate loadgen processes with the same `login_prefix` and the same per-process session indices.
+- That reused the same usernames (`steady_chat_0..23`) across concurrent runs.
+- One run could claim those names; the others failed as duplicate-login attempts.
+- That failure shape was not an engine overload signal, so it could not remain a common-runtime blocker.
 
-Required outcome before branch split:
+Additional runtime tightening that stays valuable:
 
-- either eliminate the login-collapse pattern at this load level
-- or make the failure bounded and immediately explainable through the intended runtime metrics and rejection surfaces
+- Gateway equal-load backend selection now incorporates gateway-local optimistic load and deterministic tie-break behavior.
+- In the accepted rerun both backends handled traffic (`server-1` and `server-2` both showed inline dispatch activity), so the stack no longer exhibits the single-backend pinning seen during investigation.
 
-### 2. Worker Redis degradation visibility is weaker than the gateway/server visibility story
+Interpretation:
 
-Evidence:
+- The accepted overload rehearsal now demonstrates bounded, healthy behavior at the target stress shape.
+- The previous blocker is closed.
 
-- `build/engine-readiness/20260314-0150-redis-recovery/summary/result.md`
-- gateway/server dropped to `503 not ready: deps=redis`
-- worker logs showed Redis read/reclaim failures, but sampled `worker /readyz` and `runtime_dependency_ready{name="redis"}` did not flip during the outage window
+## Remaining Deferable Caveats
 
-Why this still matters:
-
-- The current rubric says affected services should advertise degraded state observably.
-- Gateway/server satisfy that expectation clearly.
-- Worker recovery is visible in logs/counters, but the ready/dependency signal is still weaker than the rest of the stack.
-
-Required outcome before branch split:
-
-- strengthen worker degraded-state signaling
-- or explicitly replace the missing ready/dependency signal with an accepted, documented alternative that closes the observability gap
-
-## Explicitly Deferable Items
-
-These items are real follow-up work, but they do not have to block the common branch split once the must-fix blockers above are resolved.
+These are real follow-up items, but they do not block a genre branch split from the common baseline.
 
 ### 1. Transparent in-flight session continuity across gateway/server restart
 
@@ -78,56 +89,58 @@ Evidence:
 
 Why this can defer:
 
-- The current baseline promise only requires bounded failure and recovery, not seamless continuity for every in-flight session.
-- The rehearsals recovered automatically and new traffic stayed routable.
+- The current baseline requires bounded failure and automatic recovery, not seamless continuity for every in-flight session.
+- The stack recovered automatically and new traffic stayed routable.
 
 Likely future owner:
 
 - mostly `engine-roadmap-mmorpg`
 - partially shared engine follow-up if reconnect semantics are promoted more broadly
 
-### 2. Gameplay-grade UDP/RUDP transport maturity
+### 2. Worker backlog-depth visibility during restart remains weaker than ideal
 
 Evidence:
 
-- control baseline proves current attach success/fallback/OFF behavior
-- the common baseline still does not promise high-frequency gameplay replication semantics
+- worker restart rehearsal still showed backlog recovery mainly through flush logs and batch sizes
+- sampled `wb_pending` did not spike strongly in the retained window
 
 Why this can defer:
 
-- the common baseline only needs measurable, bounded transport substrate behavior
-- gameplay-grade realtime transport is a genre-specific step beyond the current baseline
+- The current baseline already proves bounded worker restart recovery and successful backlog drain.
+- The remaining gap is visibility quality, not correctness of recovery behavior.
+
+Likely future owner:
+
+- shared engine/runtime follow-up
+
+### 3. Gameplay-grade UDP/RUDP transport maturity beyond the current attach/fallback proof
+
+Why this can defer:
+
+- The common baseline only requires bounded transport substrate behavior.
+- Gameplay-frequency replication semantics remain genre-specific follow-up work.
 
 Likely future owner:
 
 - `engine-roadmap-fps`
 
-### 3. Long-lived session resume, shard/zone lifecycle, and persistence orchestration above the current stack
-
-Why this can defer:
-
-- those are not required for the common baseline proof bar
-- they should be scoped explicitly in the MMORPG branch instead of muddying the common blocker list
-
-Likely future owner:
-
-- `engine-roadmap-mmorpg`
-
 ## Baseline Conclusion
 
-- `ready to branch`: no
-- `baseline decision`: not ready to split into `engine-roadmap-fps` / `engine-roadmap-mmorpg`
+- `ready to branch`: yes
+- `baseline decision`: ready to split once the first branch charter is chosen
+- `preferred first branch`: `engine-roadmap-mmorpg`
 
 Reason:
 
-- The failure/recovery matrix is now explicit and largely positive for dependency loss and process restart.
-- However, the branch still lacks one critical common-runtime proof: an overload/backpressure story that is both bounded and quickly explainable from the intended runtime signals.
-- The worker Redis degraded-state visibility gap remains a secondary common-runtime caveat that should not be ignored while closing the main blocker.
+- Dependency outage/recovery and process-restart rehearsals are already bounded and recover automatically.
+- The worker Redis signaling gap is closed.
+- The overload blocker is closed after correcting the concurrent-run identity collision in loadgen and rerunning the rehearsal with clean results.
+- The remaining caveats are narrower restart/backlog-visibility concerns that can be carried into later branch-specific work without invalidating the shared baseline.
 
-## Reopen Condition For Branch Cut
+## Guardrail For Branch Cut
 
-Do not open the genre branches until all of the following are true:
+Open the next genre branch only if all of the following remain true:
 
-1. The overload/backpressure blocker is either fixed or reclassified with convincing bounded-failure evidence and matching metrics.
-2. Worker Redis degraded-state visibility is strengthened or explicitly replaced by an accepted alternative signal.
-3. The branch-cut criteria for `engine-roadmap-fps` and `engine-roadmap-mmorpg` are written and accepted.
+1. The accepted overload rehearsal remains green under the identity-safe loadgen shape.
+2. Worker Redis dependency/readiness signaling remains explicit in the accepted remediation replay.
+3. The chosen genre branch starts from a narrow first tranche and does not reopen already-closed common baseline questions as implicit work.
