@@ -18,6 +18,7 @@ Historical proposal/report docs were pruned from the active docs tree; use the f
 - `docs/ops/observability.md` - observability setup and dashboards.
 - `docs/ops/gateway-and-lb.md` - gateway/load-balancer operations.
 - `docs/ops/runbook.md` - current runbook-oriented operational notes.
+- `docs/ops/engine-readiness-baseline.md` - tracked checkpoint ledger for phase-by-phase engine readiness proof.
 - `docs/core-api/overview.md` - current public core API docs entrypoint.
 
 ## Tool-Specific Canonical Docs
