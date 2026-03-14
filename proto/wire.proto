@@ -9,6 +9,10 @@ message LoginRes {
   uint32 session_id = 2;
   string message = 3;
   bool is_admin = 4;
+  string logical_session_id = 5;
+  string resume_token = 6;
+  uint64 resume_expires_unix_ms = 7;
+  bool resumed = 8;
 }
 
 message ChatBroadcast {

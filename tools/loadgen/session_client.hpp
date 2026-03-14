@@ -57,6 +57,10 @@ struct LoginResult {
     std::string effective_user;
     std::uint32_t session_id{0};
     bool is_admin{false};
+    std::string logical_session_id;
+    std::string resume_token;
+    std::uint64_t resume_expires_unix_ms{0};
+    bool resumed{false};
 };
 
 struct SnapshotResult {
