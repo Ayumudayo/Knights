@@ -137,6 +137,16 @@ def current_locator_for_resume_token(resume_token: str) -> str:
     return redis_get(f"{RESUME_LOCATOR_PREFIX}{routing_key}")
 
 
+def parse_locator_payload(payload: str) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for line in payload.splitlines():
+        if "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        result[key] = value
+    return result
+
+
 def wait_for_redis_value(key: str, timeout_sec: float = 10.0) -> str:
     deadline = time.monotonic() + timeout_sec
     while time.monotonic() < deadline:
@@ -292,10 +302,13 @@ def run_locator_fallback() -> None:
         print("Dropping exact resume alias binding and forcing locator-based reconnect...")
         alias_backend_before = wait_for_redis_value(alias_key)
         locator_before = wait_for_redis_value(locator_key)
+        locator_fields = parse_locator_payload(locator_before)
         if alias_backend_before != "server-1":
             raise AssertionError(f"resume alias was not attached to server-1 before locator fallback: {alias_backend_before}")
-        if "shard=stack-shard-a" not in locator_before:
+        if locator_fields.get("shard") != "stack-shard-a":
             raise AssertionError(f"resume locator hint did not capture shard boundary: {locator_before!r}")
+        if locator_fields.get("world_id") != "starter-a":
+            raise AssertionError(f"resume locator hint did not capture world admission metadata: {locator_before!r}")
 
         routing_hit_before = read_metric_sum("gateway_resume_routing_hit_total")
         selector_hit_before = read_metric_sum("gateway_resume_locator_selector_hit_total")
