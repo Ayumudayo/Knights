@@ -78,6 +78,7 @@ public:
     /** @brief resume alias와 함께 보관하는 최소 locator 힌트입니다. */
     struct ResumeLocatorHint {
         std::string backend_instance_id;
+        std::string world_id;
         std::string role;
         std::string game_mode;
         std::string region;

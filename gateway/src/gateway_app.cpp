@@ -297,9 +297,21 @@ bool is_resume_routing_key(std::string_view value) {
     return value.rfind(kResumeRoutingPrefix, 0) == 0;
 }
 
+std::optional<std::string> extract_world_id_from_tags(const std::vector<std::string>& tags) {
+    static constexpr std::string_view kWorldPrefix = "world:";
+    for (const auto& tag : tags) {
+        const std::string_view value(tag);
+        if (value.rfind(kWorldPrefix, 0) == 0 && value.size() > kWorldPrefix.size()) {
+            return std::string(value.substr(kWorldPrefix.size()));
+        }
+    }
+    return std::nullopt;
+}
+
 std::string serialize_resume_locator_hint(const GatewayApp::ResumeLocatorHint& hint) {
     std::ostringstream out;
     out << "backend=" << hint.backend_instance_id << '\n';
+    out << "world_id=" << hint.world_id << '\n';
     out << "role=" << hint.role << '\n';
     out << "game_mode=" << hint.game_mode << '\n';
     out << "region=" << hint.region << '\n';
@@ -324,6 +336,8 @@ std::optional<GatewayApp::ResumeLocatorHint> parse_resume_locator_hint(std::stri
                 const std::string_view key = line.substr(0, sep);
                 if (key == "backend") {
                     hint.backend_instance_id = std::move(value);
+                } else if (key == "world_id") {
+                    hint.world_id = std::move(value);
                 } else if (key == "role") {
                     hint.role = std::move(value);
                 } else if (key == "game_mode") {
@@ -343,6 +357,7 @@ std::optional<GatewayApp::ResumeLocatorHint> parse_resume_locator_hint(std::stri
     }
 
     if (hint.backend_instance_id.empty()
+        && hint.world_id.empty()
         && hint.role.empty()
         && hint.game_mode.empty()
         && hint.region.empty()
@@ -1795,6 +1810,9 @@ std::optional<GatewayApp::ResumeLocatorHint> GatewayApp::load_resume_locator_hin
 std::optional<server::core::state::InstanceSelector> GatewayApp::make_resume_locator_selector(
     const ResumeLocatorHint& hint) const {
     server::core::state::InstanceSelector selector{};
+    if (!hint.world_id.empty()) {
+        selector.tags.push_back("world:" + hint.world_id);
+    }
     if (!hint.role.empty()) {
         selector.roles.push_back(hint.role);
     }
@@ -1809,6 +1827,7 @@ std::optional<server::core::state::InstanceSelector> GatewayApp::make_resume_loc
     }
 
     if (selector.roles.empty()
+        && selector.tags.empty()
         && selector.game_modes.empty()
         && selector.regions.empty()
         && selector.shards.empty()) {
@@ -1825,6 +1844,7 @@ void GatewayApp::persist_resume_locator_hint(std::string_view routing_key,
 
     ResumeLocatorHint hint;
     hint.backend_instance_id = record.instance_id;
+    hint.world_id = extract_world_id_from_tags(record.tags).value_or("");
     hint.role = record.role;
     hint.game_mode = record.game_mode;
     hint.region = record.region;
