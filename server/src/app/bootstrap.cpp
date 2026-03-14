@@ -362,12 +362,14 @@ int run_server(int argc, char** argv) {
         core::JobQueue job_queue(config.job_queue_max);
         auto* job_queue_ptr = &job_queue;
         core::ThreadManager workers(job_queue);
-        core::BufferManager buffer_manager(2048, 1024);
-
         core::Dispatcher dispatcher;
         auto options = std::make_shared<core::SessionOptions>();
         options->read_timeout_ms = 60'000;
         options->heartbeat_interval_ms = 10'000;
+        const std::size_t buffer_block_size = std::max<std::size_t>(
+            2048,
+            server::core::protocol::k_header_bytes + options->recv_max_payload);
+        core::BufferManager buffer_manager(buffer_block_size, 1024);
         auto state = core_internal::make_connection_runtime_state();
 
         // ServiceRegistry 등록
