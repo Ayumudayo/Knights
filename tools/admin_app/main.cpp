@@ -427,6 +427,16 @@ std::vector<std::string> split_csv_trimmed(std::string_view raw) {
     return out;
 }
 
+std::optional<std::string> extract_world_id_from_tags(const std::vector<std::string>& tags) {
+    static constexpr std::string_view kWorldPrefix = "world:";
+    for (const auto& tag : tags) {
+        if (tag.rfind(kWorldPrefix, 0) == 0 && tag.size() > kWorldPrefix.size()) {
+            return tag.substr(kWorldPrefix.size());
+        }
+    }
+    return std::nullopt;
+}
+
 std::string join_csv(const std::vector<std::string>& values) {
     std::ostringstream out;
     for (std::size_t i = 0; i < values.size(); ++i) {
@@ -1259,6 +1269,11 @@ private:
         registry_prefix_ = ensure_trailing_slash(read_env_string("SERVER_REGISTRY_PREFIX", "gateway/instances/"));
         session_prefix_ = ensure_trailing_slash(read_env_string("GATEWAY_SESSION_PREFIX", "gateway/session/"));
         redis_channel_prefix_ = read_env_string("REDIS_CHANNEL_PREFIX", "");
+        continuity_prefix_ = read_env_string("SESSION_CONTINUITY_REDIS_PREFIX", redis_channel_prefix_);
+        if (!continuity_prefix_.empty() && continuity_prefix_.back() != ':') {
+            continuity_prefix_.push_back(':');
+        }
+        continuity_prefix_ += "continuity:";
         registry_ttl_sec_ = read_env_u32("SERVER_REGISTRY_TTL", 30, 1, 3600);
 
         worker_metrics_raw_url_ = read_env_string(
@@ -1498,6 +1513,92 @@ private:
 
     std::string make_instance_ready_url(const server::core::state::InstanceRecord& item) const {
         return "http://" + item.host + ":" + std::to_string(instance_metrics_port_) + "/readyz";
+    }
+
+    std::string make_world_owner_key(std::string_view world_id) const {
+        return continuity_prefix_ + "world-owner:" + std::string(world_id);
+    }
+
+    std::unordered_map<std::string, std::string>
+    load_world_owner_index(const std::vector<server::core::state::InstanceRecord>& items) const {
+        std::unordered_map<std::string, std::string> out;
+        if (!redis_ || !redis_available_.load(std::memory_order_relaxed)) {
+            return out;
+        }
+
+        std::vector<std::string> world_ids;
+        std::vector<std::string> owner_keys;
+        for (const auto& item : items) {
+            const auto world_id = extract_world_id_from_tags(item.tags);
+            if (!world_id.has_value()) {
+                continue;
+            }
+            if (!out.emplace(*world_id, std::string{}).second) {
+                continue;
+            }
+            world_ids.push_back(*world_id);
+            owner_keys.push_back(make_world_owner_key(*world_id));
+        }
+
+        if (owner_keys.empty()) {
+            return out;
+        }
+
+        std::vector<std::optional<std::string>> owners(owner_keys.size());
+        bool mget_ok = false;
+        try {
+            mget_ok = redis_->mget(owner_keys, owners);
+        } catch (...) {
+            mget_ok = false;
+        }
+
+        if (!mget_ok || owners.size() != owner_keys.size()) {
+            owners.clear();
+            owners.reserve(owner_keys.size());
+            for (const auto& key : owner_keys) {
+                try {
+                    owners.push_back(redis_->get(key));
+                } catch (...) {
+                    owners.push_back(std::nullopt);
+                }
+            }
+        }
+
+        for (std::size_t i = 0; i < world_ids.size() && i < owners.size(); ++i) {
+            if (owners[i].has_value() && !owners[i]->empty()) {
+                out[world_ids[i]] = *owners[i];
+            }
+        }
+        return out;
+    }
+
+    std::string make_world_scope_json(
+        const server::core::state::InstanceRecord& item,
+        const std::unordered_map<std::string, std::string>& world_owner_index) const {
+        const auto world_id = extract_world_id_from_tags(item.tags);
+        if (!world_id.has_value()) {
+            return "null";
+        }
+
+        const auto owner_it = world_owner_index.find(*world_id);
+        const bool has_owner = owner_it != world_owner_index.end() && !owner_it->second.empty();
+
+        std::ostringstream data;
+        data << "{";
+        data << "\"world_id\":\"" << json_escape(*world_id) << "\",";
+        data << "\"owner_instance_id\":";
+        if (has_owner) {
+            data << "\"" << json_escape(owner_it->second) << "\"";
+        } else {
+            data << "null";
+        }
+        data << ",";
+        data << "\"owner_match\":" << bool_json(has_owner && owner_it->second == item.instance_id) << ",";
+        data << "\"source\":{";
+        data << "\"owner_key\":\"" << json_escape(make_world_owner_key(*world_id)) << "\"";
+        data << "}";
+        data << "}";
+        return data.str();
     }
 
     std::string probe_instance_ready_reason(const server::core::state::InstanceRecord& item) const {
@@ -3498,6 +3599,12 @@ private:
         const std::size_t remaining = items.size() - cursor_index;
         const std::size_t take = std::min<std::size_t>(remaining, static_cast<std::size_t>(options.limit));
         const std::size_t end_index = cursor_index + take;
+        std::vector<server::core::state::InstanceRecord> page_items;
+        page_items.reserve(take);
+        for (std::size_t i = cursor_index; i < end_index; ++i) {
+            page_items.push_back(items[i]);
+        }
+        const auto world_owner_index = load_world_owner_index(page_items);
 
         std::ostringstream data;
         data << "{";
@@ -3526,6 +3633,7 @@ private:
             data << "\"ready\":" << bool_json(it.ready) << ",";
             data << "\"active_sessions\":" << it.active_sessions << ",";
             data << "\"last_heartbeat_ms\":" << it.last_heartbeat_ms << ",";
+            data << "\"world_scope\":" << make_world_scope_json(it, world_owner_index) << ",";
             data << "\"source\":{";
             data << "\"registry_key\":\"" << json_escape(registry_prefix_ + it.instance_id) << "\"";
             data << "}";
@@ -3603,6 +3711,7 @@ private:
         const std::string ready_reason = detail
             ? detail->ready_reason
             : (item->ready ? std::string("ready (registry)") : std::string("not ready (registry)"));
+        const auto world_owner_index = load_world_owner_index({*item});
 
         std::ostringstream data;
         data << "{";
@@ -3626,6 +3735,7 @@ private:
         data << "\"active_sessions\":" << item->active_sessions << ",";
         data << "\"last_heartbeat_ms\":" << item->last_heartbeat_ms << ",";
         data << "\"metrics_url\":\"" << json_escape(metrics_url) << "\",";
+        data << "\"world_scope\":" << make_world_scope_json(*item, world_owner_index) << ",";
         data << "\"source\":{";
         data << "\"registry_key\":\"" << json_escape(registry_prefix_ + item->instance_id) << "\"";
         data << "}";
@@ -4156,6 +4266,9 @@ private:
                 backend = it->second;
             }
         }
+        const auto world_owner_index = backend
+            ? load_world_owner_index({*backend})
+            : std::unordered_map<std::string, std::string>{};
 
         std::ostringstream data;
         data << "{";
@@ -4178,7 +4291,8 @@ private:
             data << "\"port\":" << backend->port << ",";
             data << "\"role\":\"" << json_escape(backend->role) << "\",";
             data << "\"ready\":" << bool_json(backend->ready) << ",";
-            data << "\"active_sessions\":" << backend->active_sessions;
+            data << "\"active_sessions\":" << backend->active_sessions << ",";
+            data << "\"world_scope\":" << make_world_scope_json(*backend, world_owner_index);
             data << "}";
         } else {
             data << "null";
@@ -4311,6 +4425,13 @@ private:
             std::lock_guard<std::mutex> lock(cache_mutex_);
             instances = instances_index_;
         }
+        std::vector<server::core::state::InstanceRecord> instance_records;
+        instance_records.reserve(instances.size());
+        for (const auto& [instance_id, record] : instances) {
+            (void)instance_id;
+            instance_records.push_back(record);
+        }
+        const auto world_owner_index = load_world_owner_index(instance_records);
 
         std::ostringstream data;
         data << "{";
@@ -4352,7 +4473,8 @@ private:
                     data << "\"host\":\"" << json_escape(backend.host) << "\",";
                     data << "\"port\":" << backend.port << ",";
                     data << "\"ready\":" << bool_json(backend.ready) << ",";
-                    data << "\"active_sessions\":" << backend.active_sessions;
+                    data << "\"active_sessions\":" << backend.active_sessions << ",";
+                    data << "\"world_scope\":" << make_world_scope_json(backend, world_owner_index);
                     data << "}";
                 } else {
                     data << "null";
@@ -5026,6 +5148,7 @@ private:
     std::string registry_prefix_;
     std::string session_prefix_;
     std::string redis_channel_prefix_;
+    std::string continuity_prefix_;
     std::uint32_t registry_ttl_sec_{30};
 
     std::string worker_metrics_raw_url_;

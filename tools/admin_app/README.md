@@ -42,6 +42,7 @@
 | `SERVER_REGISTRY_PREFIX` | 인스턴스 레지스트리 접두어(prefix) | `gateway/instances/` |
 | `GATEWAY_SESSION_PREFIX` | 세션 디렉터리 키(key) 접두어(prefix) | `gateway/session/` |
 | `REDIS_CHANNEL_PREFIX` | fanout/admin 명령 채널 접두어(prefix) | `` |
+| `SESSION_CONTINUITY_REDIS_PREFIX` | continuity world owner key 조회용 접두어(prefix). 미설정이면 `REDIS_CHANNEL_PREFIX`를 재사용 | (unset) |
 | `WB_WORKER_METRICS_URL` | wb_worker 메트릭 URL | `http://127.0.0.1:39093/metrics` |
 | `GRAFANA_BASE_URL` | Grafana 기본 URL 링크 | `http://127.0.0.1:33000` |
 | `PROMETHEUS_BASE_URL` | Prometheus 기본 URL 링크 | `http://127.0.0.1:39090` |
@@ -104,6 +105,20 @@ pwsh scripts/deploy_docker.ps1 -Action up -Detached -Build -Observability
 - `timeout_ms` (선택, 최대 `5000`)
 - `limit` (선택, 최대 `500`)
 - `cursor` (선택)
+
+## 인스턴스 world scope visibility
+
+- `GET /api/v1/instances`
+- `GET /api/v1/instances/{instance_id}`
+
+server 인스턴스는 `world_scope`를 함께 반환한다.
+
+- `world_scope.world_id`
+- `world_scope.owner_instance_id`
+- `world_scope.owner_match`
+- `world_scope.source.owner_key`
+
+이 값은 `world:<id>` tag와 continuity owner key를 조합해, 현재 backend가 해당 world residency owner와 일치하는지 control-plane에서 바로 확인하게 한다.
 
 ## 쓰기 액션 (2단계)
 
