@@ -652,6 +652,10 @@ void TcpSessionClient::handle_frame(std::uint16_t msg_id,
             event.login.effective_user = message.effective_user();
             event.login.session_id = message.session_id();
             event.login.is_admin = message.is_admin();
+            event.login.logical_session_id = message.logical_session_id();
+            event.login.resume_token = message.resume_token();
+            event.login.resume_expires_unix_ms = message.resume_expires_unix_ms();
+            event.login.resumed = message.resumed();
             push_event(std::move(event));
             return;
         }

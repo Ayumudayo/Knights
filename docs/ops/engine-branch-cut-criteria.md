@@ -8,6 +8,12 @@ The current baseline decision is now `ready to branch`; see `docs/ops/engine-rea
 
 Open either `engine-roadmap-fps` or `engine-roadmap-mmorpg` only while all shared prerequisites below remain satisfied.
 
+Current execution note:
+
+- the accepted baseline is currently being exploited through the narrower capability-first branch `engine-roadmap-session-continuity`
+- that branch exists because the stack is still chat/control oriented, so a direct genre-branded branch would overstate the current scope
+- the first `engine-roadmap-session-continuity` tranche is now complete; the remaining gate is review/merge rather than more shared continuity work on the same branch
+
 ### 1. Common baseline blockers are closed
 
 Required:
@@ -117,6 +123,8 @@ Open this branch only when all shared prerequisites above are met **and** the fi
 
 ## Current Status
 
-- `engine-roadmap-fps`: ready to cut if the first tranche stays narrowly FPS-specific
-- `engine-roadmap-mmorpg`: ready to cut
-- `preferred first branch`: `engine-roadmap-mmorpg`
+- `engine-roadmap-session-continuity`: first tranche complete on the active capability-first branch
+- `engine-roadmap-fps`: not cut yet
+- `engine-roadmap-mmorpg`: not cut yet
+- `preferred first genre branch once the continuity tranche closes`: `engine-roadmap-mmorpg`
+- `next operational step after the continuity PR merges`: cut `engine-roadmap-mmorpg` from the merged continuity head

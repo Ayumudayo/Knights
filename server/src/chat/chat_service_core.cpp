@@ -206,6 +206,25 @@ ChatService::ChatService(boost::asio::io_context& io,
         presence_.prefix = prefix;
     }
 
+    if (const char* enabled = std::getenv("SESSION_CONTINUITY_ENABLED"); enabled && *enabled) {
+        continuity_.enabled = (std::strcmp(enabled, "0") != 0);
+    }
+    if (const char* ttl = std::getenv("SESSION_CONTINUITY_LEASE_TTL_SEC"); ttl && *ttl) {
+        unsigned long value = std::strtoul(ttl, nullptr, 10);
+        if (value >= 30 && value <= 7 * 24 * 60 * 60) {
+            continuity_.lease_ttl_sec = static_cast<unsigned int>(value);
+        }
+    }
+    if (const char* prefix = std::getenv("SESSION_CONTINUITY_REDIS_PREFIX"); prefix && *prefix) {
+        continuity_.redis_prefix = prefix;
+    } else {
+        continuity_.redis_prefix = presence_.prefix;
+    }
+    if (!continuity_.redis_prefix.empty() && continuity_.redis_prefix.back() != ':') {
+        continuity_.redis_prefix.push_back(':');
+    }
+    continuity_.redis_prefix += "continuity:";
+
     if (const char* use = std::getenv("USE_REDIS_PUBSUB"); use && std::strcmp(use, "0") != 0) {
         redis_pubsub_enabled_ = true;
     }
@@ -596,6 +615,19 @@ ChatService::LuaHooksMetrics ChatService::lua_hooks_metrics() const {
     return out;
 }
 
+ChatService::ContinuityMetrics ChatService::continuity_metrics() const {
+    ContinuityMetrics out{};
+    out.lease_issue_total = continuity_lease_issue_total_.load(std::memory_order_relaxed);
+    out.lease_issue_fail_total = continuity_lease_issue_fail_total_.load(std::memory_order_relaxed);
+    out.lease_resume_total = continuity_lease_resume_total_.load(std::memory_order_relaxed);
+    out.lease_resume_fail_total = continuity_lease_resume_fail_total_.load(std::memory_order_relaxed);
+    out.state_write_total = continuity_state_write_total_.load(std::memory_order_relaxed);
+    out.state_write_fail_total = continuity_state_write_fail_total_.load(std::memory_order_relaxed);
+    out.state_restore_total = continuity_state_restore_total_.load(std::memory_order_relaxed);
+    out.state_restore_fallback_total = continuity_state_restore_fallback_total_.load(std::memory_order_relaxed);
+    return out;
+}
+
 // 방별 Strand(직렬화된 실행 컨텍스트)를 반환합니다.
 // 동일한 방에 대한 작업은 동일한 스레드에서 순차적으로 실행됨을 보장합니다.
 // 이는 멀티스레드 환경에서 방 상태(참여자 목록 등)의 동시성 문제를 해결하는 핵심 메커니즘입니다.
@@ -729,6 +761,165 @@ std::string ChatService::make_presence_key(std::string_view category, const std:
     key.append(category);
     key.append(id);
     return key;
+}
+
+std::string ChatService::make_continuity_room_key(const std::string& logical_session_id) const {
+    return continuity_.redis_prefix + "room:" + logical_session_id;
+}
+
+bool ChatService::continuity_enabled() const {
+    return continuity_.enabled && static_cast<bool>(db_pool_);
+}
+
+std::optional<std::string> ChatService::extract_resume_token(std::string_view token) const {
+    static constexpr std::string_view kResumePrefix = "resume:";
+    if (token.rfind(kResumePrefix, 0) != 0) {
+        return std::nullopt;
+    }
+
+    token.remove_prefix(kResumePrefix.size());
+    if (token.empty()) {
+        return std::nullopt;
+    }
+    return std::string(token);
+}
+
+std::optional<std::string> ChatService::load_continuity_room(const std::string& logical_session_id) {
+    if (!redis_ || logical_session_id.empty()) {
+        return std::nullopt;
+    }
+    return redis_->get(make_continuity_room_key(logical_session_id));
+}
+
+void ChatService::persist_continuity_room(const std::string& logical_session_id,
+                                          const std::string& room,
+                                          std::uint64_t expires_unix_ms) {
+    if (!redis_ || logical_session_id.empty() || room.empty() || expires_unix_ms == 0) {
+        (void)continuity_state_write_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        return;
+    }
+
+    const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()).count());
+    if (expires_unix_ms <= now_ms) {
+        (void)redis_->del(make_continuity_room_key(logical_session_id));
+        return;
+    }
+
+    const auto ttl_ms = expires_unix_ms - now_ms;
+    const auto ttl_sec = static_cast<unsigned int>(std::max<std::uint64_t>(1, (ttl_ms + 999) / 1000));
+    if (redis_->setex(make_continuity_room_key(logical_session_id), room, ttl_sec)) {
+        (void)continuity_state_write_total_.fetch_add(1, std::memory_order_relaxed);
+    } else {
+        (void)continuity_state_write_fail_total_.fetch_add(1, std::memory_order_relaxed);
+    }
+}
+
+std::optional<ChatService::ContinuityLease> ChatService::try_resume_continuity_lease(std::string_view token) {
+    if (!continuity_enabled()) {
+        return std::nullopt;
+    }
+
+    const auto raw_token = extract_resume_token(token);
+    if (!raw_token.has_value()) {
+        return std::nullopt;
+    }
+
+    const std::string token_hash = sha256_hex(*raw_token);
+    if (token_hash.empty()) {
+        (void)continuity_lease_resume_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        return std::nullopt;
+    }
+
+    try {
+        auto uow = db_pool_->make_repository_unit_of_work();
+        auto session = uow->sessions().find_by_token_hash(token_hash);
+        if (!session.has_value() || session->revoked_at_ms.has_value()) {
+            (void)continuity_lease_resume_fail_total_.fetch_add(1, std::memory_order_relaxed);
+            return std::nullopt;
+        }
+
+        const auto now_ms = static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+        if (session->expires_at_ms <= static_cast<std::int64_t>(now_ms)) {
+            (void)continuity_lease_resume_fail_total_.fetch_add(1, std::memory_order_relaxed);
+            return std::nullopt;
+        }
+
+        auto user = uow->users().find_by_id(session->user_id);
+        if (!user.has_value() || user->name.empty()) {
+            (void)continuity_lease_resume_fail_total_.fetch_add(1, std::memory_order_relaxed);
+            return std::nullopt;
+        }
+
+        ContinuityLease lease;
+        lease.logical_session_id = session->id;
+        lease.resume_token = *raw_token;
+        lease.user_id = session->user_id;
+        lease.effective_user = user->name;
+        const auto continuity_room = load_continuity_room(session->id);
+        if (continuity_room.has_value() && !continuity_room->empty()) {
+            lease.room = *continuity_room;
+            (void)continuity_state_restore_total_.fetch_add(1, std::memory_order_relaxed);
+        } else {
+            lease.room = "lobby";
+            (void)continuity_state_restore_fallback_total_.fetch_add(1, std::memory_order_relaxed);
+        }
+        lease.expires_unix_ms = static_cast<std::uint64_t>(session->expires_at_ms);
+        lease.resumed = true;
+        (void)continuity_lease_resume_total_.fetch_add(1, std::memory_order_relaxed);
+        return lease;
+    } catch (const std::exception& ex) {
+        (void)continuity_lease_resume_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        corelog::warn(std::string("continuity resume lookup failed: ") + ex.what());
+    } catch (...) {
+        (void)continuity_lease_resume_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        corelog::warn("continuity resume lookup failed: unknown");
+    }
+    return std::nullopt;
+}
+
+std::optional<ChatService::ContinuityLease> ChatService::issue_continuity_lease(const std::string& user_id,
+                                                                                 const std::string& effective_user,
+                                                                                 const std::string& room,
+                                                                                 const std::optional<std::string>& client_ip) {
+    if (!continuity_enabled() || user_id.empty() || effective_user.empty()) {
+        return std::nullopt;
+    }
+
+    try {
+        const std::string raw_token = generate_uuid_v4();
+        const std::string token_hash = sha256_hex(raw_token);
+        if (token_hash.empty()) {
+            (void)continuity_lease_issue_fail_total_.fetch_add(1, std::memory_order_relaxed);
+            return std::nullopt;
+        }
+
+        const auto expires_at =
+            std::chrono::system_clock::now() + std::chrono::seconds(continuity_.lease_ttl_sec);
+        auto uow = db_pool_->make_repository_unit_of_work();
+        auto session = uow->sessions().create(user_id, expires_at, client_ip, std::nullopt, token_hash);
+        uow->commit();
+
+        ContinuityLease lease;
+        lease.logical_session_id = session.id;
+        lease.resume_token = raw_token;
+        lease.user_id = user_id;
+        lease.effective_user = effective_user;
+        lease.room = room.empty() ? "lobby" : room;
+        lease.expires_unix_ms = static_cast<std::uint64_t>(session.expires_at_ms);
+        lease.resumed = false;
+        persist_continuity_room(lease.logical_session_id, lease.room, lease.expires_unix_ms);
+        (void)continuity_lease_issue_total_.fetch_add(1, std::memory_order_relaxed);
+        return lease;
+    } catch (const std::exception& ex) {
+        (void)continuity_lease_issue_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        corelog::warn(std::string("continuity lease issue failed: ") + ex.what());
+    } catch (...) {
+        (void)continuity_lease_issue_fail_total_.fetch_add(1, std::memory_order_relaxed);
+        corelog::warn("continuity lease issue failed: unknown");
+    }
+    return std::nullopt;
 }
 
 // 사용자의 접속 상태(Presence)를 갱신합니다. (Redis SETEX)

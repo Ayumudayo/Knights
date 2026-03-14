@@ -128,7 +128,9 @@ Likely future owner:
 
 - `ready to branch`: yes
 - `baseline decision`: ready to split once the first branch charter is chosen
-- `preferred first branch`: `engine-roadmap-mmorpg`
+- `active execution branch`: `engine-roadmap-session-continuity`
+- `preferred first genre branch after the continuity tranche`: `engine-roadmap-mmorpg`
+- `current continuity tranche status`: complete and pending review/merge
 
 Reason:
 
@@ -136,6 +138,7 @@ Reason:
 - The worker Redis signaling gap is closed.
 - The overload blocker is closed after correcting the concurrent-run identity collision in loadgen and rerunning the rehearsal with clean results.
 - The remaining caveats are narrower restart/backlog-visibility concerns that can be carried into later branch-specific work without invalidating the shared baseline.
+- Because the current runtime is still fundamentally a chat/control stack, the first post-baseline branch is intentionally capability-first (`engine-roadmap-session-continuity`) rather than a broad genre-branded MMORPG branch.
 
 ## Guardrail For Branch Cut
 
