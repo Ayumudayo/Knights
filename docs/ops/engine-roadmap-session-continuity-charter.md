@@ -1,23 +1,24 @@
-# Engine Roadmap MMORPG Charter
+# Engine Roadmap Session Continuity Charter
 
-This document is the branch-start charter for `engine-roadmap-mmorpg`.
+This document is the branch-start charter for `engine-roadmap-session-continuity`.
 
 ## Branch Cut
 
-- branch: `engine-roadmap-mmorpg`
+- branch: `engine-roadmap-session-continuity`
 - cut from: `engine-readiness-baseline`
 - cut commit: `bbdf3a5`
 - baseline decision: `docs/ops/engine-readiness-decision.md`
 - branch-cut criteria: `docs/ops/engine-branch-cut-criteria.md`
 
-## Why This Branch Starts First
+## Why This Branch Exists
 
 - The accepted common baseline is stronger in TCP control flow, lifecycle/readiness, Redis/Postgres dependency handling, write-behind, and admin/control-plane behavior than in gameplay-grade realtime transport.
-- The highest-value genre-specific follow-up is therefore session/persistence continuity rather than FPS transport expansion.
+- The immediate next step is therefore session/persistence continuity rather than FPS transport expansion.
+- Because the runtime is still fundamentally a chat/control stack, this branch stays capability-first instead of pretending the current slice is already a full MMORPG branch.
 
 ## First-Tranche Theme
 
-- session continuity before world scale
+- session continuity before genre framing
 
 This tranche exists to move the stack from bounded restart recovery to resumable player continuity.
 It does not attempt full MMORPG world orchestration in one step.

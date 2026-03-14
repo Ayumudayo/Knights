@@ -42,8 +42,9 @@ This file exists so each executed checkpoint can leave a commit-visible summary.
 - `reason`: the remaining shared-runtime caveats are bounded restart/backlog-visibility concerns, not baseline blockers; the previous overload blocker was closed by fixing concurrent loadgen identity collisions and tightening gateway equal-load backend selection.
 - detailed Phase 4 decision: `docs/ops/engine-readiness-decision.md`
 - Phase 5 branch-cut criteria: `docs/ops/engine-branch-cut-criteria.md`
-- preferred first branch: `engine-roadmap-mmorpg`
+- active execution branch: `engine-roadmap-session-continuity`
+- preferred first genre branch after the capability-first tranche: `engine-roadmap-mmorpg`
 
 ## Next Checkpoint
 
-- `branch cut execution against the accepted genre criteria`
+- `session continuity capability tranche on top of the accepted baseline`
