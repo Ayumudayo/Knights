@@ -618,12 +618,51 @@ def main() -> int:
         if not instance_id:
             raise RuntimeError("instances item missing instance_id")
 
+        full_instances = load_json("/api/v1/instances?limit=100")
+        full_items = full_instances.get("data", {}).get("items", [])
+        if not isinstance(full_items, list) or not full_items:
+            raise RuntimeError("full instances payload missing items")
+        world_server = None
+        for item in full_items:
+            if not isinstance(item, dict):
+                continue
+            world_scope = item.get("world_scope")
+            if item.get("role") == "server" and isinstance(world_scope, dict):
+                if world_scope.get("world_id"):
+                    world_server = item
+                    break
+        if world_server is None:
+            raise RuntimeError("instances payload missing server world_scope data")
+        world_scope = world_server.get("world_scope", {})
+        if "owner_instance_id" not in world_scope:
+            raise RuntimeError("instances world_scope missing owner_instance_id")
+        if not isinstance(world_scope.get("owner_match"), bool):
+            raise RuntimeError("instances world_scope.owner_match expected bool")
+        source = world_scope.get("source", {})
+        if not isinstance(source, dict) or not source.get("owner_key"):
+            raise RuntimeError("instances world_scope.source.owner_key missing")
+
         detail = load_json(f"/api/v1/instances/{instance_id}")
         detail_data = detail.get("data", {})
         if not detail_data.get("metrics_url"):
             raise RuntimeError("instance detail missing metrics_url")
         if not detail_data.get("ready_reason"):
             raise RuntimeError("instance detail missing ready_reason")
+
+        world_detail = load_json(f"/api/v1/instances/{world_server['instance_id']}")
+        world_detail_data = world_detail.get("data", {})
+        detail_scope = world_detail_data.get("world_scope")
+        if not isinstance(detail_scope, dict):
+            raise RuntimeError("instance detail missing world_scope object")
+        if detail_scope.get("world_id") != world_scope.get("world_id"):
+            raise RuntimeError("instance detail world_scope.world_id mismatch")
+        if "owner_instance_id" not in detail_scope:
+            raise RuntimeError("instance detail world_scope missing owner_instance_id")
+        if not isinstance(detail_scope.get("owner_match"), bool):
+            raise RuntimeError("instance detail world_scope.owner_match expected bool")
+        detail_source = detail_scope.get("source", {})
+        if not isinstance(detail_source, dict) or not detail_source.get("owner_key"):
+            raise RuntimeError("instance detail world_scope.source.owner_key missing")
 
         links = load_json("/api/v1/metrics/links")
         links_data = links.get("data", {})
