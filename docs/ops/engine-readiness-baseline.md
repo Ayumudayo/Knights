@@ -47,4 +47,4 @@ This file exists so each executed checkpoint can leave a commit-visible summary.
 
 ## Next Checkpoint
 
-- `session continuity capability tranche on top of the accepted baseline`
+- `merge the completed session continuity tranche and cut engine-roadmap-mmorpg`

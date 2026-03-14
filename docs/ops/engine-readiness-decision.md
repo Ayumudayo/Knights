@@ -130,6 +130,7 @@ Likely future owner:
 - `baseline decision`: ready to split once the first branch charter is chosen
 - `active execution branch`: `engine-roadmap-session-continuity`
 - `preferred first genre branch after the continuity tranche`: `engine-roadmap-mmorpg`
+- `current continuity tranche status`: complete and pending review/merge
 
 Reason:
 

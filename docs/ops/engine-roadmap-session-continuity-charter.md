@@ -10,6 +10,12 @@ This document is the branch-start charter for `engine-roadmap-session-continuity
 - baseline decision: `docs/ops/engine-readiness-decision.md`
 - branch-cut criteria: `docs/ops/engine-branch-cut-criteria.md`
 
+## Current Status
+
+- first tranche status: complete
+- closure decision: `docs/ops/engine-roadmap-session-continuity-first-tranche-closure.md`
+- next recommended genre branch after merge: `engine-roadmap-mmorpg`
+
 ## Why This Branch Exists
 
 - The accepted common baseline is stronger in TCP control flow, lifecycle/readiness, Redis/Postgres dependency handling, write-behind, and admin/control-plane behavior than in gameplay-grade realtime transport.
