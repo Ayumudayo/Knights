@@ -113,6 +113,7 @@ constexpr std::uint32_t kDefaultUdpBindRetryBackoffMaxMs = 2000;
 constexpr std::uint32_t kDefaultUdpBindRetryMaxAttempts = 6;
 constexpr bool kDefaultGatewayRudpEnable = false;
 constexpr std::uint32_t kDefaultGatewayRudpCanaryPercent = 0;
+constexpr std::string_view kResumeRoutingPrefix = "resume-hash:";
 
 constexpr bool kGatewayUdpIngressBuildEnabled = true;
 
@@ -287,6 +288,10 @@ std::string make_boot_id() {
 
 std::string endpoint_key(const boost::asio::ip::udp::endpoint& endpoint) {
     return endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
+}
+
+bool is_resume_routing_key(std::string_view value) {
+    return value.rfind(kResumeRoutingPrefix, 0) == 0;
 }
 
 std::string udp_frame_summary(std::span<const std::uint8_t> frame) {
@@ -766,6 +771,12 @@ GatewayApp::GatewayApp()
         stream << "# TYPE gateway_backend_retry_budget_exhausted_total counter\n";
         stream << "gateway_backend_retry_budget_exhausted_total "
                << backend_retry_budget_exhausted_total_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE gateway_resume_routing_bind_total counter\n";
+        stream << "gateway_resume_routing_bind_total "
+               << resume_routing_bind_total_.load(std::memory_order_relaxed) << "\n";
+        stream << "# TYPE gateway_resume_routing_hit_total counter\n";
+        stream << "gateway_resume_routing_hit_total "
+               << resume_routing_hit_total_.load(std::memory_order_relaxed) << "\n";
 
         stream << "# TYPE gateway_backend_circuit_open gauge\n";
         stream << "gateway_backend_circuit_open "
@@ -1562,6 +1573,9 @@ std::optional<GatewayApp::SelectedBackend> GatewayApp::select_best_server(const 
                 return rec.instance_id == *backend_id && rec.ready;
             });
             if (it != instances.end()) {
+                if (is_resume_routing_key(client_id)) {
+                    (void)resume_routing_hit_total_.fetch_add(1, std::memory_order_relaxed);
+                }
                 return SelectedBackend{*it, true};
             }
             // 바인딩된 인스턴스가 사라졌거나 비활성화되었으므로 바인딩을 해제한다.
@@ -1618,6 +1632,27 @@ std::optional<GatewayApp::SelectedBackend> GatewayApp::select_best_server(const 
     }
 
     return SelectedBackend{*candidates[selected_index], false};
+}
+
+void GatewayApp::register_resume_routing_key(const std::string& routing_key,
+                                             const std::string& backend_instance_id) {
+    if (!session_directory_ || routing_key.empty() || backend_instance_id.empty()) {
+        return;
+    }
+    if (!is_resume_routing_key(routing_key)) {
+        return;
+    }
+
+    const auto bound = session_directory_->ensure_backend(routing_key, backend_instance_id);
+    if (bound && *bound != backend_instance_id) {
+        server::core::log::warn(
+            "GatewayApp resume routing key already bound: key=" + routing_key
+            + " desired=" + backend_instance_id
+            + " existing=" + *bound);
+        return;
+    }
+
+    (void)resume_routing_bind_total_.fetch_add(1, std::memory_order_relaxed);
 }
 
 void GatewayApp::on_backend_connected(const std::string& client_id,

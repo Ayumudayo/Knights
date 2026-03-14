@@ -1,5 +1,6 @@
 import socket
 import time
+import urllib.request
 
 HOST = "127.0.0.1"
 PORT = 6000
@@ -10,6 +11,7 @@ MSG_CHAT_SEND = 0x0100
 MSG_CHAT_BROADCAST = 0x0101
 MSG_JOIN_ROOM = 0x0102
 FLAG_SELF = 0x0100
+GATEWAY_METRICS_PORTS = (36001, 36002)
 
 
 def lp_utf8(value: str) -> bytes:
@@ -100,6 +102,17 @@ def parse_login_res(payload: bytes) -> dict:
         offset = skip_wire_value(payload, offset, wire_type)
 
     return result
+
+
+def read_metric_sum(metric_name: str) -> float:
+    total = 0.0
+    for port in GATEWAY_METRICS_PORTS:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=5.0) as response:
+            text = response.read().decode("utf-8")
+        for line in text.splitlines():
+            if line.startswith(metric_name + " "):
+                total += float(line.split(" ", 1)[1])
+    return total
 
 
 class ChatClient:
@@ -228,6 +241,15 @@ def main() -> int:
         print(f"Sending chat after resume to restored room {room}...")
         second.send_frame(MSG_CHAT_SEND, lp_utf8(room) + lp_utf8(message))
         second.wait_for_self_chat(room, message, 5.0)
+
+        bind_total = read_metric_sum("gateway_resume_routing_bind_total")
+        hit_total = read_metric_sum("gateway_resume_routing_hit_total")
+        if bind_total < 1:
+            print(f"FAIL: gateway resume routing bind counter did not increase: {bind_total}")
+            return 1
+        if hit_total < 1:
+            print(f"FAIL: gateway resume routing hit counter did not increase: {hit_total}")
+            return 1
 
         print("PASS: session continuity lease issued and resumed session preserved logical identity")
         return 0

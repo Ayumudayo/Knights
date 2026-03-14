@@ -141,6 +141,7 @@ public:
          * @return backend 연결과 매핑된 세션 ID
          */
         const std::string& session_id() const override;
+        const std::string& backend_instance_id() const noexcept { return backend_instance_id_; }
 
     private:
         void do_connect(const std::string& host, std::uint16_t port);
@@ -254,6 +255,8 @@ public:
      * @return 선택된 backend 정보, 후보가 없으면 std::nullopt
      */
     std::optional<SelectedBackend> select_best_server(const std::string& client_id = "");
+    void register_resume_routing_key(const std::string& routing_key,
+                                     const std::string& backend_instance_id);
 
     /** @brief gateway 인스턴스 ID를 반환합니다. */
     std::string gateway_id() const { return gateway_id_; }
@@ -355,6 +358,8 @@ public:
     std::atomic<std::uint64_t> backend_circuit_reject_total_{0};
     std::atomic<std::uint64_t> backend_connect_retry_total_{0};
     std::atomic<std::uint64_t> backend_retry_budget_exhausted_total_{0};
+    std::atomic<std::uint64_t> resume_routing_bind_total_{0};
+    std::atomic<std::uint64_t> resume_routing_hit_total_{0};
 
     std::atomic<std::uint64_t> ingress_reject_not_ready_total_{0};
     std::atomic<std::uint64_t> ingress_reject_rate_limit_total_{0};
